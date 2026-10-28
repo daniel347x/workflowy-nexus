@@ -1,0 +1,279 @@
+"""The augmented view and the archive operation scope (Archive Reads U1,
+§U1.5 test 3).
+
+The augmented view shares every live node object (``is``), freezes the
+overlay records under the suite's deep freeze, is cached in exactly one
+slot per (live view, store generation), and is what every cache accessor
+serves inside ``archive_operation_scope`` — with the outer snapshot
+restored exactly on exit.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from coherence_harness import make_boundary_capable
+
+from workflowy_mcp.archive_context import (
+    ARCHIVE_MODE_NONE,
+    ArchiveOperationContext,
+)
+from workflowy_mcp.archive_store import ArchiveStore, set_archive_store_for_tests
+from workflowy_mcp.client.api_client_etch import WorkFlowyClientEtch
+from workflowy_mcp.client.api_client_nexus import load_nodes_by_id_from_cache
+from workflowy_mcp.coherence.adoption import is_unpopulated_view
+from workflowy_mcp.coherence.cache_view import (
+    CacheView,
+    set_test_deep_freeze,
+)
+from workflowy_mcp.coherence.operation_cache import (
+    archive_operation_scope,
+    cache_operation_boundary,
+    current_operation_cache,
+)
+from workflowy_mcp.node_archive import build_archive_document, serialize_archive
+
+SOURCE_CACHE = {"epoch_number": 1, "epoch_id": "e1", "adopted_sequence": 3}
+
+
+def _nest(records):
+    return WorkFlowyClientEtch.__new__(WorkFlowyClientEtch)._build_hierarchy(
+        list(records)
+    )
+
+
+def _rec(node_id, name="n", parent_id=None, priority=0, **extra):
+    record = {
+        "id": node_id,
+        "name": name,
+        "note": "",
+        "parent_id": parent_id,
+        "priority": priority,
+    }
+    record.update(extra)
+    return record
+
+
+def _live_view(records, *, epoch=7):
+    return CacheView.build(
+        epoch_number=epoch,
+        epoch_id=f"live-epoch-{epoch}",
+        adopted_sequence=epoch * 10,
+        nodes_export={"nodes": [dict(r) for r in records]},
+    )
+
+
+def _store_with_archive(tmp_path):
+    document = build_archive_document(
+        [_rec("AR", name="archived root", note="from the archive")],
+        nest=_nest,
+        node_id="AR",
+        name="archived root",
+        description=None,
+        exported_at="2026-10-01T12:00:00Z",
+        source_cache=dict(SOURCE_CACHE),
+    )
+    (tmp_path / "a.json").write_bytes(serialize_archive(document).encode("utf-8"))
+    return ArchiveStore(folder_provider=lambda: str(tmp_path))
+
+
+@pytest.fixture
+def store_env(tmp_path):
+    store = _store_with_archive(tmp_path)
+    set_archive_store_for_tests(store)
+    try:
+        yield store
+    finally:
+        set_archive_store_for_tests(None)
+
+
+# ---------------------------------------------------------------------------
+# Identity: no node copies
+# ---------------------------------------------------------------------------
+
+
+def test_augmented_view_shares_live_node_objects(store_env):
+    store = store_env
+    live_nodes = [_rec("L1", name="live one"), _rec("L2", name="live two")]
+    live_view = _live_view(live_nodes)
+    overlay = store.overlay_for(live_view)
+    assert overlay is not None
+    augmented = overlay.augmented_view
+    # every live node object is the SAME object (no copies)
+    for node_id in ("L1", "L2"):
+        assert augmented.nodes_by_id[node_id] is live_view.nodes_by_id[node_id]
+    # the live records appear first, the overlay records after
+    assert augmented.nodes_export["nodes"][:2] == live_view.nodes_export["nodes"]
+    assert augmented.nodes_export["nodes"][2:] == list(overlay.records)
+    # the augmented view carries the live generation's markers
+    assert augmented.epoch_number == live_view.epoch_number
+    assert augmented.epoch_id == live_view.epoch_id
+    assert augmented.adopted_sequence == live_view.adopted_sequence
+    # it is a real populated view
+    assert not is_unpopulated_view(augmented)
+
+
+def test_overlay_records_freeze_under_deep_freeze(store_env):
+    from workflowy_mcp.archive_context import ARCHIVE_RECORD_KEY
+
+    store = store_env
+    overlay = store.overlay_for(_live_view([_rec("L1")]))
+    set_test_deep_freeze(True)
+    try:
+        view = overlay.augmented_view
+        with pytest.raises(TypeError):
+            view.nodes_by_id["AR"]["name"] = "mutated"
+        # the freeze replaces containers wholesale: no dict subclass may be
+        # relied on for the partition -- the marker lives INSIDE each record
+        assert ARCHIVE_RECORD_KEY in view.nodes_by_id["AR"]
+    finally:
+        set_test_deep_freeze(False)
+
+
+# ---------------------------------------------------------------------------
+# The one slot
+# ---------------------------------------------------------------------------
+
+
+def test_one_slot_per_live_view_and_generation(store_env, tmp_path):
+    store = store_env
+    live_a = _live_view([_rec("L1")], epoch=1)
+    live_b = _live_view([_rec("L1")], epoch=2)
+    overlay_a1 = store.overlay_for(live_a)
+    overlay_a2 = store.overlay_for(live_a)
+    assert overlay_a1 is overlay_a2  # same view + generation -> same object
+    overlay_b = store.overlay_for(live_b)
+    assert overlay_b is not overlay_a1  # a new live view rebuilds
+    # the ONE slot: returning to live_a rebuilds (the slot holds the last
+    # (view, generation) pair only) — equal content, a new object
+    overlay_a3 = store.overlay_for(live_a)
+    assert overlay_a3 is not overlay_a1
+    assert overlay_a3.by_id.keys() == overlay_a1.by_id.keys()
+
+    # a store change (a new file) rebuilds for the same view
+    document = build_archive_document(
+        [_rec("AR2", name="second archived")],
+        nest=_nest,
+        node_id="AR2",
+        name="second archived",
+        description=None,
+        exported_at="2026-10-03T12:00:00Z",
+        source_cache=dict(SOURCE_CACHE),
+    )
+    (tmp_path / "b.json").write_bytes(serialize_archive(document).encode("utf-8"))
+    overlay_a3 = store.overlay_for(live_a)
+    assert overlay_a3 is not overlay_a1
+    assert "AR2" in overlay_a3.by_id
+
+
+def test_no_visible_record_returns_none(store_env):
+    empty_store = ArchiveStore(folder_provider=lambda: "/nonexistent-dir-xyz")
+    assert empty_store.overlay_for(_live_view([_rec("L1")])) is None
+
+
+# ---------------------------------------------------------------------------
+# The accessors inside and after archive_operation_scope
+# ---------------------------------------------------------------------------
+
+
+def _boundary_client(live_records):
+    from workflowy_mcp.client.api_client_nexus import WorkFlowyClientNexus
+
+    client = make_boundary_capable(
+        object.__new__(WorkFlowyClientNexus), nodes=live_records
+    )
+    return client
+
+
+def test_accessors_serve_augmented_view_inside_scope(store_env):
+    store = store_env
+    live_records = [_rec("L1", name="live one")]
+    client = _boundary_client(live_records)
+    live_view = _live_view(live_records)
+    overlay = store.overlay_for(live_view)
+
+    outer_seen = []
+    inner_seen = []
+
+    async def _run():
+        async with cache_operation_boundary(client, "archive-test"):
+            outer = current_operation_cache()
+            outer_seen.append(outer.nodes_by_id)
+            context = ArchiveOperationContext(
+                mode=ARCHIVE_MODE_NONE,
+                reason=None,
+                overlay=overlay,
+                operation="node.read",
+            )
+            with archive_operation_scope(context, view=overlay.augmented_view):
+                inner = current_operation_cache()
+                inner_seen.append(inner)
+                # every cache accessor serves the augmented view
+                assert inner.archive is context
+                assert inner.owner is outer.owner
+                assert inner.operation_id == outer.operation_id
+                assert inner.dirty_ids == outer.dirty_ids
+                nodes = load_nodes_by_id_from_cache(inner)
+                assert "AR" in nodes
+                assert nodes["AR"]["name"].startswith("📦")
+                assert nodes["L1"] is live_view.nodes_by_id["L1"]
+
+    import asyncio
+
+    asyncio.run(_run())
+    # on exit the outer snapshot is restored exactly
+    assert "AR" not in outer_seen[0]
+
+
+def test_outer_snapshot_restored_after_scope(store_env):
+    store = store_env
+    live_records = [_rec("L1", name="live one")]
+    client = _boundary_client(live_records)
+    overlay = store.overlay_for(_live_view(live_records))
+
+    async def _run():
+        async with cache_operation_boundary(client, "archive-test"):
+            before = current_operation_cache()
+            context = ArchiveOperationContext(
+                mode=ARCHIVE_MODE_NONE, reason=None, overlay=overlay
+            )
+            with archive_operation_scope(context, view=overlay.augmented_view):
+                assert current_operation_cache().archive is context
+            after = current_operation_cache()
+            assert after is before
+            assert getattr(after, "archive", None) is None
+            assert "AR" not in after.nodes_by_id
+
+    import asyncio
+
+    asyncio.run(_run())
+
+
+def test_scope_without_view_keeps_live_view(store_env):
+    store = store_env
+    live_records = [_rec("L1", name="live one")]
+    client = _boundary_client(live_records)
+
+    async def _run():
+        async with cache_operation_boundary(client, "archive-test"):
+            before = current_operation_cache()
+            context = ArchiveOperationContext(
+                mode=ARCHIVE_MODE_NONE, reason="write", overlay=None
+            )
+            with archive_operation_scope(context):
+                inner = current_operation_cache()
+                assert inner.view is before.view
+                assert inner.archive is context
+                assert "AR" not in inner.nodes_by_id
+
+    import asyncio
+
+    asyncio.run(_run())
+
+
+def test_scope_requires_a_snapshot(store_env):
+    overlay = store_env.overlay_for(_live_view([_rec("L1")]))
+    context = ArchiveOperationContext(mode=ARCHIVE_MODE_NONE, overlay=overlay)
+    with pytest.raises(Exception):
+        with archive_operation_scope(context):
+            pass

@@ -1,0 +1,4981 @@
+{
+"meta": {
+"schema": "beacon_robustness/u01/area10_freeze@1",
+"generated_at": "2026-10-19T04:28:35.303282+00:00",
+"base_rev": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+"counts": {
+"rows_all": 1603,
+"rows_with_core": 1603,
+"spans": 103,
+"files_with_windows": 98,
+"wrong_rows_total": 261,
+"wrong_rows_non_test": 258,
+"wrong_rows_test": 3,
+"wrong_files": 28,
+"wrong_rows_cut": 187,
+"wrong_rows_foreign_gt0": 73,
+"wrong_rows_stray_gt0": 1
+}
+},
+"rows": [
+{
+"file": "beacon_mutation_contract.py",
+"lang": "python",
+"id": "auto-beacon@validate_beacon_comment_text-val1",
+"kind": "ast",
+"cl": 146,
+"pend": 151,
+"tests": false,
+"core": [
+151,
+217
+],
+"beacon_line": 146,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 146,
+"top_delta": -5
+},
+{
+"file": "beacon_mutation_contract.py",
+"lang": "python",
+"id": "auto-beacon@parse_beacon_field_lines-mlbf",
+"kind": "ast",
+"cl": 264,
+"pend": 270,
+"tests": false,
+"core": [
+270,
+323
+],
+"beacon_line": 264,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 264,
+"top_delta": -6
+},
+{
+"file": "beacon_mutation_contract.py",
+"lang": "python",
+"id": "auto-beacon@resolve_beacon_comment-res1",
+"kind": "ast",
+"cl": 489,
+"pend": 494,
+"tests": false,
+"core": [
+494,
+616
+],
+"beacon_line": 489,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 489,
+"top_delta": -5
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_normalize_core_name-shrd",
+"kind": "ast",
+"cl": 111,
+"pend": 116,
+"tests": false,
+"core": [
+83,
+135
+],
+"beacon_line": 111,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 93,
+"top_delta": 10
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@_python_resolve_ast_node_heuristic",
+"kind": "span",
+"cl": 461,
+"pend": 466,
+"tests": false,
+"core": [
+467,
+477
+],
+"beacon_line": 461,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 461,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_python_resolve_ast_node_heuristic-3t00",
+"kind": "ast",
+"cl": 471,
+"pend": 476,
+"tests": false,
+"core": [
+461,
+520
+],
+"beacon_line": 471,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 467,
+"top_delta": 6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@_python_resolve_ast_node_heuristic-TEST",
+"kind": "span",
+"cl": 500,
+"pend": 505,
+"tests": false,
+"core": [
+506,
+507
+],
+"beacon_line": 500,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 500,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@_js_ts_resolve_ast_node_heuristic",
+"kind": "span",
+"cl": 523,
+"pend": 528,
+"tests": false,
+"core": [
+529,
+538
+],
+"beacon_line": 523,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 523,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_js_ts_resolve_ast_node_heuristic-5vcf",
+"kind": "ast",
+"cl": 532,
+"pend": 537,
+"tests": false,
+"core": [
+523,
+563
+],
+"beacon_line": 532,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 529,
+"top_delta": 6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "model:forward@1",
+"kind": "ast",
+"cl": 690,
+"pend": 695,
+"tests": false,
+"core": [
+693,
+740
+],
+"beacon_line": 690,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 690,
+"top_delta": -3
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_python_comment_block_span-7bt5",
+"kind": "ast",
+"cl": 743,
+"pend": 748,
+"tests": false,
+"core": [
+746,
+844
+],
+"beacon_line": 743,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 743,
+"top_delta": -3
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@_python_snippet_for_beacon",
+"kind": "span",
+"cl": 937,
+"pend": 942,
+"tests": false,
+"core": [
+943,
+954
+],
+"beacon_line": 937,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 937,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_python_snippet_for_beacon-xf1j",
+"kind": "ast",
+"cl": 948,
+"pend": 953,
+"tests": false,
+"core": [
+937,
+1106
+],
+"beacon_line": 948,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 943,
+"top_delta": 6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_js_ts_find_closing_beacon_span-9kja",
+"kind": "ast",
+"cl": 1109,
+"pend": 1114,
+"tests": false,
+"core": [
+1112,
+1215
+],
+"beacon_line": 1109,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1109,
+"top_delta": -3
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@_js_ts_find_ast_node_for_beacon",
+"kind": "span",
+"cl": 1218,
+"pend": 1223,
+"tests": false,
+"core": [
+1224,
+1232
+],
+"beacon_line": 1218,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1218,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_js_ts_find_ast_node_for_beacon-zowk",
+"kind": "ast",
+"cl": 1226,
+"pend": 1231,
+"tests": false,
+"core": [
+1218,
+1270
+],
+"beacon_line": 1226,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 1224,
+"top_delta": 6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@_js_ts_snippet_for_beacon",
+"kind": "span",
+"cl": 1273,
+"pend": 1278,
+"tests": false,
+"core": [
+1279,
+1287
+],
+"beacon_line": 1273,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1273,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_js_ts_snippet_for_beacon-8x4f",
+"kind": "ast",
+"cl": 1281,
+"pend": 1286,
+"tests": false,
+"core": [
+1273,
+1414
+],
+"beacon_line": 1281,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 1279,
+"top_delta": 6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_markdown_comment_block_span-y6pq",
+"kind": "ast",
+"cl": 1529,
+"pend": 1534,
+"tests": false,
+"core": [
+1532,
+1600
+],
+"beacon_line": 1529,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1529,
+"top_delta": -3
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_sql_comment_block_span-mrwt",
+"kind": "ast",
+"cl": 1997,
+"pend": 2002,
+"tests": false,
+"core": [
+2000,
+2068
+],
+"beacon_line": 1997,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1997,
+"top_delta": -3
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@_sh_comment_block_span-bul0",
+"kind": "ast",
+"cl": 2315,
+"pend": 2320,
+"tests": false,
+"core": [
+2318,
+2386
+],
+"beacon_line": 2315,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2315,
+"top_delta": -3
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@get_snippet_for_ast_qualname",
+"kind": "span",
+"cl": 2477,
+"pend": 2482,
+"tests": false,
+"core": [
+2483,
+2494
+],
+"beacon_line": 2477,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2477,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@get_snippet_for_ast_qualname-an1g",
+"kind": "ast",
+"cl": 2488,
+"pend": 2493,
+"tests": false,
+"core": [
+2477,
+2576
+],
+"beacon_line": 2488,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 2483,
+"top_delta": 6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@get_snippet_for_ast_qualname_js_ts",
+"kind": "span",
+"cl": 2579,
+"pend": 2584,
+"tests": false,
+"core": [
+2585,
+2594
+],
+"beacon_line": 2579,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2579,
+"top_delta": -6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@get_snippet_for_ast_qualname_js_ts-txeb",
+"kind": "ast",
+"cl": 2588,
+"pend": 2593,
+"tests": false,
+"core": [
+2579,
+2665
+],
+"beacon_line": 2588,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 2585,
+"top_delta": 6
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "bocsv1@public-snippet-api-core",
+"kind": "span",
+"cl": 2944,
+"pend": 2950,
+"tests": false,
+"core": [
+2937,
+3540
+],
+"beacon_line": 2944,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 2940,
+"top_delta": 3
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "carto-js-ts@get_snippet_data",
+"kind": "span",
+"cl": 2956,
+"pend": 2961,
+"tests": false,
+"core": [
+2937,
+2976
+],
+"beacon_line": 2956,
+"cut": false,
+"foreign_lines": 10,
+"stray_lines": 0,
+"prop_top": 2951,
+"top_delta": 14
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@get_snippet_data-bk2v",
+"kind": "ast",
+"cl": 2970,
+"pend": 2975,
+"tests": false,
+"core": [
+2937,
+3061
+],
+"beacon_line": 2970,
+"cut": false,
+"foreign_lines": 16,
+"stray_lines": 0,
+"prop_top": 2962,
+"top_delta": 25
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@extract_snippet-tecr",
+"kind": "ast",
+"cl": 3074,
+"pend": 3079,
+"tests": false,
+"core": [
+3064,
+3085
+],
+"beacon_line": 3074,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 3074,
+"top_delta": 10
+},
+{
+"file": "beacon_obtain_code_snippet.py",
+"lang": "python",
+"id": "auto-beacon@get_snippet_for_md_path-8iyg",
+"kind": "ast",
+"cl": 3138,
+"pend": 3143,
+"tests": false,
+"core": [
+3135,
+3238
+],
+"beacon_line": 3138,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 3138,
+"top_delta": 3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "nmcv1@portable-note-and-identity-core",
+"kind": "span",
+"cl": 67,
+"pend": 73,
+"tests": false,
+"core": [
+52,
+3941
+],
+"beacon_line": 67,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 63,
+"top_delta": 11
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_warn_name-ts8n",
+"kind": "ast",
+"cl": 74,
+"pend": 79,
+"tests": false,
+"core": [
+52,
+83
+],
+"beacon_line": 74,
+"cut": false,
+"foreign_lines": 14,
+"stray_lines": 0,
+"prop_top": 74,
+"top_delta": 22
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@TRIDENT-tridnt",
+"kind": "span",
+"cl": 113,
+"pend": 118,
+"tests": false,
+"core": [
+119,
+123
+],
+"beacon_line": 113,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 113,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@arbitrary_hash_markdown_lines_to_nexus_tree-kj1r",
+"kind": "ast",
+"cl": 658,
+"pend": 663,
+"tests": false,
+"core": [
+661,
+804
+],
+"beacon_line": 658,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 658,
+"top_delta": -3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@parse_markdown_beacon_blocks",
+"kind": "span",
+"cl": 829,
+"pend": 834,
+"tests": false,
+"core": [
+835,
+845
+],
+"beacon_line": 829,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 829,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@parse_markdown_beacon_blocks-t69i",
+"kind": "ast",
+"cl": 838,
+"pend": 844,
+"tests": false,
+"core": [
+829,
+1216
+],
+"beacon_line": 838,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 835,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@apply_markdown_beacons",
+"kind": "span",
+"cl": 1292,
+"pend": 1297,
+"tests": false,
+"core": [
+1298,
+1308
+],
+"beacon_line": 1292,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1292,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@apply_markdown_beacons-mdast",
+"kind": "ast",
+"cl": 1301,
+"pend": 1307,
+"tests": false,
+"core": [
+1292,
+1691
+],
+"beacon_line": 1301,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 1298,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_write_markdown_lines_sanitized-atom",
+"kind": "ast",
+"cl": 1931,
+"pend": 1937,
+"tests": false,
+"core": [
+1937,
+2035
+],
+"beacon_line": 1931,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1931,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_extract_slice_labels_from_beacon_block-2nx9",
+"kind": "ast",
+"cl": 2355,
+"pend": 2361,
+"tests": false,
+"core": [
+2361,
+2383
+],
+"beacon_line": 2355,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2355,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_extract_role_from_beacon_block-7d4q",
+"kind": "ast",
+"cl": 2386,
+"pend": 2392,
+"tests": false,
+"core": [
+2392,
+2413
+],
+"beacon_line": 2386,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2386,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_find_markdown_heading_insert_idx-6t3r",
+"kind": "ast",
+"cl": 2567,
+"pend": 2572,
+"tests": false,
+"core": [
+2570,
+2698
+],
+"beacon_line": 2567,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2567,
+"top_delta": -3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@reconcile_trees_cartographer-2hsq",
+"kind": "ast",
+"cl": 3140,
+"pend": 3145,
+"tests": false,
+"core": [
+3135,
+3616
+],
+"beacon_line": 3140,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 3140,
+"top_delta": 5
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_sanitize_slice_label_token",
+"kind": "ast",
+"cl": 3691,
+"pend": 3697,
+"tests": false,
+"core": [
+3697,
+3723
+],
+"beacon_line": 3691,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 3691,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@_strip_beacon_meta_blocks_from_context-m8k3",
+"kind": "ast",
+"cl": 3855,
+"pend": 3861,
+"tests": false,
+"core": [
+3858,
+3939
+],
+"beacon_line": 3855,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 3855,
+"top_delta": -3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "nmcv1@parser-and-outline-core",
+"kind": "span",
+"cl": 3949,
+"pend": 3955,
+"tests": false,
+"core": [
+3942,
+7865
+],
+"beacon_line": 3949,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 3945,
+"top_delta": 3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@parse_python_beacon_blocks",
+"kind": "span",
+"cl": 3956,
+"pend": 3961,
+"tests": false,
+"core": [
+3942,
+3973
+],
+"beacon_line": 3956,
+"cut": false,
+"foreign_lines": 10,
+"stray_lines": 0,
+"prop_top": 3956,
+"top_delta": 14
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@parse_python_beacon_blocks-rqao",
+"kind": "ast",
+"cl": 3966,
+"pend": 3972,
+"tests": false,
+"core": [
+3942,
+4163
+],
+"beacon_line": 3966,
+"cut": false,
+"foreign_lines": 16,
+"stray_lines": 0,
+"prop_top": 3962,
+"top_delta": 20
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-hygiene@_normalize_duplicate_ast_beacons_markdown",
+"kind": "ast",
+"cl": 4285,
+"pend": 4291,
+"tests": false,
+"core": [
+4291,
+4498
+],
+"beacon_line": 4285,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4285,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@apply_python_beacons",
+"kind": "span",
+"cl": 4965,
+"pend": 4970,
+"tests": false,
+"core": [
+4971,
+4982
+],
+"beacon_line": 4965,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4965,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@apply_python_beacons-xzvd",
+"kind": "ast",
+"cl": 4975,
+"pend": 4981,
+"tests": false,
+"core": [
+4965,
+5594
+],
+"beacon_line": 4975,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 4971,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@_extract_python_beacon_context-7u3n",
+"kind": "ast",
+"cl": 5147,
+"pend": 5152,
+"tests": false,
+"core": [
+5150,
+5283
+],
+"beacon_line": 5147,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 5147,
+"top_delta": -3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@parse_file_outline",
+"kind": "span",
+"cl": 5985,
+"pend": 5990,
+"tests": false,
+"core": [
+5991,
+6003
+],
+"beacon_line": 5985,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 5985,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@parse_file_outline-tfh6",
+"kind": "ast",
+"cl": 5996,
+"pend": 6002,
+"tests": false,
+"core": [
+5985,
+6032
+],
+"beacon_line": 5996,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 5991,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@parse_js_ts_outline",
+"kind": "span",
+"cl": 6034,
+"pend": 6039,
+"tests": false,
+"core": [
+6040,
+6052
+],
+"beacon_line": 6034,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 6034,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_build_js_comment_mask-shrd",
+"kind": "ast",
+"cl": 6046,
+"pend": 6051,
+"tests": false,
+"core": [
+6034,
+6120
+],
+"beacon_line": 6046,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 6040,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "nmcv1@recursive-map-boundary",
+"kind": "span",
+"cl": 7873,
+"pend": 7879,
+"tests": false,
+"core": [
+7866,
+8250
+],
+"beacon_line": 7873,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 7869,
+"top_delta": 3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@map_codebase",
+"kind": "ast",
+"cl": 7883,
+"pend": 7888,
+"tests": false,
+"core": [
+7866,
+8249
+],
+"beacon_line": 7883,
+"cut": false,
+"foreign_lines": 10,
+"stray_lines": 0,
+"prop_top": 7880,
+"top_delta": 14
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "nmcv1@multilang-update-core",
+"kind": "span",
+"cl": 8258,
+"pend": 8264,
+"tests": false,
+"core": [
+8251,
+14635
+],
+"beacon_line": 8258,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 8254,
+"top_delta": 3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@parse_sql_beacon_blocks-xpb1",
+"kind": "ast",
+"cl": 8265,
+"pend": 8271,
+"tests": false,
+"core": [
+8251,
+8449
+],
+"beacon_line": 8265,
+"cut": false,
+"foreign_lines": 10,
+"stray_lines": 0,
+"prop_top": 8265,
+"top_delta": 14
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@parse_js_beacon_blocks",
+"kind": "span",
+"cl": 8452,
+"pend": 8457,
+"tests": false,
+"core": [
+8458,
+8468
+],
+"beacon_line": 8452,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 8452,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@parse_js_beacon_blocks-czo0",
+"kind": "ast",
+"cl": 8461,
+"pend": 8467,
+"tests": false,
+"core": [
+8452,
+8674
+],
+"beacon_line": 8461,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 8458,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@parse_sh_beacon_blocks",
+"kind": "span",
+"cl": 8677,
+"pend": 8682,
+"tests": false,
+"core": [
+8683,
+8693
+],
+"beacon_line": 8677,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 8677,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@parse_sh_beacon_blocks-7qwa",
+"kind": "ast",
+"cl": 8686,
+"pend": 8692,
+"tests": false,
+"core": [
+8677,
+8864
+],
+"beacon_line": 8686,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 8683,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@parse_yaml_beacon_blocks",
+"kind": "span",
+"cl": 8867,
+"pend": 8872,
+"tests": false,
+"core": [
+8873,
+8880
+],
+"beacon_line": 8867,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 8867,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@parse_yaml_beacon_blocks-ku8p",
+"kind": "ast",
+"cl": 8873,
+"pend": 8879,
+"tests": false,
+"core": [
+8867,
+9051
+],
+"beacon_line": 8873,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 8873,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_extract_sql_beacon_context-9w82",
+"kind": "ast",
+"cl": 9054,
+"pend": 9059,
+"tests": false,
+"core": [
+9057,
+9213
+],
+"beacon_line": 9054,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9054,
+"top_delta": -3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@apply_sql_beacons",
+"kind": "span",
+"cl": 9216,
+"pend": 9221,
+"tests": false,
+"core": [
+9222,
+9231
+],
+"beacon_line": 9216,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9216,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@apply_sql_beacons-0rsg",
+"kind": "ast",
+"cl": 9225,
+"pend": 9230,
+"tests": false,
+"core": [
+9216,
+9320
+],
+"beacon_line": 9225,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 9222,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_extract_sh_beacon_context-s7r8",
+"kind": "ast",
+"cl": 9323,
+"pend": 9328,
+"tests": false,
+"core": [
+9326,
+9453
+],
+"beacon_line": 9323,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9323,
+"top_delta": -3
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@apply_sh_beacons",
+"kind": "span",
+"cl": 9456,
+"pend": 9461,
+"tests": false,
+"core": [
+9462,
+9471
+],
+"beacon_line": 9456,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9456,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_prepend_duplicate_beacon_id_warning_nodes-f830",
+"kind": "ast",
+"cl": 9464,
+"pend": 9470,
+"tests": false,
+"core": [
+9456,
+9509
+],
+"beacon_line": 9464,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 9462,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@apply_yaml_beacon_context",
+"kind": "span",
+"cl": 9626,
+"pend": 9631,
+"tests": false,
+"core": [
+9632,
+9638
+],
+"beacon_line": 9626,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9626,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_extract_yaml_beacon_context-i1o0",
+"kind": "ast",
+"cl": 9632,
+"pend": 9637,
+"tests": false,
+"core": [
+9626,
+9749
+],
+"beacon_line": 9632,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 9632,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@apply_yaml_beacons",
+"kind": "span",
+"cl": 9752,
+"pend": 9757,
+"tests": false,
+"core": [
+9758,
+9766
+],
+"beacon_line": 9752,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9752,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@apply_yaml_beacons-gi3p",
+"kind": "ast",
+"cl": 9760,
+"pend": 9765,
+"tests": false,
+"core": [
+9752,
+9852
+],
+"beacon_line": 9760,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 9758,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@apply_js_beacons",
+"kind": "span",
+"cl": 9855,
+"pend": 9860,
+"tests": false,
+"core": [
+9861,
+9870
+],
+"beacon_line": 9855,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9855,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@apply_js_beacons-yaw6",
+"kind": "ast",
+"cl": 9864,
+"pend": 9869,
+"tests": false,
+"core": [
+9855,
+10344
+],
+"beacon_line": 9864,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 9861,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@split_name_and_tags",
+"kind": "span",
+"cl": 10347,
+"pend": 10352,
+"tests": false,
+"core": [
+10353,
+10362
+],
+"beacon_line": 10347,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 10347,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@split_name_and_tags-t17m",
+"kind": "ast",
+"cl": 10356,
+"pend": 10361,
+"tests": false,
+"core": [
+10347,
+10381
+],
+"beacon_line": 10356,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 10353,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@_beacon_block_extent_for_language-ext1",
+"kind": "ast",
+"cl": 10826,
+"pend": 10832,
+"tests": false,
+"core": [
+10832,
+10885
+],
+"beacon_line": 10826,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 10826,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@update_beacon_from_node_python",
+"kind": "span",
+"cl": 11535,
+"pend": 11540,
+"tests": false,
+"core": [
+11541,
+11558
+],
+"beacon_line": 11535,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 11535,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@update_beacon_from_node_python-1svv",
+"kind": "ast",
+"cl": 11552,
+"pend": 11557,
+"tests": false,
+"core": [
+11535,
+12065
+],
+"beacon_line": 11552,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 11541,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@update_beacon_from_node_js_ts",
+"kind": "span",
+"cl": 12068,
+"pend": 12073,
+"tests": false,
+"core": [
+12074,
+12083
+],
+"beacon_line": 12068,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 12068,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@update_beacon_from_node_js_ts-d5kl",
+"kind": "ast",
+"cl": 12077,
+"pend": 12082,
+"tests": false,
+"core": [
+12068,
+12548
+],
+"beacon_line": 12077,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 12074,
+"top_delta": 6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "carto-js-ts@update_beacon_from_node_markdown",
+"kind": "span",
+"cl": 13150,
+"pend": 13155,
+"tests": false,
+"core": [
+13156,
+13166
+],
+"beacon_line": 13150,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 13150,
+"top_delta": -6
+},
+{
+"file": "nexus_map_codebase.py",
+"lang": "python",
+"id": "auto-beacon@update_beacon_from_node_markdown-mdast",
+"kind": "ast",
+"cl": 13159,
+"pend": 13165,
+"tests": false,
+"core": [
+13150,
+13882
+],
+"beacon_line": 13159,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 13156,
+"top_delta": 6
+},
+{
+"file": "src/workflowy_mcp/ancestor_path.py",
+"lang": "python",
+"id": "ancestor-path@walk",
+"kind": "ast",
+"cl": 68,
+"pend": 73,
+"tests": false,
+"core": [
+73,
+106
+],
+"beacon_line": 68,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 68,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/cache_render_spec.py",
+"lang": "python",
+"id": "cache-render-spec@render-policy",
+"kind": "ast",
+"cl": 253,
+"pend": 258,
+"tests": false,
+"core": [
+258,
+501
+],
+"beacon_line": 253,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 253,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/cache_render_spec.py",
+"lang": "python",
+"id": "cache-render-spec@render-projection-spec",
+"kind": "ast",
+"cl": 561,
+"pend": 566,
+"tests": false,
+"core": [
+566,
+1369
+],
+"beacon_line": 561,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 561,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/carto_job_governance.py",
+"lang": "python",
+"id": "carto-governance@identity-keys",
+"kind": "ast",
+"cl": 661,
+"pend": 666,
+"tests": false,
+"core": [
+656,
+670
+],
+"beacon_line": 661,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 661,
+"top_delta": 5
+},
+{
+"file": "src/workflowy_mcp/carto_job_governance.py",
+"lang": "python",
+"id": "carto-governance@auxiliary-artifact-cleanup",
+"kind": "ast",
+"cl": 2613,
+"pend": 2618,
+"tests": false,
+"core": [
+2608,
+2668
+],
+"beacon_line": 2613,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 2613,
+"top_delta": 5
+},
+{
+"file": "src/workflowy_mcp/carto_job_governance.py",
+"lang": "python",
+"id": "carto-governance@q3-leases",
+"kind": "ast",
+"cl": 2685,
+"pend": 2690,
+"tests": false,
+"core": [
+2680,
+2810
+],
+"beacon_line": 2685,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 2685,
+"top_delta": 5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_core.py",
+"lang": "python",
+"id": "api-client-core@load_nodes_export_cache_from_disk",
+"kind": "span",
+"cl": 430,
+"pend": 435,
+"tests": false,
+"core": [
+436,
+445
+],
+"beacon_line": 430,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 430,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_core.py",
+"lang": "python",
+"id": "carto-safety@bounded-crud-retry",
+"kind": "ast",
+"cl": 1807,
+"pend": 1812,
+"tests": false,
+"core": [
+1803,
+1839
+],
+"beacon_line": 1807,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 1807,
+"top_delta": 4
+},
+{
+"file": "src/workflowy_mcp/client/api_client_etch.py",
+"lang": "python",
+"id": "auto-beacon@_log_to_file_helper-epud",
+"kind": "ast",
+"cl": 28,
+"pend": 34,
+"tests": false,
+"core": [
+34,
+78
+],
+"beacon_line": 28,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 28,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_etch.py",
+"lang": "python",
+"id": "core-crud@parse_etch_nodes_payload",
+"kind": "ast",
+"cl": 129,
+"pend": 134,
+"tests": false,
+"core": [
+134,
+197
+],
+"beacon_line": 129,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 129,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "handle-resolution@_resolve_symbol_candidates_sync",
+"kind": "ast",
+"cl": 1494,
+"pend": 1500,
+"tests": false,
+"core": [
+1500,
+2131
+],
+"beacon_line": 1494,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1494,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@parse_path_or_root_from_note-cw31",
+"kind": "ast",
+"cl": 2168,
+"pend": 2173,
+"tests": false,
+"core": [
+2157,
+2189
+],
+"beacon_line": 2168,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 2168,
+"top_delta": 11
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@_resolve_uuid_with_prefix_fallback",
+"kind": "ast",
+"cl": 2723,
+"pend": 2729,
+"tests": false,
+"core": [
+2729,
+2818
+],
+"beacon_line": 2723,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2723,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@unwrap_bracketed_uuid_handle",
+"kind": "ast",
+"cl": 2876,
+"pend": 2881,
+"tests": false,
+"core": [
+2881,
+2924
+],
+"beacon_line": 2876,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2876,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@resolve_uuid_like_node_handle",
+"kind": "ast",
+"cl": 2998,
+"pend": 3004,
+"tests": false,
+"core": [
+3004,
+3232
+],
+"beacon_line": 2998,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 2998,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@_lstrip_leading_ws_and_emoji",
+"kind": "ast",
+"cl": 3266,
+"pend": 3271,
+"tests": false,
+"core": [
+3271,
+3300
+],
+"beacon_line": 3266,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 3266,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@_normalize_ap_id_input",
+"kind": "ast",
+"cl": 3354,
+"pend": 3359,
+"tests": false,
+"core": [
+3359,
+3377
+],
+"beacon_line": 3354,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 3354,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@_compose_protected_name",
+"kind": "ast",
+"cl": 3632,
+"pend": 3637,
+"tests": false,
+"core": [
+3637,
+3889
+],
+"beacon_line": 3632,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 3632,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@resolve_uuid_from_anchor_point",
+"kind": "ast",
+"cl": 3892,
+"pend": 3898,
+"tests": false,
+"core": [
+3898,
+4037
+],
+"beacon_line": 3892,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 3892,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@resolve_uuid_or_anchor_point_handle",
+"kind": "ast",
+"cl": 4040,
+"pend": 4046,
+"tests": false,
+"core": [
+4046,
+4231
+],
+"beacon_line": 4040,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4040,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@node_identity",
+"kind": "ast",
+"cl": 4234,
+"pend": 4240,
+"tests": false,
+"core": [
+4240,
+4278
+],
+"beacon_line": 4234,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4234,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@resolve_node_identity_record",
+"kind": "ast",
+"cl": 4324,
+"pend": 4330,
+"tests": false,
+"core": [
+4330,
+4496
+],
+"beacon_line": 4324,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4324,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@_node_payload_from_note_file",
+"kind": "ast",
+"cl": 4598,
+"pend": 4604,
+"tests": false,
+"core": [
+4604,
+4728
+],
+"beacon_line": 4598,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4598,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@_node_payload_from_content",
+"kind": "ast",
+"cl": 4731,
+"pend": 4737,
+"tests": false,
+"core": [
+4737,
+4771
+],
+"beacon_line": 4731,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4731,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@resolve_cartographer_path_from_node._segment_from_node_name-r8w7-inner",
+"kind": "span",
+"cl": 5000,
+"pend": 5005,
+"tests": false,
+"core": [
+5006,
+5015
+],
+"beacon_line": 5000,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 5000,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@COSMETIC_SUFFIX_FIRST_CODEPOINTS-s06a",
+"kind": "span",
+"cl": 5513,
+"pend": 5518,
+"tests": false,
+"core": [
+5500,
+5525
+],
+"beacon_line": 5513,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 5503,
+"top_delta": 3
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@_is_cartographer_parse_error_sentinel-s06b",
+"kind": "ast",
+"cl": 5546,
+"pend": 5551,
+"tests": false,
+"core": [
+5551,
+5571
+],
+"beacon_line": 5546,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 5546,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@_detect_duplicate_ether_beacon_ids",
+"kind": "ast",
+"cl": 5602,
+"pend": 5608,
+"tests": false,
+"core": [
+5608,
+5642
+],
+"beacon_line": 5602,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 5602,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "inventory@uuid-prefix-collisions",
+"kind": "ast",
+"cl": 5735,
+"pend": 5741,
+"tests": false,
+"core": [
+5741,
+5752
+],
+"beacon_line": 5735,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 5735,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "anchor-widget@render-anchor-tree-raw-text",
+"kind": "ast",
+"cl": 5919,
+"pend": 5925,
+"tests": false,
+"core": [
+5925,
+6072
+],
+"beacon_line": 5919,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 5919,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@WorkFlowyClientNexus.workflowy_glimpse-yqpd",
+"kind": "ast",
+"cl": 6656,
+"pend": 6662,
+"tests": false,
+"core": [
+6645,
+6726
+],
+"beacon_line": 6656,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 6656,
+"top_delta": 11
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-rev-md-preview@materialize-from-document-forest",
+"kind": "ast",
+"cl": 7264,
+"pend": 7269,
+"tests": false,
+"core": [
+7269,
+7745
+],
+"beacon_line": 7264,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 7264,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@_repository_view_forest-rv01",
+"kind": "ast",
+"cl": 7747,
+"pend": 7753,
+"tests": false,
+"core": [
+7753,
+7958
+],
+"beacon_line": 7747,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 7747,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "md-preview@headings-line-metadata",
+"kind": "ast",
+"cl": 8218,
+"pend": 8239,
+"tests": false,
+"core": [
+8225,
+8263
+],
+"beacon_line": 8218,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 8218,
+"top_delta": -7
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@WorkFlowyClientNexus._build_markdown_preview_from_tree-1m02",
+"kind": "ast",
+"cl": 8265,
+"pend": 8271,
+"tests": false,
+"core": [
+8271,
+9645
+],
+"beacon_line": 8265,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 8265,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-rev-md-preview@clamp-level",
+"kind": "ast",
+"cl": 8790,
+"pend": 8795,
+"tests": false,
+"core": [
+8795,
+8797
+],
+"beacon_line": 8790,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 8790,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-rev-md-preview@render-hashes",
+"kind": "ast",
+"cl": 8799,
+"pend": 8804,
+"tests": false,
+"core": [
+8804,
+8816
+],
+"beacon_line": 8799,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 8799,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-rev-md-modal@iter-row-records",
+"kind": "ast",
+"cl": 9741,
+"pend": 9746,
+"tests": false,
+"core": [
+9746,
+9826
+],
+"beacon_line": 9741,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9741,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-rev-md-modal@node-uuid-at-index-path",
+"kind": "ast",
+"cl": 9866,
+"pend": 9871,
+"tests": false,
+"core": [
+9871,
+9894
+],
+"beacon_line": 9866,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9866,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-rev-md-modal@build-rows",
+"kind": "ast",
+"cl": 9970,
+"pend": 9975,
+"tests": false,
+"core": [
+9975,
+10046
+],
+"beacon_line": 9970,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 9970,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-rev-md-modal@staleness-phase1",
+"kind": "ast",
+"cl": 10430,
+"pend": 10435,
+"tests": false,
+"core": [
+10435,
+10462
+],
+"beacon_line": 10430,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 10430,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@add_to_anchor",
+"kind": "ast",
+"cl": 13219,
+"pend": 13225,
+"tests": false,
+"core": [
+13225,
+13515
+],
+"beacon_line": 13219,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 13219,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@update_note_session",
+"kind": "ast",
+"cl": 13517,
+"pend": 13522,
+"tests": false,
+"core": [
+13522,
+13732
+],
+"beacon_line": 13517,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 13517,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "slice-groups@get_slice_group_config",
+"kind": "ast",
+"cl": 13734,
+"pend": 13739,
+"tests": false,
+"core": [
+13739,
+13784
+],
+"beacon_line": 13734,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 13734,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@get_code_snippet_for_resolved_node",
+"kind": "ast",
+"cl": 14450,
+"pend": 14455,
+"tests": false,
+"core": [
+14455,
+15132
+],
+"beacon_line": 14450,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 14450,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-js-ts@js_ts_ast_qualname_resolution",
+"kind": "span",
+"cl": 14783,
+"pend": 14788,
+"tests": false,
+"core": [
+14789,
+14791
+],
+"beacon_line": 14783,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 14783,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@WorkFlowyClientNexus.read_uuid_from_anchor_point",
+"kind": "ast",
+"cl": 15368,
+"pend": 15374,
+"tests": false,
+"core": [
+15374,
+15403
+],
+"beacon_line": 15368,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 15368,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "note-sessions@resolve_node_handle",
+"kind": "ast",
+"cl": 15405,
+"pend": 15410,
+"tests": false,
+"core": [
+15410,
+15759
+],
+"beacon_line": 15405,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 15405,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "ncv1@f12-refresh-and-notes",
+"kind": "span",
+"cl": 15767,
+"pend": 15773,
+"tests": false,
+"core": [
+15761,
+18910
+],
+"beacon_line": 15767,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 15764,
+"top_delta": 3
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@WorkFlowyClientNexus.refresh_file_node_beacons-wgth",
+"kind": "ast",
+"cl": 15774,
+"pend": 15780,
+"tests": false,
+"core": [
+15761,
+16919
+],
+"beacon_line": 15774,
+"cut": false,
+"foreign_lines": 10,
+"stray_lines": 0,
+"prop_top": 15774,
+"top_delta": 13
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "carto-cancel@refresh_file_node_beacons.reconcile_tree_cancel_callback",
+"kind": "span",
+"cl": 16749,
+"pend": 16754,
+"tests": false,
+"core": [
+16755,
+16794
+],
+"beacon_line": 16749,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 16749,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/client/api_client_nexus.py",
+"lang": "python",
+"id": "auto-beacon@WorkFlowyClientNexus.refresh_folder_cartographer_sync-62ih",
+"kind": "ast",
+"cl": 17196,
+"pend": 17202,
+"tests": false,
+"core": [
+17202,
+18909
+],
+"beacon_line": 17196,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 17196,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/config.py",
+"lang": "python",
+"id": "config-bootstrap@dotenv-gated-load",
+"kind": "span",
+"cl": 15,
+"pend": 22,
+"tests": false,
+"core": [
+23,
+32
+],
+"beacon_line": 15,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 15,
+"top_delta": -8
+},
+{
+"file": "src/workflowy_mcp/config.py",
+"lang": "python",
+"id": "carto-jobstatus@terminal-vocabulary",
+"kind": "span",
+"cl": 165,
+"pend": 171,
+"tests": false,
+"core": [
+172,
+254
+],
+"beacon_line": 165,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 165,
+"top_delta": -7
+},
+{
+"file": "src/workflowy_mcp/config.py",
+"lang": "python",
+"id": "carto-jobstatus@merge_write",
+"kind": "ast",
+"cl": 260,
+"pend": 265,
+"tests": false,
+"core": [
+255,
+378
+],
+"beacon_line": 260,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 260,
+"top_delta": 5
+},
+{
+"file": "src/workflowy_mcp/dock_peek_metrics.py",
+"lang": "python",
+"id": "dock-peek@render-source-metrics",
+"kind": "ast",
+"cl": 73,
+"pend": 89,
+"tests": false,
+"core": [
+79,
+110
+],
+"beacon_line": 73,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 73,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/dock_peek_metrics.py",
+"lang": "python",
+"id": "auto-beacon@describe_dock_peek_recency_rule-4e",
+"kind": "ast",
+"cl": 279,
+"pend": 292,
+"tests": false,
+"core": [
+285,
+312
+],
+"beacon_line": 279,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 279,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/f8_slice_policy.py",
+"lang": "python",
+"id": "f8policy@slice-tag-variant-match",
+"kind": "ast",
+"cl": 312,
+"pend": 317,
+"tests": false,
+"core": [
+317,
+367
+],
+"beacon_line": 312,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 312,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/f8_slice_policy.py",
+"lang": "python",
+"id": "f8policy@parse-slice-policy-config",
+"kind": "ast",
+"cl": 1143,
+"pend": 1148,
+"tests": false,
+"core": [
+1148,
+1169
+],
+"beacon_line": 1143,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1143,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/f8_slice_policy.py",
+"lang": "python",
+"id": "f8policy@parse-slice-group-name",
+"kind": "ast",
+"cl": 1178,
+"pend": 1183,
+"tests": false,
+"core": [
+1183,
+1242
+],
+"beacon_line": 1178,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1178,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/f8_slice_policy.py",
+"lang": "python",
+"id": "f8policy@build-slice-group-display-items",
+"kind": "ast",
+"cl": 1245,
+"pend": 1250,
+"tests": false,
+"core": [
+1250,
+1411
+],
+"beacon_line": 1245,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1245,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/f8_slice_policy.py",
+"lang": "python",
+"id": "f8policy@collect-deprecated-variant-tags",
+"kind": "ast",
+"cl": 1699,
+"pend": 1704,
+"tests": false,
+"core": [
+1704,
+1776
+],
+"beacon_line": 1699,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1699,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/f8_slice_policy.py",
+"lang": "python",
+"id": "f8policy@diagnose-subtree-edges",
+"kind": "ast",
+"cl": 3307,
+"pend": 3312,
+"tests": false,
+"core": [
+3312,
+3382
+],
+"beacon_line": 3307,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 3307,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/f8_slice_policy.py",
+"lang": "python",
+"id": "f8policy@phase4-prune-zombies",
+"kind": "ast",
+"cl": 4264,
+"pend": 4269,
+"tests": false,
+"core": [
+4269,
+4364
+],
+"beacon_line": 4264,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 4264,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@since-spec",
+"kind": "ast",
+"cl": 86,
+"pend": 91,
+"tests": false,
+"core": [
+91,
+152
+],
+"beacon_line": 86,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 86,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@render-is-chronological",
+"kind": "ast",
+"cl": 155,
+"pend": 160,
+"tests": false,
+"core": [
+160,
+214
+],
+"beacon_line": 155,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 155,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@parse-since-item-count",
+"kind": "ast",
+"cl": 442,
+"pend": 447,
+"tests": false,
+"core": [
+447,
+448
+],
+"beacon_line": 442,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 442,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@cap-forest-first-node-count",
+"kind": "ast",
+"cl": 612,
+"pend": 617,
+"tests": false,
+"core": [
+617,
+697
+],
+"beacon_line": 612,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 612,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@prune-tree-since",
+"kind": "ast",
+"cl": 929,
+"pend": 934,
+"tests": false,
+"core": [
+934,
+1009
+],
+"beacon_line": 929,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 929,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@prune-tree-to-last-leaf-count",
+"kind": "ast",
+"cl": 1102,
+"pend": 1107,
+"tests": false,
+"core": [
+1107,
+1156
+],
+"beacon_line": 1102,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1102,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@resolve-item-count-basis",
+"kind": "ast",
+"cl": 1159,
+"pend": 1164,
+"tests": false,
+"core": [
+1164,
+1182
+],
+"beacon_line": 1159,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1159,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@prune-tree-to-newest-leaf-count",
+"kind": "ast",
+"cl": 1185,
+"pend": 1190,
+"tests": false,
+"core": [
+1190,
+1249
+],
+"beacon_line": 1185,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1185,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/glimpse_since_policy.py",
+"lang": "python",
+"id": "since-policy@apply-since-to-forest",
+"kind": "ast",
+"cl": 1351,
+"pend": 1356,
+"tests": false,
+"core": [
+1356,
+1509
+],
+"beacon_line": 1351,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1351,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/lens_engine.py",
+"lang": "python",
+"id": "mcp-api@lens-scaffold-ancestor-ids",
+"kind": "ast",
+"cl": 539,
+"pend": 545,
+"tests": false,
+"core": [
+545,
+592
+],
+"beacon_line": 539,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 539,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/lightning_rod_search.py",
+"lang": "python",
+"id": "slices@line-span-matcher",
+"kind": "ast",
+"cl": 180,
+"pend": 186,
+"tests": false,
+"core": [
+186,
+280
+],
+"beacon_line": 180,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 180,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/lightning_rod_tag_mutation_spec.py",
+"lang": "python",
+"id": "lightning-rod@tag-mutation-operation",
+"kind": "ast",
+"cl": 85,
+"pend": 90,
+"tests": false,
+"core": [
+90,
+110
+],
+"beacon_line": 85,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 85,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/lightning_rod_tag_mutation_spec.py",
+"lang": "python",
+"id": "lightning-rod@_normalize_operations",
+"kind": "ast",
+"cl": 113,
+"pend": 118,
+"tests": false,
+"core": [
+118,
+202
+],
+"beacon_line": 113,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 113,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/lightning_rod_tag_mutation_spec.py",
+"lang": "python",
+"id": "lightning-rod@tag-mutation-spec",
+"kind": "ast",
+"cl": 205,
+"pend": 210,
+"tests": false,
+"core": [
+210,
+327
+],
+"beacon_line": 205,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 205,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/managed_metadata.py",
+"lang": "python",
+"id": "mcp-api@managed-source-line",
+"kind": "ast",
+"cl": 325,
+"pend": 342,
+"tests": false,
+"core": [
+331,
+359
+],
+"beacon_line": 325,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 325,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/markdown_generate_pipeline.py",
+"lang": "python",
+"id": "auto-beacon@_disambiguate_duplicate_beacon_ids_in_file-2n7p",
+"kind": "ast",
+"cl": 217,
+"pend": 223,
+"tests": false,
+"core": [
+223,
+432
+],
+"beacon_line": 217,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 217,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/mcp_api_registry.py",
+"lang": "python",
+"id": "mcp-api@dispatch-operation",
+"kind": "ast",
+"cl": 1063,
+"pend": 1069,
+"tests": false,
+"core": [
+1069,
+1122
+],
+"beacon_line": 1063,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 1063,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/models/config.py",
+"lang": "python",
+"id": "config-models@coherence-configuration",
+"kind": "ast",
+"cl": 221,
+"pend": 226,
+"tests": false,
+"core": [
+216,
+248
+],
+"beacon_line": 221,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 221,
+"top_delta": 5
+},
+{
+"file": "src/workflowy_mcp/note_lines.py",
+"lang": "python",
+"id": "auto-beacon@compile_note_query-9mrw",
+"kind": "ast",
+"cl": 74,
+"pend": 80,
+"tests": false,
+"core": [
+80,
+105
+],
+"beacon_line": 74,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 74,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/note_lines.py",
+"lang": "python",
+"id": "note-lines@match-controls",
+"kind": "ast",
+"cl": 207,
+"pend": 212,
+"tests": false,
+"core": [
+212,
+255
+],
+"beacon_line": 207,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 207,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/note_lines.py",
+"lang": "python",
+"id": "note-lines@grep",
+"kind": "ast",
+"cl": 340,
+"pend": 345,
+"tests": false,
+"core": [
+345,
+544
+],
+"beacon_line": 340,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 340,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "svcv1@websocket-f12-infra",
+"kind": "span",
+"cl": 563,
+"pend": 569,
+"tests": false,
+"core": [
+548,
+12928
+],
+"beacon_line": 563,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 559,
+"top_delta": 11
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "auto-beacon@get_ws_connection-bjsi",
+"kind": "ast",
+"cl": 570,
+"pend": 575,
+"tests": false,
+"core": [
+548,
+579
+],
+"beacon_line": 570,
+"cut": false,
+"foreign_lines": 14,
+"stray_lines": 0,
+"prop_top": 570,
+"top_delta": 22
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "cache-refresh@async-coordinator",
+"kind": "span",
+"cl": 671,
+"pend": 677,
+"tests": false,
+"core": [
+678,
+1219
+],
+"beacon_line": 671,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 671,
+"top_delta": -7
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "cache-refresh@_send_ws_json_best_effort",
+"kind": "ast",
+"cl": 678,
+"pend": 683,
+"tests": false,
+"core": [
+671,
+723
+],
+"beacon_line": 678,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 678,
+"top_delta": 7
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "cache-refresh@_get_carto_jobs_base_dir",
+"kind": "ast",
+"cl": 1223,
+"pend": 1228,
+"tests": false,
+"core": [
+1220,
+1236
+],
+"beacon_line": 1223,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 1223,
+"top_delta": 3
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "cache-refresh@_carto_jobs_watcher_loop",
+"kind": "ast",
+"cl": 2298,
+"pend": 2303,
+"tests": false,
+"core": [
+2293,
+2304
+],
+"beacon_line": 2298,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 2298,
+"top_delta": 5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@_cache_root_resolution_error",
+"kind": "ast",
+"cl": 6209,
+"pend": 6214,
+"tests": false,
+"core": [
+6214,
+6282
+],
+"beacon_line": 6209,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 6209,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "coherence@legacy-tool-boundary-wrapper",
+"kind": "ast",
+"cl": 10237,
+"pend": 10242,
+"tests": false,
+"core": [
+10242,
+10323
+],
+"beacon_line": 10237,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 10237,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "bulk-visible-apply@_is_bulk_visible_apply_candidate",
+"kind": "ast",
+"cl": 11458,
+"pend": 11464,
+"tests": false,
+"core": [
+11464,
+11534
+],
+"beacon_line": 11458,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 11458,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "bulk-visible-apply@_node_name_tags_match_beacon_block_in_note",
+"kind": "ast",
+"cl": 11671,
+"pend": 11677,
+"tests": false,
+"core": [
+11677,
+11859
+],
+"beacon_line": 11671,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 11671,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "bulk-visible-apply@_run_carto_bulk_visible_apply_job",
+"kind": "ast",
+"cl": 12277,
+"pend": 12283,
+"tests": false,
+"core": [
+12283,
+12537
+],
+"beacon_line": 12277,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 12277,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "bulk-visible-apply@_start_carto_bulk_visible_apply_job",
+"kind": "ast",
+"cl": 12540,
+"pend": 12546,
+"tests": false,
+"core": [
+12546,
+12808
+],
+"beacon_line": 12540,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 12540,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "svcv1@compat-warning-layer",
+"kind": "span",
+"cl": 12936,
+"pend": 12942,
+"tests": false,
+"core": [
+12929,
+15757
+],
+"beacon_line": 12936,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 12932,
+"top_delta": 3
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "server@_render_note_unified_diff",
+"kind": "ast",
+"cl": 13406,
+"pend": 13412,
+"tests": false,
+"core": [
+13412,
+13475
+],
+"beacon_line": 13406,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 13406,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "server@update_node",
+"kind": "ast",
+"cl": 13672,
+"pend": 13678,
+"tests": false,
+"core": [
+13678,
+13881
+],
+"beacon_line": 13672,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 13672,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "server@_node_edit_core",
+"kind": "ast",
+"cl": 13895,
+"pend": 13900,
+"tests": false,
+"core": [
+13900,
+14414
+],
+"beacon_line": 13895,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 13895,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "server@_node_note_concat_impl",
+"kind": "ast",
+"cl": 14548,
+"pend": 14553,
+"tests": false,
+"core": [
+14553,
+14602
+],
+"beacon_line": 14548,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 14548,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "server@_resolve_generic_node_handle",
+"kind": "ast",
+"cl": 14891,
+"pend": 14897,
+"tests": false,
+"core": [
+14897,
+14991
+],
+"beacon_line": 14891,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 14891,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "svcv1@export-and-cache-core",
+"kind": "span",
+"cl": 15764,
+"pend": 15770,
+"tests": false,
+"core": [
+15758,
+16888
+],
+"beacon_line": 15764,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 15761,
+"top_delta": 3
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "svcv1@shared-context-surface",
+"kind": "span",
+"cl": 16896,
+"pend": 16902,
+"tests": false,
+"core": [
+16889,
+45555
+],
+"beacon_line": 16896,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 16892,
+"top_delta": 3
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "server@generate_markdown",
+"kind": "ast",
+"cl": 16906,
+"pend": 16911,
+"tests": false,
+"core": [
+16889,
+16926
+],
+"beacon_line": 16906,
+"cut": false,
+"foreign_lines": 10,
+"stray_lines": 0,
+"prop_top": 16903,
+"top_delta": 14
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@_forest_node_count",
+"kind": "ast",
+"cl": 17085,
+"pend": 17091,
+"tests": false,
+"core": [
+17091,
+17098
+],
+"beacon_line": 17085,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 17085,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@_forest_depth",
+"kind": "ast",
+"cl": 17101,
+"pend": 17107,
+"tests": false,
+"core": [
+17107,
+17111
+],
+"beacon_line": 17101,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 17101,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@prepare_stage2_render_forest",
+"kind": "ast",
+"cl": 17114,
+"pend": 17120,
+"tests": false,
+"core": [
+17120,
+17207
+],
+"beacon_line": 17114,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 17114,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@render_stage2_filter_sort",
+"kind": "ast",
+"cl": 17210,
+"pend": 17216,
+"tests": false,
+"core": [
+17216,
+17849
+],
+"beacon_line": 17210,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 17210,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@_glimpse_root_uuid_from_cache",
+"kind": "ast",
+"cl": 17852,
+"pend": 17858,
+"tests": false,
+"core": [
+17858,
+18078
+],
+"beacon_line": 17852,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 17852,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_resolve_lightning_rod_symbol_items_from_cache",
+"kind": "ast",
+"cl": 18094,
+"pend": 18100,
+"tests": false,
+"core": [
+18100,
+18339
+],
+"beacon_line": 18094,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 18094,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_normalize_render_symbols_items",
+"kind": "ast",
+"cl": 18360,
+"pend": 18365,
+"tests": false,
+"core": [
+18365,
+18453
+],
+"beacon_line": 18360,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 18360,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_lightning_rod_render_symbols",
+"kind": "ast",
+"cl": 18456,
+"pend": 18461,
+"tests": false,
+"core": [
+18461,
+18620
+],
+"beacon_line": 18456,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 18456,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_render_symbols_report_markdown",
+"kind": "ast",
+"cl": 19261,
+"pend": 19266,
+"tests": false,
+"core": [
+19266,
+19318
+],
+"beacon_line": 19261,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 19261,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_lightning_rod_mutate_beacons",
+"kind": "ast",
+"cl": 19353,
+"pend": 19359,
+"tests": false,
+"core": [
+19359,
+19911
+],
+"beacon_line": 19353,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 19353,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_lightning_rod_mutate_tags",
+"kind": "ast",
+"cl": 19914,
+"pend": 19920,
+"tests": false,
+"core": [
+19920,
+20222
+],
+"beacon_line": 19914,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 19914,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_handle_mutate_node_tags",
+"kind": "ast",
+"cl": 20225,
+"pend": 20231,
+"tests": false,
+"core": [
+20231,
+20304
+],
+"beacon_line": 20225,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 20225,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_lightning_rod_from_cache",
+"kind": "ast",
+"cl": 21242,
+"pend": 21248,
+"tests": false,
+"core": [
+21248,
+21920
+],
+"beacon_line": 21242,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 21242,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@_glimpse_dispatch_spec",
+"kind": "ast",
+"cl": 23122,
+"pend": 23127,
+"tests": false,
+"core": [
+23127,
+23366
+],
+"beacon_line": 23122,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 23122,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@_handle_render_lightning_dom_capture",
+"kind": "ast",
+"cl": 23772,
+"pend": 23777,
+"tests": false,
+"core": [
+23777,
+24431
+],
+"beacon_line": 23772,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 23772,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@_shape_glimpse_family_return",
+"kind": "ast",
+"cl": 25197,
+"pend": 25202,
+"tests": false,
+"core": [
+25202,
+25263
+],
+"beacon_line": 25197,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 25197,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "saved-tabs@estate-verb",
+"kind": "ast",
+"cl": 26026,
+"pend": 26031,
+"tests": false,
+"core": [
+26031,
+26513
+],
+"beacon_line": 26026,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 26026,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "auto-beacon@glimpse-rxug",
+"kind": "ast",
+"cl": 26521,
+"pend": 26527,
+"tests": false,
+"core": [
+26527,
+27595
+],
+"beacon_line": 26521,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 26521,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "note-sessions@_local_anchor_postfixes_from_reply",
+"kind": "ast",
+"cl": 27703,
+"pend": 27708,
+"tests": false,
+"core": [
+27708,
+27739
+],
+"beacon_line": 27703,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 27703,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "note-sessions@_favorite_anchor_postfixes_from_reply",
+"kind": "ast",
+"cl": 27742,
+"pend": 27747,
+"tests": false,
+"core": [
+27747,
+27776
+],
+"beacon_line": 27742,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 27742,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@_resolve_slice_group_handle",
+"kind": "ast",
+"cl": 28166,
+"pend": 28171,
+"tests": false,
+"core": [
+28171,
+28277
+],
+"beacon_line": 28166,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 28166,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@node-resolve",
+"kind": "ast",
+"cl": 28975,
+"pend": 28981,
+"tests": false,
+"core": [
+28981,
+28991
+],
+"beacon_line": 28975,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 28975,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "lightning-rod@lightning_rod_tool",
+"kind": "ast",
+"cl": 29111,
+"pend": 29117,
+"tests": false,
+"core": [
+29117,
+29748
+],
+"beacon_line": 29111,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 29111,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@node-search",
+"kind": "ast",
+"cl": 30625,
+"pend": 30630,
+"tests": false,
+"core": [
+30630,
+30753
+],
+"beacon_line": 30625,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 30625,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-dock-root-guard",
+"kind": "ast",
+"cl": 33293,
+"pend": 33299,
+"tests": false,
+"core": [
+33299,
+33413
+],
+"beacon_line": 33293,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 33293,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@render-dock-peek-raw-text",
+"kind": "ast",
+"cl": 33625,
+"pend": 33631,
+"tests": false,
+"core": [
+33631,
+33780
+],
+"beacon_line": 33625,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 33625,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@render-slice-group-inventory-raw-text",
+"kind": "ast",
+"cl": 33783,
+"pend": 33789,
+"tests": false,
+"core": [
+33789,
+33829
+],
+"beacon_line": 33783,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 33783,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-dock-list",
+"kind": "ast",
+"cl": 33832,
+"pend": 33838,
+"tests": false,
+"core": [
+33838,
+33928
+],
+"beacon_line": 33832,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 33832,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-dock-update",
+"kind": "ast",
+"cl": 33999,
+"pend": 34005,
+"tests": false,
+"core": [
+34005,
+34307
+],
+"beacon_line": 33999,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 33999,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-dock-get-description",
+"kind": "ast",
+"cl": 34445,
+"pend": 34451,
+"tests": false,
+"core": [
+34451,
+34506
+],
+"beacon_line": 34445,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 34445,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-dock-peek",
+"kind": "ast",
+"cl": 34509,
+"pend": 34515,
+"tests": false,
+"core": [
+34515,
+34755
+],
+"beacon_line": 34509,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 34509,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "anchors@point-search",
+"kind": "ast",
+"cl": 34804,
+"pend": 34809,
+"tests": false,
+"core": [
+34809,
+34936
+],
+"beacon_line": 34804,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 34804,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-dock-render",
+"kind": "ast",
+"cl": 34939,
+"pend": 34945,
+"tests": false,
+"core": [
+34945,
+35059
+],
+"beacon_line": 34939,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 34939,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-point-resolve",
+"kind": "ast",
+"cl": 35517,
+"pend": 35523,
+"tests": false,
+"core": [
+35523,
+35533
+],
+"beacon_line": 35517,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 35517,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-point-touch",
+"kind": "ast",
+"cl": 35712,
+"pend": 35718,
+"tests": false,
+"core": [
+35718,
+36064
+],
+"beacon_line": 35712,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 35712,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@anchor-point-promote",
+"kind": "ast",
+"cl": 36465,
+"pend": 36471,
+"tests": false,
+"core": [
+36471,
+37218
+],
+"beacon_line": 36465,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 36465,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@project-render-lens-from-cache",
+"kind": "ast",
+"cl": 39026,
+"pend": 39032,
+"tests": false,
+"core": [
+39032,
+39143
+],
+"beacon_line": 39026,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 39026,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@lightning-rod-render-lens",
+"kind": "ast",
+"cl": 39146,
+"pend": 39152,
+"tests": false,
+"core": [
+39152,
+39278
+],
+"beacon_line": 39146,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 39146,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@build-slice-group-registry",
+"kind": "ast",
+"cl": 39293,
+"pend": 39299,
+"tests": false,
+"core": [
+39299,
+40145
+],
+"beacon_line": 39293,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 39293,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "handle-resolution@beacon-symbol-suppress-tags",
+"kind": "ast",
+"cl": 40179,
+"pend": 40185,
+"tests": false,
+"core": [
+40185,
+40189
+],
+"beacon_line": 40179,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 40179,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "auto-beacon@_looks_like_uuid_source_handle-quhp",
+"kind": "ast",
+"cl": 40211,
+"pend": 40217,
+"tests": false,
+"core": [
+40217,
+40221
+],
+"beacon_line": 40211,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 40211,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@beacon-snippet-impl",
+"kind": "ast",
+"cl": 40224,
+"pend": 40230,
+"tests": false,
+"core": [
+40230,
+40359
+],
+"beacon_line": 40224,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 40224,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@beacon-resolve-impl",
+"kind": "ast",
+"cl": 40362,
+"pend": 40368,
+"tests": false,
+"core": [
+40368,
+40445
+],
+"beacon_line": 40362,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 40362,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@beacon-tags-mutate-impl",
+"kind": "ast",
+"cl": 40448,
+"pend": 40454,
+"tests": false,
+"core": [
+40454,
+40486
+],
+"beacon_line": 40448,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 40448,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@beacon-scope-roots",
+"kind": "ast",
+"cl": 40514,
+"pend": 40519,
+"tests": false,
+"core": [
+40519,
+40580
+],
+"beacon_line": 40514,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 40514,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "mcp-api@build-lightning-rod-registry",
+"kind": "ast",
+"cl": 42567,
+"pend": 42573,
+"tests": false,
+"core": [
+42573,
+43236
+],
+"beacon_line": 42567,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 42567,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "auto-beacon@_read_text_snippet_result_impl-x7qa",
+"kind": "ast",
+"cl": 44124,
+"pend": 44130,
+"tests": false,
+"core": [
+44130,
+44384
+],
+"beacon_line": 44124,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 44124,
+"top_delta": -6
+},
+{
+"file": "src/workflowy_mcp/server.py",
+"lang": "python",
+"id": "slice-groups@tool_update_slice_group",
+"kind": "ast",
+"cl": 45368,
+"pend": 45373,
+"tests": false,
+"core": [
+45373,
+45498
+],
+"beacon_line": 45368,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 45368,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/snippet_view.py",
+"lang": "python",
+"id": "snippet-view@header-format",
+"kind": "ast",
+"cl": 127,
+"pend": 132,
+"tests": false,
+"core": [
+132,
+163
+],
+"beacon_line": 127,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 127,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/snippet_view.py",
+"lang": "python",
+"id": "snippet-view@guard",
+"kind": "ast",
+"cl": 166,
+"pend": 171,
+"tests": false,
+"core": [
+171,
+335
+],
+"beacon_line": 166,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 166,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/snippet_view.py",
+"lang": "python",
+"id": "snippet-view@clamp-span",
+"kind": "ast",
+"cl": 338,
+"pend": 343,
+"tests": false,
+"core": [
+343,
+364
+],
+"beacon_line": 338,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 338,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/snippet_view.py",
+"lang": "python",
+"id": "snippet-view@note-guard",
+"kind": "ast",
+"cl": 543,
+"pend": 548,
+"tests": false,
+"core": [
+548,
+573
+],
+"beacon_line": 543,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 543,
+"top_delta": -5
+},
+{
+"file": "src/workflowy_mcp/weave_worker.py",
+"lang": "python",
+"id": "worker@log_worker",
+"kind": "ast",
+"cl": 51,
+"pend": 56,
+"tests": false,
+"core": [
+40,
+60
+],
+"beacon_line": 51,
+"cut": false,
+"foreign_lines": 7,
+"stray_lines": 0,
+"prop_top": 51,
+"top_delta": 11
+},
+{
+"file": "src/workflowy_mcp/weave_worker.py",
+"lang": "python",
+"id": "weave-worker@refresh_nodes_export_cache",
+"kind": "span",
+"cl": 429,
+"pend": 435,
+"tests": false,
+"core": [
+436,
+621
+],
+"beacon_line": 429,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 429,
+"top_delta": -7
+},
+{
+"file": "src/workflowy_mcp/weave_worker.py",
+"lang": "python",
+"id": "wkv1@carto-refresh-core",
+"kind": "span",
+"cl": 632,
+"pend": 638,
+"tests": false,
+"core": [
+622,
+1173
+],
+"beacon_line": 632,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 629,
+"top_delta": 7
+},
+{
+"file": "src/workflowy_mcp/weave_worker.py",
+"lang": "python",
+"id": "weave-worker@carto-refresh-job",
+"kind": "span",
+"cl": 639,
+"pend": 646,
+"tests": false,
+"core": [
+622,
+1170
+],
+"beacon_line": 639,
+"cut": false,
+"foreign_lines": 13,
+"stray_lines": 0,
+"prop_top": 639,
+"top_delta": 17
+},
+{
+"file": "src/workflowy_mcp/weave_worker.py",
+"lang": "python",
+"id": "weave-worker@markdown-generate-job",
+"kind": "span",
+"cl": 1178,
+"pend": 1185,
+"tests": false,
+"core": [
+1171,
+1300
+],
+"beacon_line": 1178,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 1178,
+"top_delta": 7
+},
+{
+"file": "tests/test_agent_kit_build.py",
+"lang": "python",
+"id": "demo@limits",
+"kind": "span",
+"cl": 130,
+"pend": 137,
+"tests": true,
+"core": [
+138,
+140
+],
+"beacon_line": 130,
+"cut": true,
+"foreign_lines": 0,
+"stray_lines": 0,
+"prop_top": 130,
+"top_delta": -8
+},
+{
+"file": "tests/test_agent_kit_build.py",
+"lang": "python",
+"id": "demo@quiet",
+"kind": "span",
+"cl": 146,
+"pend": 153,
+"tests": true,
+"core": [
+141,
+154
+],
+"beacon_line": 146,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 146,
+"top_delta": 5
+},
+{
+"file": "tests/test_carto_dry_run_byte_purity.py",
+"lang": "python",
+"id": "second",
+"kind": "ast",
+"cl": 16,
+"pend": 21,
+"tests": true,
+"core": [
+11,
+22
+],
+"beacon_line": 16,
+"cut": false,
+"foreign_lines": 0,
+"stray_lines": 1,
+"prop_top": 16,
+"top_delta": 5
+},
+{
+"file": "workflowy-glimpse-cache/background.js",
+"lang": "js_ts",
+"id": "auto-beacon@scheduleReconnect-ojt9",
+"kind": "ast",
+"cl": 396,
+"pend": 401,
+"tests": false,
+"core": [
+359,
+408
+],
+"beacon_line": 396,
+"cut": false,
+"foreign_lines": 6,
+"stray_lines": 0,
+"prop_top": 396,
+"top_delta": 37
+},
+{
+"file": "workflowy-glimpse-cache/background.js",
+"lang": "js_ts",
+"id": "auto-beacon@connectWebSocket-zwgn",
+"kind": "ast",
+"cl": 410,
+"pend": 415,
+"tests": false,
+"core": [
+359,
+574
+],
+"beacon_line": 410,
+"cut": false,
+"foreign_lines": 12,
+"stray_lines": 0,
+"prop_top": 410,
+"top_delta": 51
+},
+{
+"file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+"lang": "js_ts",
+"id": "auto-beacon@__lambdao_1.extractItemIdFromDomNode-c4c2",
+"kind": "ast",
+"cl": 508,
+"pend": 513,
+"tests": false,
+"core": [
+494,
+528
+],
+"beacon_line": 508,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 498,
+"top_delta": 4
+},
+{
+"file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+"lang": "js_ts",
+"id": "auto-beacon@__lambdao_1.initializeUuidNavigator-as01",
+"kind": "ast",
+"cl": 5860,
+"pend": 5866,
+"tests": false,
+"core": [
+5854,
+7479
+],
+"beacon_line": 5860,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 5858,
+"top_delta": 4
+},
+{
+"file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+"lang": "js_ts",
+"id": "carto-jobs@uuid-widget-ui",
+"kind": "span",
+"cl": 7061,
+"pend": 7066,
+"tests": false,
+"core": [
+7057,
+7475
+],
+"beacon_line": 7061,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 7061,
+"top_delta": 4
+},
+{
+"file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+"lang": "js_ts",
+"id": "f12-popup@keyup-open",
+"kind": "span",
+"cl": 8695,
+"pend": 8701,
+"tests": false,
+"core": [
+8689,
+8760
+],
+"beacon_line": 8695,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 8693,
+"top_delta": 4
+},
+{
+"file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+"lang": "js_ts",
+"id": "lightning-rod@resolve-root-uuid",
+"kind": "ast",
+"cl": 21285,
+"pend": 21291,
+"tests": false,
+"core": [
+21279,
+21321
+],
+"beacon_line": 21285,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 21283,
+"top_delta": 4
+},
+{
+"file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+"lang": "js_ts",
+"id": "glimpse-loading@standalone-dom-bootstrap",
+"kind": "span",
+"cl": 26288,
+"pend": 26295,
+"tests": false,
+"core": [
+26284,
+26319
+],
+"beacon_line": 26288,
+"cut": false,
+"foreign_lines": 3,
+"stray_lines": 0,
+"prop_top": 26288,
+"top_delta": 4
+}
+]
+}

@@ -1,0 +1,105 @@
+def _find_beacon_close_block_extent(
+    language: str,
+    lines: list[str],
+    bid: str,
+    search_from_idx: int = 0,
+) -> Optional[tuple[int, int]]:
+    """Return a matching close comment's inclusive extent, or ``None``.
+
+    Only a prefix-stripped structural opener starts a block. Its id must
+    occur before its own terminator, without crossing code or a new opener.
+    Markdown additionally requires a dedicated, terminated HTML comment
+    outside fences; neither prose nor fenced examples are delete targets.
+    """
+    prefix = _BEACON_EXTENT_LINE_PREFIX.get(language)
+    wanted = (bid or "").strip()
+    if not wanted or (prefix is None and language != "markdown"):
+        return None
+    search_from_idx = max(0, search_from_idx)
+    # Markdown starts at BOF so a fence opened before search_from_idx still
+    # protects its contents. Whole comments are consumed, never reinterpreted.
+    i = 0 if language == "markdown" else search_from_idx
+    fence_char = ""
+    fence_len = 0
+    while i < len(lines):
+        start_idx = i
+        body = lines[i].lstrip()
+        if language == "markdown":
+            fm = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", lines[i])
+            if fm:
+                run, suffix = fm.groups()
+                if not fence_char:
+                    fence_char, fence_len = run[0], len(run)
+                elif run[0] == fence_char and len(run) >= fence_len and not suffix.strip():
+                    fence_char, fence_len = "", 0
+                i += 1
+                continue
+            if fence_char or not body.startswith("<!--"):
+                i += 1
+                continue
+            body = body[4:]
+            block = []
+            j = i
+            while j < len(lines):
+                text, separator, suffix = body.partition("-->")
+                block.append(text.strip())
+                if separator:
+                    break
+                j += 1
+                if j < len(lines):
+                    body = lines[j]
+            i = j + 1
+            if j == len(lines) or suffix.strip() or start_idx < search_from_idx:
+                continue
+            end_idx = j
+            block = [text for text in block if text]
+            if not block or not block[0].startswith("@beacon-close["):
+                continue
+        else:
+            if not body.startswith(prefix):
+                i += 1
+                continue
+            body = body[len(prefix):].lstrip()
+            if not body.startswith("@beacon-close["):
+                i += 1
+                continue
+            block = [body]
+            end_idx = None
+            j = i + 1
+            while j < len(lines):
+                body = lines[j].lstrip()
+                if not body.startswith(prefix):
+                    break
+                body = body[len(prefix):].strip()
+                if body.startswith(("@beacon[", "@beacon-close[")):
+                    break
+                block.append(body)
+                if body.startswith("]"):
+                    end_idx = j
+                    j += 1
+                    break
+                j += 1
+            i = j
+            if end_idx is None:
+                continue
+
+        found_id = None
+        for k, body in enumerate(block[1:], start=1):
+            if body.startswith("]"):
+                # HTML wrappers must contain ONLY the close block. Never
+                # extend a deletion through prose to some later stray -->.
+                if language == "markdown" and (body != "]" or k != len(block) - 1):
+                    break
+                if found_id == wanted:
+                    return (start_idx, end_idx)
+                break
+            if body.startswith(("@beacon[", "@beacon-close[")):
+                break
+            text = body.strip()
+            while text and text[-1] in ",]":
+                text = text[:-1].rstrip()
+            if text.startswith("id="):
+                found_id = (
+                    text.split("=", 1)[1].strip().strip('"').strip("'").strip()
+                )
+    return None

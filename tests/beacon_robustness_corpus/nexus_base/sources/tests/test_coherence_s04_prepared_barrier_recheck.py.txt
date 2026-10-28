@@ -1,0 +1,459 @@
+"""S04 Remediation Chain 2 (work-order item 2) — prepared CARTO tasks must
+recheck before preparation side effects.
+
+``launch_carto_refresh_job(preparation=...)`` schedules an independent
+``prepared_runner``: the front launch gate may be clean, another process
+may raise the hard barrier mid-flight, and the prepared callback would then
+run WITHOUT a fresh hard-stop check — writing source files, calling
+``update_node``/``update_beacon_from_node``, publishing compat-patch
+epochs, and mutating the local cache, all before ``weave_worker.main``'s
+later (distinct) recheck.
+
+These tests drive the REAL WS handlers (F12-on-AST beacon write and F12+4
+materialization) through the REAL launch seam against a REAL coherence
+root; the barrier is raised by a REAL subprocess (second process) inside
+the prepared task's freshness work — after admission, before the
+preparation callback.  The execution-side recheck (the ONE shared
+``require_coherence_mutation_admission`` authority inside the S03B
+execution-site boundary) must refuse: zero preparation side effects, typed
+``coherence_barrier_active`` job diagnostics, exact-token claim
+finalization, and no worker spawn.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+from coherence_harness import NOW, run_subprocess, s02_node
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp import server
+from workflowy_mcp.coherence import (
+    initialize_manifest_if_absent,
+    manifest_with_updates,
+    new_bootstrap_manifest,
+    read_manifest,
+    write_manifest,
+)
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+REPO = Path(__file__).resolve().parents[1]
+
+_RAISE_BARRIER_DRIVER = r"""
+import sys
+sys.path.insert(0, sys.argv[3] + "/tests")
+from pathlib import Path
+from coherence_harness import NOW
+from workflowy_mcp.coherence import (
+    coherence_paths,
+    initialize_manifest_if_absent,
+    new_bootstrap_manifest,
+    raise_global_dirty_barrier,
+)
+
+paths = coherence_paths(sys.argv[2], jobs_root=Path(sys.argv[1]))
+initialize_manifest_if_absent(paths, new_bootstrap_manifest(sys.argv[2], now=NOW))
+raise_global_dirty_barrier(
+    paths,
+    reason_code="ambiguous_commit_outcome",
+    transaction_id="tx-prepared-recheck",
+    detail="raised by a second process during the prepared task",
+)
+print("barrier raised")
+"""
+
+
+def async_test(function):
+    import functools
+
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+class _WsStub:
+    """Recording websocket stub for the WS handlers."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def send(self, text: str) -> None:
+        self.messages.append(json.loads(text))
+
+
+def _make_client(tmp_path: Path, monkeypatch):
+    from pydantic import SecretStr
+
+    from workflowy_mcp.client.api_client_core import WorkFlowyClientCore
+    from workflowy_mcp.models import APIConfiguration
+
+    jobs_root = tmp_path / "cartographer_jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.get_cartographer_jobs_dir",
+        lambda: jobs_root,
+    )
+
+    def _runtime_subdir(*parts):
+        if parts == ("nodes_export_cache",):
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            return snapshot_dir
+        return tmp_path.joinpath(*parts)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.client.api_client_core.get_runtime_subdir", _runtime_subdir
+    )
+    config = APIConfiguration(
+        api_key=SecretStr("test-key-1234"), base_url="https://workflowy.com/api/v1"
+    )
+    return WorkFlowyClientCore(config), jobs_root, snapshot_dir
+
+
+def _seed_client(tmp_path: Path, monkeypatch, nodes: list[dict]):
+    """A warm-started real client over a real manifest + base carrying the
+    fixture nodes (mirrors the S03 prepared-boundary scaffolding)."""
+
+    probe, jobs_root, snapshot_dir = _make_client(tmp_path, monkeypatch)
+    paths = probe._coherence_paths()
+    account = paths.account_root.name
+    manifest = initialize_manifest_if_absent(
+        paths, new_bootstrap_manifest(account, now=NOW)
+    )
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": [dict(n) for n in nodes]},
+        account_scope_id=account,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=candidate, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    return client, jobs_root, snapshot_dir, candidate, account, manifest
+
+
+def _install_launch_mocks(
+    monkeypatch,
+    *,
+    client,
+    jobs_root,
+    account,
+    manifest,
+    candidate,
+    raise_barrier: bool,
+):
+    """Route the REAL server launch seam; the freshness callback is the
+    deterministic pause point where a SECOND PROCESS raises the barrier."""
+
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_governance_jobs_root", lambda: str(jobs_root))
+    monkeypatch.setattr(server, "_carto_account_scope_and_env", lambda: (account, {}))
+
+    async def _freshness(*, reason: str, source: str):
+        if raise_barrier:
+            proc = run_subprocess(
+                _RAISE_BARRIER_DRIVER,
+                str(jobs_root),
+                account,
+                str(REPO),
+                timeout=30,
+            )
+            assert proc.returncode == 0, proc.stderr
+        return {
+            "snapshot_path": str(candidate),
+            "freshness_disposition": "performed",
+            "snapshot_lineage": {
+                "account_scope_id": account,
+                "epoch_number": manifest.epoch_number,
+                "epoch_id": manifest.epoch_id,
+                "incorporated_through_seq": 0,
+            },
+        }
+
+    monkeypatch.setattr(server, "_carto_select_snapshot", _freshness)
+
+    spawned: list[dict] = []
+
+    async def _fake_spawn(**kwargs):
+        spawned.append(kwargs)
+        return {"success": True, "pid": 4242}
+
+    monkeypatch.setattr(gov, "_spawn_governed_worker", _fake_spawn)
+
+    finalize_calls: list[str] = []
+    real_finalize = gov.finalize_claim_async
+
+    async def _finalize_spy(claim_id, finalize_jobs_root):
+        finalize_calls.append(str(claim_id))
+        return await real_finalize(claim_id, finalize_jobs_root)
+
+    monkeypatch.setattr(gov, "finalize_claim_async", _finalize_spy)
+    return {"spawned": spawned, "finalize_calls": finalize_calls}
+
+
+async def _drain_prepared() -> None:
+    pending = list(server._carto_inprocess_tasks.values())
+    while pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+        pending = list(server._carto_inprocess_tasks.values())
+
+
+def _job_record(jobs_root: Path) -> dict:
+    job_files = sorted(jobs_root.glob("*_carto-refresh-*.json"))
+    assert len(job_files) == 1, f"expected exactly one job file, got {job_files}"
+    return json.loads(job_files[0].read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# F12-on-AST prepared callback (update_beacon_from_node)
+# ---------------------------------------------------------------------------
+
+
+def _ast_fixture(tmp_path: Path) -> list[dict]:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True, exist_ok=True)
+    py_file = repo_dir / "mod.py"
+    py_file.write_text("def foo():\n    pass\n", encoding="utf-8")
+    return [
+        s02_node("vault", name="Vault"),
+        s02_node("file", name="mod.py", parent_id="vault", note=f"Path: {py_file}"),
+        s02_node("ast", name="foo", parent_id="file", note=""),
+    ]
+
+
+def _ast_data() -> dict:
+    return {
+        "action": "refresh_file_node",
+        "node_id": "ast",
+        "node_note": "",
+        "node_name": "foo",
+    }
+
+
+@async_test
+async def test_f12_on_ast_prepared_recheck_refuses_after_second_process_raises_barrier(
+    tmp_path, monkeypatch
+):
+    """Work-order item 2(a): launch clean, pause after admission (the
+    freshness seam), a REAL second process raises the barrier, resume —
+    prove ZERO update_beacon_from_node call, no worker spawn, typed
+    diagnostics, and exact-token claim finalization."""
+
+    client, jobs_root, _sd, candidate, account, manifest = _seed_client(
+        tmp_path, monkeypatch, _ast_fixture(tmp_path)
+    )
+    mocks = _install_launch_mocks(
+        monkeypatch,
+        client=client,
+        jobs_root=jobs_root,
+        account=account,
+        manifest=manifest,
+        candidate=candidate,
+        raise_barrier=True,
+    )
+    beacon_calls: list[dict] = []
+
+    async def _beacon_spy(**kwargs):
+        beacon_calls.append(kwargs)
+        return {"success": True, "operation": "updated_beacon"}
+
+    # The production handler calls client.update_beacon_from_node (a Nexus-side
+    # method); the Core fixture client lacks it, so install the spy permissively.
+    monkeypatch.setattr(client, "update_beacon_from_node", _beacon_spy, raising=False)
+    ws = _WsStub()
+    await server._handle_refresh_file_node(_ast_data(), ws)
+    await _drain_prepared()
+
+    # Zero preparation side effects; no worker spawn.
+    assert beacon_calls == []
+    assert mocks["spawned"] == []
+    # Typed coherence_barrier_active job diagnostics.
+    job = _job_record(jobs_root)
+    assert job["status"] == "failed"
+    assert job["error_kind"] == "coherence_barrier_active"
+    assert "coherence_barrier_active" in str(job["error"])
+    # Exact-token claim finalization through the existing path.
+    assert mocks["finalize_calls"] == [str(job["claim_id"])]
+    claims_dir = gov.governance_paths(jobs_root).claims_dir
+    assert list(claims_dir.glob("*.lock.json")) == []
+    # The barrier is genuinely active (raised by the subprocess).
+    boundary = read_manifest(client._coherence_paths(), required=True)
+    assert boundary.dirty_status.active is True
+    assert boundary.dirty_status.transaction_id == "tx-prepared-recheck"
+
+
+@async_test
+async def test_f12_on_ast_prepared_clean_path_proceeds(tmp_path, monkeypatch):
+    """Work-order item 2(c) control: with NO barrier the prepared task
+    passes the recheck, runs the REAL callback chain (spied), and spawns."""
+
+    client, jobs_root, _sd, candidate, account, manifest = _seed_client(
+        tmp_path, monkeypatch, _ast_fixture(tmp_path)
+    )
+    mocks = _install_launch_mocks(
+        monkeypatch,
+        client=client,
+        jobs_root=jobs_root,
+        account=account,
+        manifest=manifest,
+        candidate=candidate,
+        raise_barrier=False,
+    )
+    beacon_calls: list[dict] = []
+
+    async def _beacon_spy(**kwargs):
+        beacon_calls.append(kwargs)
+        return {"success": True, "operation": "updated_beacon"}
+
+    monkeypatch.setattr(client, "update_beacon_from_node", _beacon_spy, raising=False)
+    ws = _WsStub()
+    await server._handle_refresh_file_node(_ast_data(), ws)
+    await _drain_prepared()
+
+    assert len(beacon_calls) == 1
+    assert beacon_calls[0]["node_id"] == "ast"
+    assert beacon_calls[0]["name"] == "foo"
+    assert len(mocks["spawned"]) == 1
+    assert mocks["finalize_calls"] == []  # success leaves the claim to the worker
+    job = _job_record(jobs_root)
+    assert job["status"] != "failed"
+    assert "error_kind" not in job
+
+
+# ---------------------------------------------------------------------------
+# F12+4 materialization (file write / update_node / compat patch)
+# ---------------------------------------------------------------------------
+
+
+def _f12p4_fixture(tmp_path: Path) -> list[dict]:
+    return [
+        s02_node("vault", name="Vault"),
+        s02_node("mdoc", name="My Doc", parent_id="vault", note="# My Doc\n\nbody text"),
+    ]
+
+
+def _f12p4_data(out_dir: Path) -> dict:
+    return {
+        "action": "materialize_markdown_file",
+        "node_id": "mdoc",
+        "node_note": "# My Doc\n\nbody text",
+        "node_name": "My Doc",
+        "default_markdown_folder": str(out_dir),
+    }
+
+
+def _install_f12p4_spies(monkeypatch, client) -> dict:
+    calls: dict[str, list] = {"update_node": [], "patch": [], "dirty": []}
+
+    async def _update_node_spy(**kwargs):
+        calls["update_node"].append(kwargs)
+        return {"success": True}
+
+    async def _patch_spy(patches):
+        calls["patch"].append(patches)
+        return {"success": True}
+
+    def _dirty_spy(ids):
+        calls["dirty"].append(list(ids))
+
+    monkeypatch.setattr(client, "update_node", _update_node_spy)
+    monkeypatch.setattr(client, "patch_nodes_export_snapshot_on_disk", _patch_spy)
+    monkeypatch.setattr(client, "_mark_nodes_export_dirty", _dirty_spy)
+    return calls
+
+
+@async_test
+async def test_f12p4_prepared_recheck_refuses_after_second_process_raises_barrier(
+    tmp_path, monkeypatch
+):
+    """Work-order item 2(b): launch clean, pause after admission, a REAL
+    second process raises the barrier, resume — prove NO file
+    creation/write, NO update_node, NO compat patch, NO worker spawn."""
+
+    out_dir = tmp_path / "md_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    client, jobs_root, _sd, candidate, account, manifest = _seed_client(
+        tmp_path, monkeypatch, _f12p4_fixture(tmp_path)
+    )
+    mocks = _install_launch_mocks(
+        monkeypatch,
+        client=client,
+        jobs_root=jobs_root,
+        account=account,
+        manifest=manifest,
+        candidate=candidate,
+        raise_barrier=True,
+    )
+    calls = _install_f12p4_spies(monkeypatch, client)
+    ws = _WsStub()
+    await server._handle_materialize_markdown_file(_f12p4_data(out_dir), ws)
+    await _drain_prepared()
+
+    # No file creation/write, no update_node, no compat patch, no dirty mark.
+    assert list(out_dir.iterdir()) == []
+    assert calls == {"update_node": [], "patch": [], "dirty": []}
+    assert mocks["spawned"] == []
+    job = _job_record(jobs_root)
+    assert job["status"] == "failed"
+    assert job["error_kind"] == "coherence_barrier_active"
+    assert mocks["finalize_calls"] == [str(job["claim_id"])]
+    claims_dir = gov.governance_paths(jobs_root).claims_dir
+    assert list(claims_dir.glob("*.lock.json")) == []
+    boundary = read_manifest(client._coherence_paths(), required=True)
+    assert boundary.dirty_status.active is True
+
+
+@async_test
+async def test_f12p4_prepared_clean_path_proceeds(tmp_path, monkeypatch):
+    """Work-order item 2(c) control: with NO barrier the REAL F12+4
+    callback writes the file, updates the node, publishes the compat patch,
+    and the worker spawns."""
+
+    out_dir = tmp_path / "md_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    client, jobs_root, _sd, candidate, account, manifest = _seed_client(
+        tmp_path, monkeypatch, _f12p4_fixture(tmp_path)
+    )
+    mocks = _install_launch_mocks(
+        monkeypatch,
+        client=client,
+        jobs_root=jobs_root,
+        account=account,
+        manifest=manifest,
+        candidate=candidate,
+        raise_barrier=False,
+    )
+    calls = _install_f12p4_spies(monkeypatch, client)
+    ws = _WsStub()
+    await server._handle_materialize_markdown_file(_f12p4_data(out_dir), ws)
+    await _drain_prepared()
+
+    written = list(out_dir.iterdir())
+    assert len(written) == 1
+    assert written[0].name == "My_Doc.md"  # _sanitize_markdown_filename underscores spaces
+    assert "body text" in written[0].read_text(encoding="utf-8")
+    assert len(calls["update_node"]) == 1
+    assert len(calls["patch"]) == 1
+    assert calls["dirty"] == [["mdoc"]]
+    assert len(mocks["spawned"]) == 1
+    assert mocks["finalize_calls"] == []
+    job = _job_record(jobs_root)
+    assert job["status"] != "failed"

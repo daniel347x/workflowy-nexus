@@ -1,0 +1,187 @@
+"""SPEC v5 §7/§10.5 + §6 -- atomic source writer, CAS, fail-closed anchors.
+
+Commit-1 regression locks for the Lightning Rod beacon mutation seam work:
+
+* ``_write_markdown_lines_sanitized`` is now an ATOMIC REPLACE (temp file in
+  the same directory -> flush+fsync -> copymode (permissions only, fresh
+  mtime) -> os.replace), with an optional ``expected_sha256`` CAS.
+* py/js Case-2 beacon creation is FAIL-CLOSED on an unresolved AST anchor
+  (the top-of-file ``insert_idx = 0`` fallback is deleted).
+* The Markdown helper's early control-char sanitize rewrite is routed
+  through the atomic writer, and a normal MD beacon update calls the atomic
+  writer EXACTLY ONCE (zero-preliminary-writes lock, legacy path).
+"""
+
+import asyncio
+import hashlib
+import os
+import stat
+import sys
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import nexus_map_codebase as nmc  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Atomic writer basics + CAS
+# ---------------------------------------------------------------------------
+
+
+def test_atomic_writer_exactly_one_trailing_newline(tmp_path):
+    p = tmp_path / "f.md"
+    p.write_text("a\n\n\n", encoding="utf-8")
+    nmc._write_markdown_lines_sanitized(str(p), ["a", "", ""])
+    assert p.read_text(encoding="utf-8") == "a\n"
+
+
+def test_atomic_writer_cas_match_writes(tmp_path):
+    p = tmp_path / "f.md"
+    p.write_text("line1\nline2\n", encoding="utf-8")
+    digest = hashlib.sha256(p.read_bytes()).hexdigest()
+    nmc._write_markdown_lines_sanitized(
+        str(p), ["line1", "line2", "line3"], expected_sha256=digest
+    )
+    assert p.read_text(encoding="utf-8") == "line1\nline2\nline3\n"
+
+
+def test_atomic_writer_cas_mismatch_writes_nothing(tmp_path):
+    p = tmp_path / "f.md"
+    p.write_text("original\n", encoding="utf-8")
+    before = p.read_bytes()
+    with pytest.raises(nmc.SourceChangedSincePlanError):
+        nmc._write_markdown_lines_sanitized(
+            str(p), ["changed"], expected_sha256="0" * 64
+        )
+    assert p.read_bytes() == before
+
+
+def test_atomic_writer_injected_failure_leaves_original_and_cleans_temp(
+    tmp_path, monkeypatch
+):
+    p = tmp_path / "f.md"
+    p.write_text("original\n", encoding="utf-8")
+    before = p.read_bytes()
+
+    def _boom(*_a, **_k):
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(os, "replace", _boom)
+    with pytest.raises(OSError):
+        nmc._write_markdown_lines_sanitized(str(p), ["changed"])
+    assert p.read_bytes() == before
+    leftovers = [f for f in os.listdir(tmp_path) if f.startswith(".beacon_atomic_")]
+    assert leftovers == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are near-no-op on Windows")
+def test_atomic_writer_preserves_posix_mode_bits(tmp_path):
+    p = tmp_path / "script.sh"
+    p.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    os.chmod(p, 0o744)
+    nmc._write_markdown_lines_sanitized(str(p), ["#!/bin/sh", "echo ho"])
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o744
+    assert p.read_text(encoding="utf-8") == "#!/bin/sh\necho ho\n"
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed py/js Case-2 anchoring (insert_idx=0 fallback deleted)
+# ---------------------------------------------------------------------------
+
+
+def test_python_case2_unresolved_ast_anchor_fails_closed(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text("# header comment\n\ndef foo():\n    return 1\n", encoding="utf-8")
+    before = p.read_bytes()
+    res = nmc.update_beacon_from_node_python(
+        str(p), "Foo #newtag", "AST_QUALNAME: missing_fn\n---\n"
+    )
+    assert res.get("error")
+    assert "ast_qualname_unresolved" in res["error"]
+    assert res.get("operation") == "noop"
+    assert p.read_bytes() == before
+
+
+def test_python_case2_creates_above_target_not_top_of_file(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text("# header comment\n\ndef foo():\n    return 1\n", encoding="utf-8")
+    res = nmc.update_beacon_from_node_python(
+        str(p), "Foo #newtag", "AST_QUALNAME: foo\n---\n"
+    )
+    assert res.get("operation") == "created_beacon"
+    lines = p.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "# header comment"
+    def_idx = lines.index("def foo():")
+    block_head = max(0, def_idx - 6)
+    assert any("@beacon[" in lines[k] for k in range(block_head, def_idx))
+
+
+@pytest.mark.skipif(not nmc._HAVE_TREE_SITTER, reason="tree-sitter not available")
+def test_js_case2_unresolved_ast_anchor_fails_closed(tmp_path):
+    p = tmp_path / "m.js"
+    p.write_text("// header\nfunction foo() { return 1; }\n", encoding="utf-8")
+    before = p.read_bytes()
+    res = nmc.update_beacon_from_node_js_ts(
+        str(p), "Foo #newtag", "AST_QUALNAME: missing_fn\n---\n"
+    )
+    assert res.get("error")
+    assert "ast_qualname_unresolved" in res["error"]
+    assert res.get("operation") == "noop"
+    assert p.read_bytes() == before
+
+
+# ---------------------------------------------------------------------------
+# MD path: normal update calls the atomic writer EXACTLY ONCE
+# (zero-preliminary-writes lock, legacy path -- the early control-char
+# sanitize only fires on corrupted input and is itself routed through the
+# atomic writer).
+# ---------------------------------------------------------------------------
+
+
+def test_md_update_invokes_atomic_writer_exactly_once(tmp_path, monkeypatch):
+    md = tmp_path / "doc.md"
+    md.write_text(
+        "# Doc\n"
+        "\n"
+        "<!--\n"
+        "@beacon[\n"
+        "  id=auto-beacon@abcd,\n"
+        "  role=Target,\n"
+        "  slice_labels=old,\n"
+        "  kind=ast,\n"
+        "]\n"
+        "-->\n"
+        "## Target\n"
+        "\n"
+        "body\n",
+        encoding="utf-8",
+    )
+    note = (
+        "MD_PATH:\n# Doc\n## Target\n---\n"
+        "BEACON (MD AST)\nid: auto-beacon@abcd\nrole: Target\n"
+        "slice_labels: old\nkind: ast\n---\n"
+    )
+
+    calls = []
+    real_writer = nmc._write_markdown_lines_sanitized
+
+    def _counting_writer(file_path, lines, **kwargs):
+        calls.append(str(file_path))
+        return real_writer(file_path, lines, **kwargs)
+
+    monkeypatch.setattr(nmc, "_write_markdown_lines_sanitized", _counting_writer)
+    res = nmc.update_beacon_from_node_markdown(
+        str(md), "Target #new", note, occurrence=None
+    )
+    assert res.get("operation") == "updated_beacon", res
+    assert calls == [str(md)]
+    content = md.read_text(encoding="utf-8")
+    assert "slice_labels=new," in content
+    assert "slice_labels=old," not in content

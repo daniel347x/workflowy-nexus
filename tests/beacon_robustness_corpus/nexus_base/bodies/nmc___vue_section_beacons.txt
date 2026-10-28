@@ -1,0 +1,27 @@
+def _vue_section_beacons(
+    section: dict[str, Any], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    """Parse one ``_vue_sfc_sections`` section's beacon blocks with the parser
+    that section type uses and rebase them to file lines.
+
+    ``diagnostics``, when a list, receives the section parser's diagnostics
+    records with ``line`` / ``end_line`` / ``opener_line`` rebased to file
+    lines.
+    """
+    local_lines = str(section.get("raw_text") or "").splitlines()
+    content_row0 = int(section.get("content_row0") or 0)
+    section_type = section.get("type")
+    local_diagnostics: list | None = [] if diagnostics is not None else None
+    if section_type == "template_element":
+        beacons_local = parse_markdown_beacon_blocks(local_lines, diagnostics=local_diagnostics)
+    elif section_type in ("script_element", "style_element"):
+        beacons_local = parse_js_beacon_blocks(local_lines, diagnostics=local_diagnostics)
+    else:
+        raise ValueError(f"unknown Vue section type {section_type!r}")
+    if diagnostics is not None:
+        diagnostics.extend(
+            _vue_rebase_beacons(
+                local_diagnostics, content_row0, keys=("line", "end_line", "opener_line")
+            )
+        )
+    return _vue_rebase_beacons(beacons_local, content_row0)

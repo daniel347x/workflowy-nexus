@@ -1,0 +1,165 @@
+// ============================================================================
+// test_dock_source_view.js — the repo's FIRST JavaScript test harness.
+//
+// Covers the docked-Markdown-modal "Source view + find-in-source" feature
+// (glimpse-cache-client.js): compileDockSourceSearch (the highlight-only JS
+// mini-twin of the server's build_search_predicate smart grammar) and
+// dockedSourceHtml (the single <pre> paint choke for the dock's text views).
+//
+// RUN:   node tests/js/test_dock_source_view.js
+// EXIT:  0 = all pass, 1 = at least one failure. Zero dependencies — no npm
+//        install, no package.json, no framework. Not collected by pytest
+//        (pytest only gathers test_*.py), so it can never interfere with the
+//        Python suite.
+//
+// HOW IT WORKS (the extraction idiom — reuse it for future JS harnesses):
+// the client is one big main-world page script, not a module, so we extract
+// the functions under test VERBATIM from the real file bytes (signature
+// search + brace matching) and evaluate them inside a `new Function` with
+// the handful of module-level locals they read injected as parameters. The
+// tests therefore run against the exact shipped source, and a rename or
+// signature change fails LOUDLY here (extraction throws), never silently.
+// ============================================================================
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const CLIENT_FILE = path.join(__dirname, '..', '..',
+  'workflowy-glimpse-cache', 'glimpse-cache-client.js');
+const src = fs.readFileSync(CLIENT_FILE, 'utf8');
+
+function extractFunction(name) {
+  const idx = src.indexOf(`function ${name}(`);
+  if (idx < 0) throw new Error(`function not found in client file: ${name}`);
+  const start = src.indexOf('{', idx);
+  let depth = 0;
+  for (let i = start; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(idx, i + 1);
+    }
+  }
+  throw new Error(`unbalanced braces extracting: ${name}`);
+}
+
+// The module-level locals the two functions under test read/write in the real
+// file. `state` seeds them per fresh closure (mirrors a page load).
+function makeApi(regex) {
+  const state = { regex, count: 0, current: -1 };
+  const escapeHtmlForPreview = (t) => String(t)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const body = extractFunction('compileDockSourceSearch') + '\n'
+    + extractFunction('dockedSourceHtml');
+  const factory = new Function(
+    'escapeHtmlForPreview', 'state',
+    `let dockedSourceSearchRegex = state.regex;
+     let dockedSourceSearchCount = state.count;
+     let dockedSourceSearchCurrent = state.current;
+     function _sync() {
+       state.regex = dockedSourceSearchRegex;
+       state.count = dockedSourceSearchCount;
+       state.current = dockedSourceSearchCurrent;
+     }
+     ${body}
+     return {
+       compileDockSourceSearch,
+       dockedSourceHtml: (t) => { const r = dockedSourceHtml(t); _sync(); return r; },
+       _state: state,
+     };`
+  );
+  return factory(escapeHtmlForPreview, state);
+}
+
+let failures = 0;
+function check(label, cond) {
+  if (cond) { console.log('ok   ' + label); }
+  else { failures++; console.log('FAIL ' + label); }
+}
+function testRx(rx, s) {
+  rx.lastIndex = 0; // /g regexes are stateful across .test() calls
+  return rx.test(s);
+}
+
+const api = makeApi(null);
+
+// ------------------------- compileDockSourceSearch -------------------------
+let r = api.compileDockSourceSearch('');
+check('blank query -> ok, regex null', r.ok && r.regex === null);
+
+r = api.compileDockSourceSearch('   ');
+check('whitespace-only query -> regex null', r.ok && r.regex === null);
+
+r = api.compileDockSourceSearch('invoice OR receipt -draft');
+check('smart query compiles', r.ok && r.regex !== null);
+check('  matches invoice (case-insensitive)', testRx(r.regex, 'an INVOICE here'));
+check('  matches receipt', testRx(r.regex, 'a Receipt here'));
+check('  negated term is not a highlight term', !testRx(r.regex, 'draft only'));
+
+r = api.compileDockSourceSearch('"27 inch monitor"');
+check('quoted phrase compiles', r.ok
+  && testRx(r.regex, 'a 27 inch monitor sale')
+  && !testRx(r.regex, '27 monitor inch'));
+
+r = api.compileDockSourceSearch('inv*2026');
+check('glob * compiles', r.ok
+  && testRx(r.regex, 'see inv-99-2026 now')
+  && !testRx(r.regex, 'inv 2027'));
+
+r = api.compileDockSourceSearch('monit?r');
+check('glob ? compiles', r.ok
+  && testRx(r.regex, 'a monitor')
+  && !testRx(r.regex, 'a monitr'));
+
+r = api.compileDockSourceSearch('"inv*2026"');
+check('glob inside quotes still globs (server parity)', r.ok && testRx(r.regex, 'inv-x-2026'));
+
+r = api.compileDockSourceSearch('invoice OR "big receipt" OR mon*');
+check('OR mix of term/phrase/glob compiles', r.ok
+  && testRx(r.regex, 'invoice')
+  && testRx(r.regex, 'a big receipt')
+  && testRx(r.regex, 'monitor'));
+
+r = api.compileDockSourceSearch('"unbalanced');
+check('unbalanced quotes -> loud failure', r.ok === false && typeof r.error === 'string');
+
+r = api.compileDockSourceSearch('*');
+check('bare * (empty-match pattern) dropped -> regex null', r.ok && r.regex === null);
+
+r = api.compileDockSourceSearch('-draft');
+check('all-negated query -> regex null', r.ok && r.regex === null);
+
+r = api.compileDockSourceSearch('OR');
+check('keywords-only query -> regex null', r.ok && r.regex === null);
+
+r = api.compileDockSourceSearch('a.c');
+check('regex metachars escaped (a.c matches literally, not abc)', r.ok
+  && testRx(r.regex, 'a.c') && !testRx(r.regex, 'abc'));
+
+// ----------------------------- dockedSourceHtml ----------------------------
+let h = makeApi(api.compileDockSourceSearch('invoice').regex);
+let html = h.dockedSourceHtml('invoice and Invoice and <b>nothing</b>');
+check('highlight count = 2', h._state.count === 2);
+check('first match is --current (index 0)', h._state.current === 0);
+check('first mark carries both classes', html.indexOf('class="glimpse-dock-src-hit glimpse-dock-src-hit--current"') >= 0);
+check('second mark is plain', html.split('class="glimpse-dock-src-hit"').length === 2);
+check('non-match text is HTML-escaped', html.indexOf('&lt;b&gt;') >= 0);
+check('pre wrapper', html.startsWith('<pre class="glimpse-md-preview-plain">'));
+
+h = makeApi(api.compileDockSourceSearch('^edge').regex);
+html = h.dockedSourceHtml('^edge start and end ^edge');
+check('matches at both string boundaries', h._state.count === 2);
+
+h = makeApi(null);
+html = h.dockedSourceHtml('plain <x>');
+check('no-regex passthrough escapes, no marks', html.indexOf('&lt;x&gt;') >= 0 && html.indexOf('<mark') < 0);
+check('no-regex count/current reset', h._state.count === 0 && h._state.current === -1);
+
+h = makeApi(api.compileDockSourceSearch('nomatch').regex);
+html = h.dockedSourceHtml('nothing here');
+check('zero matches -> count 0, current -1, no marks', h._state.count === 0
+  && h._state.current === -1 && html.indexOf('<mark') < 0);
+
+console.log(failures === 0 ? 'ALL PASS' : `${failures} FAILURES`);
+process.exit(failures === 0 ? 0 : 1);

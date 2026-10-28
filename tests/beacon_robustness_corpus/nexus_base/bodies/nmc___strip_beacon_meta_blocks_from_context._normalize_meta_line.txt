@@ -1,0 +1,13 @@
+    def _normalize_meta_line(raw: str) -> str:
+        s = (raw or "").strip()
+        # Defensive: if a comment prefix somehow survives into context_lines,
+        # strip common single-line comment sugars.
+        if s.startswith("#"):
+            s = s.lstrip("#").lstrip()
+        if s.startswith("--"):
+            s = s[2:].lstrip()
+        if s.startswith("//"):
+            s = s[2:].lstrip()
+        if s.startswith("*"):
+            s = s.lstrip("*").lstrip()
+        return s

@@ -1,0 +1,131 @@
+    def walk_body(
+        body_items: List[ast.AST],
+        qual_prefix: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for item in body_items:
+            # ONE shared physical-start interpretation for classes and
+            # functions, also used by forward attachment and reverse writes.
+            decor_ranges = decorator_ranges_by_definition.get(getattr(item, "lineno", 0) - 1, [])
+            decor_start: Optional[int] = decor_ranges[0][0] + 1 if decor_ranges else None
+            if isinstance(item, ast.ClassDef):
+                qual = item.name if not qual_prefix else f"{qual_prefix}.{item.name}"
+                start = getattr(item, "lineno", None)
+                end = getattr(item, "end_lineno", start)
+                # Build note: AST_QUALNAME header, then optional separator and docstring.
+                doc = get_docstring(item)
+                note_lines: list[str] = [f"AST_QUALNAME: {qual}"]
+                if doc:
+                    note_lines.append("---")
+                    note_lines.append(doc)
+                context_lines = _extract_ast_comment_context(start, decor_start) if isinstance(start, int) else []
+                if context_lines:
+                    note_lines.append("")
+                    note_lines.append("CONTEXT COMMENTS (PYTHON):")
+                    note_lines.extend(context_lines)
+                note_text = "\n".join(note_lines)
+
+                node = {
+                    "name": f"{EMOJI_CLASS} class {item.name}",
+                    "priority": priority_counter[0],
+                    "note": note_text,
+                    "children": walk_body(item.body, qual_prefix=qual),
+                    "ast_type": "class",
+                    "ast_name": item.name,
+                    "ast_qualname": qual,
+                    "file_path": file_path,
+                    "orig_lineno_start_unused": start,
+                    "orig_lineno_end_unused": end,
+                    "decor_start_lineno": decor_start,
+                }
+                priority_counter[0] += 100
+                results.append(node)
+            elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                prefix = EMOJI_ASYNC if isinstance(item, ast.AsyncFunctionDef) else EMOJI_FUNC
+                sig = get_function_signature(item)
+                qual = item.name if not qual_prefix else f"{qual_prefix}.{item.name}"
+                start = getattr(item, "lineno", None)
+                end = getattr(item, "end_lineno", start)
+
+                doc = get_docstring(item)
+                note_lines: list[str] = [f"AST_QUALNAME: {qual}"]
+                if doc:
+                    note_lines.append("---")
+                    note_lines.append(doc)
+                context_lines = _extract_ast_comment_context(start, decor_start) if isinstance(start, int) else []
+                if context_lines:
+                    note_lines.append("")
+                    note_lines.append("CONTEXT COMMENTS (PYTHON):")
+                    note_lines.extend(context_lines)
+                note_text = "\n".join(note_lines)
+
+                node = {
+                    "name": f"{prefix} {sig}",
+                    "priority": priority_counter[0],
+                    "note": note_text,
+                    "children": walk_body(item.body, qual_prefix=qual),
+                    "ast_type": "async_function" if isinstance(item, ast.AsyncFunctionDef) else "function",
+                    "ast_name": item.name,
+                    "ast_qualname": qual,
+                    "file_path": file_path,
+                    "orig_lineno_start_unused": start,
+                    "orig_lineno_end_unused": end,
+                    "decor_start_lineno": decor_start,
+                }
+                priority_counter[0] += 100
+                results.append(node)
+            elif isinstance(item, ast.Assign):
+                # Optional: Capture constants and selected module globals at this structural level.
+                for target in item.targets:
+                    if isinstance(target, ast.Name) and _should_map_python_assigned_name(
+                        target.id,
+                        qual_prefix=qual_prefix,
+                    ):
+                        start = getattr(item, "lineno", None)
+                        end = getattr(item, "end_lineno", start)
+                        qual_const = target.id if not qual_prefix else f"{qual_prefix}.{target.id}"
+                        note_label = _assigned_name_note_label(target.id, qual_prefix=qual_prefix)
+                        note_text = f"AST_QUALNAME: {qual_const}\n---\n{note_label}"
+                        node = {
+                            "name": f"{EMOJI_CONST} {target.id}",
+                            "priority": priority_counter[0],
+                            "note": note_text,
+                            "children": [],
+                            "ast_type": "const",
+                            "ast_name": target.id,
+                            "ast_qualname": qual_const,
+                            "file_path": file_path,
+                            "orig_lineno_start_unused": start,
+                            "orig_lineno_end_unused": end,
+                        }
+                        priority_counter[0] += 100
+                        results.append(node)
+            elif isinstance(item, ast.AnnAssign):
+                target = item.target
+                if isinstance(target, ast.Name) and _should_map_python_assigned_name(
+                    target.id,
+                    qual_prefix=qual_prefix,
+                ):
+                    start = getattr(item, "lineno", None)
+                    end = getattr(item, "end_lineno", start)
+                    qual_const = target.id if not qual_prefix else f"{qual_prefix}.{target.id}"
+                    note_label = _assigned_name_note_label(target.id, qual_prefix=qual_prefix)
+                    note_text = f"AST_QUALNAME: {qual_const}\n---\n{note_label}"
+                    node = {
+                        "name": f"{EMOJI_CONST} {target.id}",
+                        "priority": priority_counter[0],
+                        "note": note_text,
+                        "children": [],
+                        "ast_type": "const",
+                        "ast_name": target.id,
+                        "ast_qualname": qual_const,
+                        "file_path": file_path,
+                        "orig_lineno_start_unused": start,
+                        "orig_lineno_end_unused": end,
+                    }
+                    priority_counter[0] += 100
+                    results.append(node)
+            else:
+                for nested_body in _iter_nested_statement_bodies(item):
+                    results.extend(walk_body(nested_body, qual_prefix=qual_prefix))
+        return results

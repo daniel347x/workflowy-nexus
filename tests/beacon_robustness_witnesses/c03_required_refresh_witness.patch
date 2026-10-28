@@ -1,0 +1,55 @@
+--- a/tests/test_carto_dry_run_byte_purity.py
++++ b/tests/test_carto_dry_run_byte_purity.py
+@@ -279,43 +279,31 @@
+         assert b"\x07" not in previous and b"\\a" in previous
+ 
+ 
+-def test_claimed_real_non_utf8_markdown_reaches_mapper_but_header_seam_is_deferred(monkeypatch, tmp_path):
+-    """C03: ab0653d aborts before map; protected LINE COUNT still blocks reconcile.
+-
+-    This is not a completed-refresh witness. The requested success witness is
+-    blocked by the untouched protected header seam, reported as stop-and-ask.
+-    """
+-    from workflowy_mcp.models.errors import NetworkError
++def test_claimed_real_non_utf8_markdown_maps_error_sentinel_without_repair_abort(monkeypatch, tmp_path):
++    """C03: ab0653d raises from optional C0 and never reaches the mapper."""
+     corpus = Path(__file__).parent / "beacon_robustness_corpus/area6/area6_inputs.json"
+     raw = base64.b64decode(json.loads(corpus.read_text(encoding="utf-8"))["other_inputs"]["c0_case_bytes_base64"]["C03_latin1.md"])
+-    outcomes, order, maps, states = [], [], [], []
++    outcomes, order = [], []
+     def track(name, original):
+         def invoke(path, *args, **kwargs):
+             order.append(name)
+-            states.append((Path(path).read_bytes(), Path(path).stat().st_mtime_ns))
+             outcome = original(path, *args, **kwargs)
+-            states.append((Path(path).read_bytes(), Path(path).stat().st_mtime_ns))
+             if name != "map_codebase":
+                 outcomes.append(outcome)
+-            else:
+-                maps.append(outcome)
+             return outcome
+         return invoke
+     names = ["repair_markdown_c0_controls_on_disk", "normalize_beacon_comment_field_aliases_in_file",
+              "normalize_duplicate_ast_beacons_in_file", "map_codebase"]
+     for name in names:
+         monkeypatch.setattr(nexus_map_codebase, name, track(name, getattr(nexus_map_codebase, name)))
+-    # Observe, do not bypass or weaken the protected header-freshness policy.
+-    with pytest.raises(NetworkError) as raised:
+-        _run_file_refresh(monkeypatch, tmp_path, suffix=".md", fixture=raw,
+-                          dry_run=False, carto_claim_id="owned-carto-claim")
+-    assert "no usable LINE COUNT header" in str(raised.value.__cause__)
++    path, before, result, observed = _run_file_refresh(
++        monkeypatch, tmp_path, suffix=".md", fixture=raw, dry_run=False, carto_claim_id="owned-carto-claim")
++    assert result["success"], result
+     assert order == names
+-    assert (tmp_path / "fixture.md").read_bytes() == raw
+-    assert all(state == states[0] for state in states)
++    assert (path.read_bytes(), path.stat().st_mtime_ns) == (before, observed["before_mtime_ns"])
+     assert all(not o["success"] and not o["changed"] and o["error_kind"] == "not_utf8" and o["findings"] for o in outcomes)
+-    assert any("⚠️ Parse Error" in node["name"] for node in maps[0]["children"])
+-    assert "LINE COUNT:" not in maps[0]["note"]
++    assert any("⚠️ MD Parse Error" in node["name"] for node in observed["source_json"]["nodes"])
++
+ 
+ 
+ def test_alias_cas_skip_still_maps_newest_source(monkeypatch, tmp_path):

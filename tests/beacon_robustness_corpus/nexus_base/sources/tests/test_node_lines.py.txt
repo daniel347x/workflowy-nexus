@@ -1,0 +1,860 @@
+"""Node-as-a-file read/search through real registry, resolver and coherence hooks.
+
+Only transport is faked. Published views are deep-frozen by conftest; the
+real runtime-directory fence stays enabled. No real vault/API is touched.
+"""
+from __future__ import annotations
+
+import asyncio
+import copy
+import html
+import re
+from unittest.mock import AsyncMock
+
+import pytest
+from coherence_harness import make_boundary_capable, s04_boundary_status
+from workflowy_mcp import server
+from workflowy_mcp.coherence import COHERENCE_READ_ADVISORY_LINE
+from workflowy_mcp.coherence.admission import mutation_admission_class
+from workflowy_mcp.coherence.errors import CacheViewError
+from workflowy_mcp.coherence.operation_cache import current_operation_cache
+from workflowy_mcp.mcp_api_registry import dispatch_operation, validate_params
+from workflowy_mcp.models.node import WorkFlowyNode
+from workflowy_mcp.note_lines import search_note_documents, split_note_lines
+
+ROOT = "7b97b6a9-467c-43eb-9bab-90f736cedfe6"
+A = "11111111-1111-4111-8111-111111111111"
+B = "22222222-2222-4222-8222-222222222222"
+C = "33333333-3333-4333-8333-333333333333"
+OUT = "44444444-4444-4444-8444-444444444444"
+NAME = "[ap:LINES01] Specification 📊 #tag"
+
+
+def client_for(monkeypatch, note="one\ntwo\nthree\n", *, nodes=None, status=None):
+    if nodes is None:
+        nodes = [{"id": ROOT, "name": NAME, "note": "STALE CACHE", "parent_id": None}]
+    client = make_boundary_capable(object.__new__(server.WorkFlowyClient), nodes=nodes, boundary_status=status)
+    client.get_node = AsyncMock(return_value=WorkFlowyNode(id=ROOT, name=NAME, note=html.escape(note)))
+    client.update_node = AsyncMock(side_effect=AssertionError("no writes"))
+    client.create_node = AsyncMock(side_effect=AssertionError("no writes"))
+    client._adopt_coherence_head = AsyncMock(wraps=client._adopt_coherence_head)
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    return client
+
+
+async def dispatch_async(verb, params):
+    return await dispatch_operation(
+        server.build_node_registry(), verb, params,
+        operation_boundary=server._mcp_operation_boundary,
+        mutation_admission=server._mcp_mutation_admission,
+        exception_mapper=server._mcp_exception_mapper,
+        result_finalizer=server._mcp_operation_result_finalizer,
+    )
+
+
+def dispatch(verb, params):
+    return asyncio.run(dispatch_async(verb, params))
+
+
+@pytest.mark.parametrize("handle", [ROOT, ROOT[:8], f"[{ROOT[:8]}]", "[ap:LINES01]"])
+def test_read_live_window_and_handle_grammar(monkeypatch, handle):
+    note = "\n".join(f"line {n}" for n in range(1, 105))
+    client = client_for(monkeypatch, note)
+    result = dispatch("read", {"node_handle": handle, "offset": 98, "limit": 3, "with_line_numbers": True})
+    assert result == " 99 | line 99\n100 | line 100\n101 | line 101"
+    client.get_node.assert_awaited_once_with(ROOT)
+    client._adopt_coherence_head.assert_awaited_once()
+    client.update_node.assert_not_awaited()
+    assert current_operation_cache(required=False) is None
+
+
+@pytest.mark.parametrize("note,options,expected", [
+    ("a\nb\nc\n", {"limit": 2}, "a\nb"),
+    ("a\nb\nc\n", {"offset": 1}, "b\nc"),
+    ("a\nb", {"offset": 1, "limit": 500}, "b"),
+    # A window with no lines legitimately returns nothing: the 9a ([ap:G2UALX])
+    # empty-output stub at the dispatch funnel delivers the literal marker,
+    # never a bare '' (indistinguishable from a fault or a client fill-in).
+    ("a\nb", {"offset": 50, "with_line_numbers": True}, "(empty)"),
+    ("", {"limit": 1, "with_line_numbers": True}, "(empty)"),
+    ("\n", {"limit": 1, "with_line_numbers": True}, "1 | "),
+    ("a\r\nb\rc\n", {"limit": 10}, "a\nb\nc"),
+    ("α\vβ\u2028γ\n", {"limit": 10}, "α\nβ\nγ"),
+    ("\t\u00a0 &lt; 📊\n<b>literal</b>\n", {"limit": 2}, "\t\u00a0 &lt; 📊\n<b>literal</b>"),
+])
+def test_read_bounds_and_canonical_line_domain(monkeypatch, note, options, expected):
+    client_for(monkeypatch, note)
+    assert dispatch("read", {"node_handle": ROOT, **options}) == expected
+
+
+def test_read_numbering_only_and_ordinary_byte_parity(monkeypatch):
+    note = "a\r\nb\n"
+    client_for(monkeypatch, note)
+    assert dispatch("read", {"node_handle": ROOT}) == f"[name: not editable] {NAME}\n\n{note}"
+    assert dispatch("read", {"node_handle": ROOT, "offset": 0}) == f"[name: not editable] {NAME}\n\n{note}"
+    assert dispatch("read", {"node_handle": ROOT, "with_line_numbers": True}) == f"[name: not editable] {NAME}\n\n1 | a\n2 | b"
+
+
+@pytest.mark.parametrize("options,code", [
+    ({"offset": -1}, "invalid_parameter_value"),
+    ({"limit": 0}, "invalid_parameter_value"),
+    ({"offset": True}, "invalid_parameter_type"),
+    ({"limit": 1.5}, "invalid_parameter_type"),
+    ({"with_line_numbers": "true"}, "invalid_parameter_type"),
+    ({"as_raw_node": False, "offset": 0}, "invalid_parameter_combination"),
+    ({"as_raw_node": False, "limit": 1}, "invalid_parameter_combination"),
+    ({"as_raw_node": False, "with_line_numbers": True}, "invalid_parameter_combination"),
+    ({"output_file": "not-written.md", "offset": 0}, "invalid_parameter_combination"),
+    ({"output_file": "not-written.md", "limit": 1}, "invalid_parameter_combination"),
+    ({"output_file": "not-written.md", "with_line_numbers": True}, "invalid_parameter_combination"),
+    ({"line_numbers": True}, "forbidden_parameter"),
+])
+def test_read_validation_before_get(monkeypatch, options, code):
+    client = client_for(monkeypatch)
+    result = dispatch("read", {"node_handle": ROOT, **options})
+    assert result["error"]["code"] == code
+    client.get_node.assert_not_awaited()
+
+
+def test_python_delegate_uses_same_line_helper(monkeypatch):
+    client = client_for(monkeypatch)
+    async def run():
+        async with server._mcp_operation_boundary("node.read"):
+            return await server.read_node(ROOT, offset=1, limit=1, with_line_numbers=True)
+    assert asyncio.run(run()) == "2 | two"
+    client.get_node.assert_awaited_once()
+
+
+@pytest.mark.parametrize("handle", [ROOT, ROOT[:8], f"[{ROOT[:8]}]", "[ap:LINES01]"])
+def test_search_single_live_decoding_and_merged_context(monkeypatch, handle):
+    client = client_for(monkeypatch, "start\nHIT &lt;\nhit hit\n\t\u00a0end 📊\n")
+    result = dispatch("search", {"node_handle": handle, "query": "hit", "context_lines": 1})
+    assert result == (
+        f'Source: live node note.\n\nMatched 2 lines in {ROOT} "{NAME}":\n'
+        "  1 | start\n> 2 | HIT &lt;\n> 3 | hit hit\n  4 | \t\u00a0end 📊"
+        "\n\nPagination: offset=0; returned_matches=2; returned_occurrences=3; has_more=false; next_offset=null."
+    )
+    client.get_node.assert_awaited_once_with(ROOT)
+    client._adopt_coherence_head.assert_awaited_once()
+
+
+@pytest.mark.parametrize("query,extra,expected_lines", [
+    ("a.b", {}, [1]),
+    ("a.b", {"is_regex": True}, [1, 2]),
+    ("^HIT$", {"is_regex": True}, [3, 4]),
+    ("HIT", {"case_sensitive": True}, [3]),
+    ("a.b\naXb", {}, []),
+    ("^$", {"is_regex": True}, [5]),
+    (" ", {}, [6]),
+])
+def test_search_line_local_literal_regex_case_and_empty_lines(monkeypatch, query, extra, expected_lines):
+    client_for(monkeypatch, "a.b\naXb\nHIT\nhit\n\n \n")
+    result = dispatch("search", {"node_handle": ROOT, "query": query, "context_lines": 0, **extra})
+    assert numbered_rows(result) == expected_lines
+    assert ("No matching note lines." in result) is (not expected_lines)
+
+
+def subtree():
+    # Intentionally shuffled cache order: traversal must follow priority.
+    # B is COMPLETED (and suppressed by name): hidden by the new default.
+    return [
+        {"id": ROOT, "name": NAME, "note": "hit ROOT &lt;", "parent_id": None},
+        {"id": B, "name": "Spec B #wfy-suppress", "note": "hit B", "parent_id": ROOT, "priority": 20, "completed": True},
+        {"id": A, "name": "other parent", "note": "hit A", "parent_id": ROOT, "priority": 10},
+        {"id": C, "name": "[ap:CHILD01] Spec C #wfy-ns", "note": "hit C", "parent_id": A},
+        {"id": OUT, "name": "Spec OUT", "note": "hit OUT", "parent_id": None},
+    ]
+
+
+SUPPRESSED = "55555555-5555-4555-8555-555555555555"
+
+
+def subtree_deep():
+    # A completed PARENT hides its whole subtree by default; a suppressed
+    # (non-completed) node stays included -- search is a grep, not a render.
+    return [
+        {"id": ROOT, "name": NAME, "note": "root note", "parent_id": None},
+        {"id": A, "name": "done parent", "note": "hit parent", "parent_id": ROOT, "priority": 10, "completed": True, "completedAt": 123},
+        {"id": C, "name": "child of done", "note": "hit child", "parent_id": A},
+        {"id": SUPPRESSED, "name": "kept #wfy-suppress", "note": "hit suppressed", "parent_id": ROOT, "priority": 20},
+    ]
+
+
+def test_search_subtree_pinned_read_only_hides_completed_by_default(monkeypatch):
+    client = client_for(monkeypatch, nodes=subtree())
+    view = client._cache_view_publisher.capture()
+    before = copy.deepcopy(view.nodes_export)
+    result = dispatch("search", {"root_handle": "[ap:LINES01]", "query": "hit", "context_lines": 0})
+    assert result.index("hit ROOT &lt;") < result.index("hit A") < result.index("hit C")
+    assert "hit B" not in result
+    assert "hit OUT" not in result
+    assert "Source: pinned operation cache (root and all descendants; completed nodes hidden by default — 1 completed hidden; suppressed nodes and child Docks included; include_completed=true searches them too)." in result
+    assert client._cache_view_publisher.capture() is view
+    assert view.nodes_export == before
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+    client.create_node.assert_not_awaited()
+    client._adopt_coherence_head.assert_awaited_once()
+
+
+def test_search_subtree_include_completed_restores_completed(monkeypatch):
+    client_for(monkeypatch, nodes=subtree())
+    result = dispatch("search", {"root_handle": "[ap:LINES01]", "query": "hit", "context_lines": 0, "include_completed": True})
+    assert result.index("hit ROOT &lt;") < result.index("hit A") < result.index("hit C") < result.index("hit B")
+    assert "Source: pinned operation cache (root and all descendants, including completed/suppressed nodes and child Docks)." in result
+
+
+def test_subtree_completed_parent_hides_its_descendants_and_counts_them(monkeypatch):
+    client_for(monkeypatch, nodes=subtree_deep())
+    result = dispatch("search", {"root_handle": ROOT, "query": "hit", "context_lines": 0})
+    assert "hit child" not in result
+    assert "hit parent" not in result
+    assert "hit suppressed" in result  # suppressed-but-live stays a document
+    assert "1 completed hidden, 1 descendant of a completed node" in result
+    full = dispatch("search", {"root_handle": ROOT, "query": "hit", "context_lines": 0, "include_completed": True})
+    assert "hit parent" in full and "hit child" in full
+
+
+def test_completed_root_is_still_searched_and_hides_nothing(monkeypatch):
+    nodes = [
+        {"id": ROOT, "name": NAME, "note": "hit root", "parent_id": None, "completed": True},
+        {"id": A, "name": "live child", "note": "hit child", "parent_id": ROOT},
+    ]
+    client_for(monkeypatch, nodes=nodes)
+    result = dispatch("search", {"root_handle": ROOT, "query": "hit", "context_lines": 0})
+    assert "hit root" in result and "hit child" in result
+    # No hidden counts: the root is exempt and nothing was skipped.
+    assert "completed hidden" not in result
+
+
+@pytest.mark.parametrize("pattern,ids_hidden,ids_full", [
+    ("*Spec*", [ROOT, C], [ROOT, C, B]),
+    ("spec", [ROOT, C], [ROOT, C, B]),
+    ("[ap:*", [ROOT, C], [ROOT, C]),
+    ("*Spec ?*", [C], [C, B]),
+    ("absent", [], []),
+])
+def test_name_filter_never_prunes_nonmatching_ancestors(monkeypatch, pattern, ids_hidden, ids_full):
+    client_for(monkeypatch, nodes=subtree())
+    result = dispatch("search", {"root_handle": ROOT, "name_filter": pattern, "query": "hit", "context_lines": 0})
+    for node_id in [ROOT, A, B, C, OUT]:
+        assert (f"lines in {node_id}" in result) is (node_id in ids_hidden)
+    full = dispatch("search", {"root_handle": ROOT, "name_filter": pattern, "query": "hit", "context_lines": 0, "include_completed": True})
+    for node_id in [ROOT, A, B, C, OUT]:
+        assert (f"lines in {node_id}" in full) is (node_id in ids_full)
+
+
+@pytest.mark.parametrize("cap,truncated,count", [(1, True, 1), (2, True, 2), (3, False, 3), (200, False, 3)])
+def test_global_matched_line_cap_and_truthful_truncation(monkeypatch, cap, truncated, count):
+    client_for(monkeypatch, nodes=subtree())
+    result = dispatch("search", {"root_handle": ROOT, "query": "hit", "max_matches": cap, "context_lines": 0})
+    assert len(numbered_rows(result)) == count
+    assert ("Truncated at" in result) is truncated
+    assert ("PAGINATION ACTIVE" in result) is truncated
+    assert page_metadata(result) == (0, count, truncated, count if truncated else None)
+    if truncated:
+        assert result.splitlines()[0].startswith("INFORMATIONAL, CRITICAL DETAIL: PAGINATION ACTIVE.")
+        assert f"keep paging: offset={count}" in result
+
+
+@pytest.mark.parametrize("changes,code", [
+    ({"node_handle": None}, "invalid_parameter_type"),
+    ({"root_handle": ROOT}, "invalid_parameter_combination"),
+    ({"node_handle": ""}, "invalid_parameter_type"),
+    ({"name_filter": "*Spec*"}, "invalid_parameter_combination"),
+    ({"query": ""}, "invalid_query"),
+    ({"query": "[", "is_regex": True}, "invalid_query"),
+    ({"context_lines": -1}, "invalid_parameter_value"),
+    ({"context_lines": 11}, "invalid_parameter_value"),
+    ({"context_width": -1}, "invalid_parameter_value"),
+    ({"context_width": True}, "invalid_parameter_type"),
+    ({"context_width": 1.5}, "invalid_parameter_type"),
+    ({"context_width": "160"}, "invalid_parameter_type"),
+    ({"match_width": -1}, "invalid_parameter_value"),
+    ({"match_width": True}, "invalid_parameter_type"),
+    ({"match_width": 1.5}, "invalid_parameter_type"),
+    ({"match_width": "1000"}, "invalid_parameter_type"),
+    ({"max_matches": 0}, "invalid_parameter_value"),
+    ({"max_matches": 201}, "invalid_parameter_value"),
+    ({"max_matches": True}, "invalid_parameter_type"),
+    ({"offset": -1}, "invalid_parameter_value"),
+    ({"offset": True}, "invalid_parameter_type"),
+    ({"offset": 1.5}, "invalid_parameter_type"),
+    ({"offset": "1"}, "invalid_parameter_type"),
+    ({"offset": None}, "invalid_parameter_type"),
+    ({"is_regex": "yes"}, "invalid_parameter_type"),
+    ({"case_sensitive": None}, "invalid_parameter_type"),
+    ({"include_completed": "yes"}, "invalid_parameter_type"),
+    ({"include_completed": True}, "invalid_parameter_combination"),
+])
+def test_search_validation_before_get(monkeypatch, changes, code):
+    client = client_for(monkeypatch)
+    result = dispatch("search", {"node_handle": ROOT, "query": "x", **changes})
+    assert result["error"]["code"] == code
+    client.get_node.assert_not_awaited()
+
+
+def test_missing_scope_and_query_are_loud(monkeypatch):
+    client_for(monkeypatch)
+    assert dispatch("search", {"query": "x"})["error"]["code"] == "invalid_parameter_combination"
+    assert dispatch("search", {"node_handle": ROOT})["error"]["code"] == "missing_parameter"
+
+
+@pytest.mark.parametrize("verb,params", [
+    ("read", {"node_handle": ROOT, "limit": 2, "with_line_numbers": True}),
+    ("search", {"node_handle": ROOT, "query": "two"}),
+    ("search", {"root_handle": ROOT, "query": "STALE"}),
+    ("search", {"node_handle": ROOT, "query": "o", "offset": 1, "max_matches": 1}),
+    ("search", {"root_handle": ROOT, "query": "STALE", "offset": 1}),
+])
+def test_existing_coherence_advisory_is_preserved_once(monkeypatch, verb, params):
+    client_for(monkeypatch, status=s04_boundary_status(hard_dirty=True, hard_generation=7))
+    result = dispatch(verb, params)
+    assert result.startswith(COHERENCE_READ_ADVISORY_LINE)
+    assert result.count(COHERENCE_READ_ADVISORY_LINE) == 1
+    if verb == "read":
+        assert result.endswith("1 | one\n2 | two")
+
+
+@pytest.mark.parametrize("offset", [0, 1, 200])
+def test_search_without_boundary_fails_closed(monkeypatch, offset):
+    client_for(monkeypatch)
+    with pytest.raises(CacheViewError):
+        asyncio.run(server._node_search_impl("x", root_handle=ROOT, offset=offset))
+
+
+@pytest.mark.parametrize("offset", [0, 1])
+def test_cache_publication_during_resolution_cannot_change_search_generation(monkeypatch, offset):
+    from workflowy_mcp.coherence.cache_view import CacheView
+    client = client_for(monkeypatch, nodes=subtree())
+    original = client._cache_view_publisher.capture()
+    next_view = CacheView.build(
+        epoch_number=original.epoch_number, epoch_id=original.epoch_id,
+        adopted_sequence=1, nodes_export={"nodes": [{"id": ROOT, "name": NAME, "note": "NEW GENERATION", "parent_id": None}]},
+    )
+    resolver = server._resolve_generic_node_handle
+    async def resolving(handle, **kwargs):
+        resolved = await resolver(handle, **kwargs)
+        # Simulate a publisher advancing elsewhere, not a write by the search.
+        monkeypatch.setattr(client._cache_view_publisher, "capture", lambda: next_view)
+        return resolved
+    monkeypatch.setattr(server, "_resolve_generic_node_handle", resolving)
+    result = dispatch("search", {"root_handle": ROOT, "query": "hit", "context_lines": 0, "offset": offset})
+    assert ("hit ROOT" in result) is (offset == 0)
+    assert "hit C" in result
+    assert "NEW GENERATION" not in result
+    client._adopt_coherence_head.assert_awaited_once()
+
+
+def test_search_registry_contract_and_exact_unpack(monkeypatch):
+    impl = AsyncMock(return_value="grep report")
+    monkeypatch.setattr(server, "_node_search_impl", impl)
+    params = {"root_handle": ROOT, "name_filter": "*Spec*", "query": "^test", "is_regex": True, "case_sensitive": True, "context_lines": 10, "max_matches": 200, "offset": 400, "context_width": 80, "match_width": 40}
+    assert asyncio.run(dispatch_operation(server.build_node_registry(), "search", params)) == "grep report"
+    impl.assert_awaited_once_with("^test", node_handle=None, root_handle=ROOT, name_filter="*Spec*", is_regex=True, case_sensitive=True, context_lines=10, max_matches=200, offset=400, include_completed=False, context_width=80, match_width=40, sort_by=None, sort_direction=None, recent=None, recent_by=None, max_nodes=None)
+    spec = server.build_node_registry().resolve("search")
+    assert spec.cache_backed and spec.side_effects == ("pure_read",) and spec.async_mode == "never"
+    assert mutation_admission_class(spec.canonical_name, spec.side_effects, spec.cache_backed) == "proceed"
+    for example in spec.examples:
+        validate_params(spec, dict(example["call"]["params"]))
+
+
+def test_top_level_tools_and_describe_disclose_node_as_file_without_extra_call():
+    tools = {tool.name: tool for tool in asyncio.run(server.mcp.list_tools())}
+    for family in ("node", "anchor"):
+        text = tools[family].description
+        assert "Anchor Point" in text
+        assert "offset" in text and "limit" in text and "with_line_numbers" in text
+        assert "grep" in text and "node.edit" in text
+    assert "search —" in tools["node"].description
+    registry = server.build_node_registry()
+    read = registry.describe_full("read")
+    search = registry.describe_full("search")
+    assert {"offset", "limit", "with_line_numbers"} <= read["params_schema"]["properties"].keys()
+    assert {"query", "is_regex", "case_sensitive", "context_lines", "context_width", "match_width", "max_matches", "offset", "include_completed"} <= search["params_schema"]["properties"].keys()
+    assert search["params_schema"]["properties"]["context_width"]["default"] == 160
+    assert search["params_schema"]["properties"]["match_width"]["default"] == 1000
+    assert "null" in search["params_schema"]["properties"]["match_width"]["type"]
+    assert "PAGINATION BANNER" in search["returns"]["description"]
+    assert "include_completed" in search["returns"]["description"]
+    offset = search["params_schema"]["properties"]["offset"]
+    assert offset["type"] == "integer" and offset["minimum"] == 0 and offset["default"] == 0
+    assert "maximum" not in offset
+    assert "next_offset" in search["returns"]["description"]
+    assert "has_more" in tools["node"].description
+    assert "line windows" in registry.describe_index()["summary"]
+
+
+def test_empty_and_trailing_terminator_line_authority():
+    assert split_note_lines("") == []
+    assert split_note_lines("a\n") == ["a"]
+    assert split_note_lines("a\n\n") == ["a", ""]
+
+
+def page_metadata(report):
+    match = re.search(
+        r"^Pagination: offset=(\d+); returned_matches=(\d+); returned_occurrences=(\d+); "
+        r"has_more=(true|false); next_offset=(\d+|null)\.$", report, re.MULTILINE,
+    )
+    assert match, report
+    offset, count, _occurrences, more, next_offset = match.groups()
+    return int(offset), int(count), more == "true", None if next_offset == "null" else int(next_offset)
+
+
+def page_occurrences(report):
+    match = re.search(r"^Pagination: .*?returned_occurrences=(\d+);", report, re.MULTILINE)
+    assert match, report
+    return int(match.group(1))
+
+
+def numbered_rows(report):
+    """Displayed grep rows (hits and context) as 1-based numbers."""
+    return [
+        int(row.split("|")[0]) for row in report.splitlines()
+        if re.match(r"^\s*\d+ \| ", row)
+    ]
+
+
+def span_finder(token: str, *, case_sensitive: bool = False):
+    pattern = re.compile(re.escape(token), 0 if case_sensitive else re.IGNORECASE)
+    return lambda line: [match.span() for match in pattern.finditer(line)]
+
+
+def regex_span_finder(pattern: str):
+    compiled = re.compile(pattern, re.IGNORECASE)
+    return lambda line: [match.span() for match in compiled.finditer(line)]
+
+
+def marked_numbers(report):
+    return [int(row.split("|")[0][2:]) for row in report.splitlines() if row.startswith("> ")]
+
+
+@pytest.mark.parametrize("query,extra", [("hit", {}), (r"^hit .*hit$", {"is_regex": True})])
+def test_page_through_more_than_200_live_matches(monkeypatch, query, extra):
+    # Repeated occurrences, context and CRLF do not consume match offsets.
+    note = "\r\n".join(f"gap {n}\r\nhit {n} 📊 &lt; hit" for n in range(451)) + "\r\n"
+    client = client_for(monkeypatch, note)
+    view = client._cache_view_publisher.capture()
+    offset, numbers, sizes = 0, [], []
+    while offset is not None:
+        result = dispatch("search", {
+            "node_handle": "[ap:LINES01]", "query": query,
+            "max_matches": 200, "offset": offset, "context_lines": 1, **extra,
+        })
+        actual_offset, count, more, next_offset = page_metadata(result)
+        assert actual_offset == offset
+        page_numbers = marked_numbers(result)
+        assert len(page_numbers) == count
+        assert more is (next_offset is not None)
+        if more:
+            assert next_offset == offset + count
+            assert f"Repeat the same search with offset={next_offset}" in result
+        numbers.extend(page_numbers)
+        sizes.append(count)
+        assert len(sizes) <= 3  # Fail loudly rather than loop on a broken cursor.
+        offset = next_offset
+    assert sizes == [200, 200, 51]
+    assert numbers == list(range(2, 903, 2))
+    assert client.get_node.await_count == client._adopt_coherence_head.await_count == 3
+    assert client._cache_view_publisher.capture() is view
+    client.update_node.assert_not_awaited()
+    client.create_node.assert_not_awaited()
+    assert current_operation_cache(required=False) is None
+
+
+def test_default_page_size_and_explicit_zero_parity(monkeypatch):
+    client_for(monkeypatch, "\n".join("hit" for _ in range(51)))
+    params = {"node_handle": ROOT, "query": "hit", "context_lines": 0}
+    implicit = dispatch("search", params)
+    assert implicit == dispatch("search", {**params, "offset": 0})
+    assert page_metadata(implicit) == (0, 50, True, 50)
+    last = dispatch("search", {**params, "offset": 50})
+    assert numbered_rows(last) == [51]
+    assert page_metadata(last) == (50, 1, False, None)
+
+
+@pytest.mark.parametrize("include_completed,offset,expected,more,next_offset", [
+    (False, 0, [ROOT, A], True, 2),
+    (False, 1, [A, C], False, None),
+    (False, 2, [C], False, None),
+    (False, 3, [], False, None),
+    (False, 2**70, [], False, None),
+    (True, 0, [ROOT, A], True, 2),
+    (True, 1, [A, C], True, 3),
+    (True, 2, [C, B], False, None),
+    (True, 3, [B], False, None),
+    (True, 4, [], False, None),
+    (True, 2**70, [], False, None),
+])
+def test_subtree_page_global_order_end_and_no_publication(monkeypatch, include_completed, offset, expected, more, next_offset):
+    client = client_for(monkeypatch, nodes=subtree())
+    view = client._cache_view_publisher.capture()
+    before = copy.deepcopy(view.nodes_export)
+    result = dispatch("search", {
+        "root_handle": ROOT, "query": "hit", "offset": offset,
+        "max_matches": 2, "context_lines": 0, "include_completed": include_completed,
+    })
+    ids = re.findall(r"^Matched \d+ lines in ([\w-]+) ", result, re.MULTILINE)
+    assert ids == expected
+    assert page_metadata(result) == (offset, len(expected), more, next_offset)
+    assert ("PAGINATION ACTIVE" in result.split("Source:")[0]) is more
+    if not expected:
+        assert f"No matching note lines at or after offset={offset}." in result
+    assert client._cache_view_publisher.capture() is view
+    assert view.nodes_export == before
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+    client.create_node.assert_not_awaited()
+    client._adopt_coherence_head.assert_awaited_once()
+
+
+def test_offset_applies_after_name_filter_without_pruning_children(monkeypatch):
+    client_for(monkeypatch, nodes=subtree())
+    result = dispatch("search", {
+        "root_handle": ROOT, "query": "hit", "name_filter": "*Spec*",
+        "offset": 1, "max_matches": 1, "context_lines": 0,
+    })
+    assert re.findall(r"^Matched \d+ lines in ([\w-]+) ", result, re.MULTILINE) == [C]
+    assert page_metadata(result) == (1, 1, False, None)
+    full = dispatch("search", {
+        "root_handle": ROOT, "query": "hit", "name_filter": "*Spec*",
+        "offset": 1, "max_matches": 1, "context_lines": 0, "include_completed": True,
+    })
+    assert re.findall(r"^Matched \d+ lines in ([\w-]+) ", full, re.MULTILINE) == [C]
+    assert page_metadata(full) == (1, 1, True, 2)
+
+
+def test_context_across_page_boundaries_marks_only_current_hits(monkeypatch):
+    client_for(monkeypatch, "hit one\nhit two\nhit three\nhit four\n")
+    result = dispatch("search", {
+        "node_handle": ROOT, "query": "hit", "offset": 1,
+        "max_matches": 2, "context_lines": 1,
+    })
+    assert "  1 | hit one\n> 2 | hit two\n> 3 | hit three\n  4 | hit four" in result
+    assert marked_numbers(result) == [2, 3]
+    assert page_metadata(result) == (1, 2, True, 3)
+
+
+@pytest.mark.parametrize("offset", [0, 5])
+def test_empty_search_page_has_explicit_terminal_metadata(monkeypatch, offset):
+    client_for(monkeypatch, "")
+    result = dispatch("search", {"node_handle": ROOT, "query": "hit", "offset": offset})
+    assert "No matching note lines" in result
+    assert page_metadata(result) == (offset, 0, False, None)
+
+
+def test_pure_pager_stops_at_one_extra_hit_without_consuming_remaining_documents():
+    visited = []
+    def documents():
+        yield ROOT, NAME, "hit skipped\nno\nhit selected"
+        yield A, "next document", "gap\nhit lookahead\nnot scanned"
+        raise AssertionError("must stop without consuming another document")
+    def matches(line):
+        visited.append(line)
+        return [(0, 3)] if "hit" in line else []
+    result = search_note_documents(documents(), matches, offset=1, max_matches=1, context_lines=0)
+    assert visited == ["hit skipped", "no", "hit selected", "gap", "hit lookahead"]
+    assert page_metadata(result) == (1, 1, True, 2)
+    assert numbered_rows(result) == [3]
+    assert f"lines in {A}" not in result
+    assert result.splitlines()[0].startswith("INFORMATIONAL, CRITICAL DETAIL: PAGINATION ACTIVE.")
+
+
+def test_pagination_banner_opens_truncated_pages_and_is_absent_on_a_single_page():
+    documents = lambda: iter([("u1", "one", "hit\nhit")])
+    report = search_note_documents(documents(), span_finder("hit"), context_lines=0, max_matches=1, offset=0)
+    assert report.splitlines()[0] == (
+        "INFORMATIONAL, CRITICAL DETAIL: PAGINATION ACTIVE. DO NOT IGNORE. "
+        "These results are page 1 (matches 1-1); more exist. If you need the full set, "
+        "keep paging: offset=1 (see the bottom for paging details)."
+    )
+    single = search_note_documents(documents(), span_finder("hit"), context_lines=0, max_matches=5, offset=0)
+    assert "PAGINATION ACTIVE" not in single
+    assert single.splitlines()[0].startswith("Matched")
+
+
+def test_pagination_banner_names_even_pages_only():
+    lines = "\n".join(f"hit {n}" for n in range(1, 31))
+    even = search_note_documents([("u", "n", lines)], span_finder("hit"), context_lines=0, max_matches=10, offset=10)
+    assert "These results are page 2 (matches 11-20); more exist." in even
+    assert "keep paging: offset=20" in even
+    ragged = search_note_documents([("u", "n", lines)], span_finder("hit"), context_lines=0, max_matches=7, offset=10)
+    assert "These results are matches 11-17; more exist." in ragged
+
+
+def test_header_line_sits_below_the_banner_and_above_the_body():
+    def report_for(**kwargs):
+        return search_note_documents(
+            iter([("u", "n", "hit\nhit")]), span_finder("hit"),
+            context_lines=0, **kwargs,
+        )
+    paged = report_for(header_line="Source: test.", max_matches=1)
+    rows = paged.splitlines()
+    assert rows[0].startswith("INFORMATIONAL, CRITICAL DETAIL: PAGINATION ACTIVE.")
+    assert rows[2] == "Source: test."
+    assert "Matched 1 lines in u" in paged
+    assert paged.index("Source: test.") < paged.index("Matched 1 lines")
+    single = report_for(header_line="Source: test.", max_matches=5)
+    assert single.splitlines()[0] == "Source: test."
+    assert "PAGINATION ACTIVE" not in single
+
+
+def test_compact_rows_no_context_no_blank_lines():
+    note = "intro\n# Heading one\nbody text\n## Heading two\ntail"
+    report = search_note_documents(
+        [("u1", "doc one", note)], regex_span_finder(r"^#{1,6}\s"), context_lines=0, max_matches=50,
+    )
+    group, footer = report.split("\n\n")
+    assert group.splitlines() == [
+        'Matched 2 lines in u1 "doc one":',
+        "2 | # Heading one",
+        "4 | ## Heading two",
+    ]
+    assert page_metadata(footer) == (0, 2, False, None)
+    assert page_occurrences(footer) == 2
+
+
+def test_compact_groups_keep_one_header_per_node_and_blank_line_between():
+    docs = [("u1", "one", "hit a\nno\nhit b"), ("u2", "two", "also hit")]
+    report = search_note_documents(docs, span_finder("hit"), context_lines=0, max_matches=50)
+    assert report.split("\n\n") == [
+        # A bare hit list has no separators: non-adjacent hits stay back-to-back.
+        'Matched 2 lines in u1 "one":\n1 | hit a\n3 | hit b',
+        'Matched 1 lines in u2 "two":\n1 | also hit',
+        "Pagination: offset=0; returned_matches=3; returned_occurrences=3; has_more=false; next_offset=null.",
+    ]
+
+
+def test_context_rows_mark_hits_merge_windows_and_single_ellipsis():
+    note = "\n".join(f"line {n}" for n in range(1, 13))
+    report = search_note_documents(
+        [("u", "n", note)], regex_span_finder(r"^line (2|10)$"), context_lines=1, max_matches=50,
+    )
+    group, footer = report.split("\n\n")
+    assert group.splitlines() == [
+        'Matched 2 lines in u "n":',
+        "   1 | line 1",
+        ">  2 | line 2",
+        "   3 | line 3",
+        "...",
+        "   9 | line 9",
+        "> 10 | line 10",
+        "  11 | line 11",
+    ]
+    assert page_metadata(footer) == (0, 2, False, None)
+
+
+def test_adjacent_hits_share_one_window_without_ellipsis():
+    note = "hit one\nhit two\nhit three\nhit four\n"
+    report = search_note_documents(
+        [("u", "n", note)], regex_span_finder(r"hit (two|three)"), context_lines=1, max_matches=50,
+    )
+    group, _footer = report.split("\n\n")
+    assert group.splitlines() == [
+        'Matched 2 lines in u "n":',
+        "  1 | hit one",
+        "> 2 | hit two",
+        "> 3 | hit three",
+        "  4 | hit four",
+    ]
+
+
+def test_match_width_crops_long_hit_lines_centred_one_row_per_distant_match():
+    line = "A" * 600 + " NEEDLE1 " + "B" * 600 + " NEEDLE2 " + "C" * 600
+    report = search_note_documents(
+        [("u", "n", line)], span_finder("NEEDLE"), context_lines=0, max_matches=50, match_width=100,
+    )
+    group, footer = report.split("\n\n")
+    assert group.splitlines() == [
+        'Matched 1 lines in u "n":',
+        "1 | …" + line[554:654] + "…",
+        "1 | …" + line[1163:1263] + "…",
+    ]
+    assert page_occurrences(footer) == 2
+    assert page_metadata(footer) == (0, 1, False, None)
+
+
+def test_close_matches_on_a_long_line_merge_into_one_row():
+    line = "A" * 600 + " needle " + "B" * 90 + " needle " + "C" * 600
+    report = search_note_documents(
+        [("u", "n", line)], span_finder("needle"), context_lines=0, max_matches=50, match_width=100,
+    )
+    rows = report.splitlines()
+    hit_rows = [row for row in rows if row.startswith("1 | ")]
+    assert len(hit_rows) == 1  # overlapping windows merge: one row, both matches
+    assert hit_rows[0].count("needle") == 2
+    assert page_occurrences(report) == 2
+
+
+def test_match_width_null_and_zero_disable_the_crop():
+    line = "A" * 1200 + " needle"
+    for match_width in (None, 0):
+        report = search_note_documents(
+            [("u", "n", line)], span_finder("needle"), context_lines=0, max_matches=50, match_width=match_width,
+        )
+        assert f"1 | {line}" in report
+
+
+def test_context_width_crops_context_rows_only():
+    long_context = "C" * 400
+    note = long_context + "\nshort hit\n" + long_context
+    report = search_note_documents(
+        [("u", "n", note)], span_finder("hit"), context_lines=1, max_matches=50, context_width=10,
+    )
+    group, _footer = report.split("\n\n")
+    assert group.splitlines() == [
+        'Matched 1 lines in u "n":',
+        "  1 | " + "C" * 10 + "…",
+        "> 2 | short hit",
+        "  3 | " + "C" * 10 + "…",
+    ]
+    whole = search_note_documents(
+        [("u", "n", note)], span_finder("hit"), context_lines=1, max_matches=50, context_width=None,
+    )
+    assert f"  1 | {long_context}" in whole
+    assert "> 2 | short hit" in whole
+
+
+def test_width_parameters_accept_null_and_zero(monkeypatch):
+    client_for(monkeypatch, "hit\n")
+    for kwargs in (
+        {"context_width": None}, {"context_width": 0},
+        {"match_width": None}, {"match_width": 0},
+        {"context_width": None, "match_width": None},
+    ):
+        result = dispatch("search", {"node_handle": ROOT, "query": "hit", "context_lines": 1, **kwargs})
+        assert "> 1 | hit" in result
+
+
+def test_compile_note_query_returns_match_spans():
+    from workflowy_mcp.note_lines import compile_note_query
+    find = compile_note_query("hit", is_regex=False, case_sensitive=False)
+    assert find("a hit, HIT!") == [(2, 5), (7, 10)]
+    assert find("nothing") == []
+    sensitive = compile_note_query("hit", is_regex=False, case_sensitive=True)
+    assert sensitive("a hit, HIT!") == [(2, 5)]
+    anchored = compile_note_query(r"^hit$", is_regex=True, case_sensitive=False)
+    assert anchored("hit") == [(0, 3)]
+    assert anchored("a hit") == []
+    empty_line = compile_note_query(r"^$", is_regex=True, case_sensitive=False)
+    assert empty_line("") == [(0, 0)]
+
+
+def test_heading_outline_search_returns_compact_rows(monkeypatch):
+    note = "\n".join([
+        "intro", "# 🛰️ MANAGER SESSIONS — the human side", "text",
+        "## What lives here", "more", "## Canonical anchor points",
+    ])
+    client_for(monkeypatch, note)
+    result = dispatch("search", {"node_handle": ROOT, "query": "^#{1,6}\\s", "is_regex": True, "context_lines": 0})
+    source, group, footer = result.split("\n\n")
+    assert source == "Source: live node note."
+    assert group.splitlines() == [
+        f'Matched 3 lines in {ROOT} "{NAME}":',
+        "2 | # 🛰️ MANAGER SESSIONS — the human side",
+        "4 | ## What lives here",
+        "6 | ## Canonical anchor points",
+    ]
+    assert page_metadata(footer) == (0, 3, False, None)
+
+
+def test_each_page_reads_live_source_again_without_retaining_snapshot(monkeypatch):
+    client = client_for(monkeypatch, "hit A\nhit B")
+    params = {"node_handle": ROOT, "query": "hit", "max_matches": 1, "context_lines": 0}
+    first = dispatch("search", params)
+    assert page_metadata(first) == (0, 1, True, 1)
+    # Inserting a hit before the previous page shifts positions by design.
+    client.get_node.return_value = WorkFlowyNode(id=ROOT, name=NAME, note="hit NEW\nhit A\nhit B")
+    second = dispatch("search", {**params, "offset": 1})
+    assert "2 | hit A" in second
+    assert page_metadata(second) == (1, 1, True, 2)
+    assert client.get_node.await_count == client._adopt_coherence_head.await_count == 2
+    assert current_operation_cache(required=False) is None
+
+
+def test_each_subtree_page_adopts_current_view_without_retaining_prior_view(monkeypatch):
+    from workflowy_mcp.coherence.cache_view import CacheView
+    client = client_for(monkeypatch, nodes=subtree())
+    params = {"root_handle": ROOT, "query": "hit", "max_matches": 1, "context_lines": 0}
+    assert page_metadata(dispatch("search", params)) == (0, 1, True, 1)
+    original = client._cache_view_publisher.capture()
+    changed = subtree()
+    changed[2]["note"] = "hit NEW A"
+    next_view = CacheView.build(
+        epoch_number=original.epoch_number, epoch_id=original.epoch_id,
+        adopted_sequence=1, nodes_export={"nodes": changed},
+    )
+    # Simulate another operation's publication, never mutate the pinned map.
+    monkeypatch.setattr(client._cache_view_publisher, "capture", lambda: next_view)
+    second = dispatch("search", {**params, "offset": 1})
+    assert "1 | hit NEW A" in second
+    assert page_metadata(second) == (1, 1, True, 2)
+    assert client._adopt_coherence_head.await_count == 2
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+    assert current_operation_cache(required=False) is None
+
+
+# ---------------------------------------------------------------------------
+# [ap:47B7WO] formatter contract for the grep tiers: D6 marker documents and
+# the collect out-param. node.search never produces markers; sift's grep tier
+# and anchor.search do.
+# ---------------------------------------------------------------------------
+
+def test_marker_document_reports_header_alone_and_counts_zero_lines():
+    matcher = span_finder("needle")
+    documents = [
+        ("u1", "Has note hit", "before\nneedle line\nafter"),
+        ("u2", "Title only", "", "(title match)"),
+        ("u3", "Spanned", "alpha\nbeta", "(match spans lines)"),
+    ]
+    report = search_note_documents(
+        documents, matcher, context_lines=0, max_matches=50,
+    )
+    assert "Matched 1 lines in u1" in report
+    assert 'Matched 0 lines in u2 "Title only" (title match):' in report
+    assert 'Matched 0 lines in u3 "Spanned" (match spans lines):' in report
+    # Marker groups carry no rows; the hitting group does.
+    assert numbered_rows(report) == [2]
+    # Marker nodes count zero lines for paging.
+    assert page_metadata(report) == (0, 1, False, None)
+
+
+def test_marker_only_documents_skip_the_zero_match_section():
+    matcher = span_finder("needle")
+    report = search_note_documents(
+        [("u1", "Title only", "", "(title match)")],
+        matcher, context_lines=0, max_matches=50,
+    )
+    assert "(title match)" in report
+    assert "No matching note lines." not in report
+
+
+def test_collect_out_param_reports_page_facts_and_changes_nothing():
+    matcher = span_finder("hit")
+    documents = [("u1", "N", "hit one\nhit two"), ("u2", "M", "hit three")]
+    plain = search_note_documents(
+        documents, matcher, context_lines=0, max_matches=2,
+    )
+    collected: dict = {}
+    with_collect = search_note_documents(
+        documents, matcher, context_lines=0, max_matches=2, collect=collected,
+    )
+    assert with_collect == plain  # collect is an out-param, never a shape change
+    assert collected == {
+        "has_more": True,
+        "next_offset": 2,
+        "returned_matches": 2,
+        "returned_occurrences": 2,
+    }
+    complete: dict = {}
+    search_note_documents(
+        documents, matcher, context_lines=0, max_matches=50, collect=complete,
+    )
+    assert complete == {
+        "has_more": False,
+        "next_offset": None,
+        "returned_matches": 3,
+        "returned_occurrences": 3,
+    }

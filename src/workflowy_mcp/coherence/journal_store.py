@@ -1,0 +1,657 @@
+"""Physical journal and manifest publication protocol (S01 §9).
+
+Crash-recoverable append protocol (not merely mutex-logical):
+
+1. read and strictly validate manifest/account;
+2. validate the committed journal range ``floor..head`` is contiguous and
+   readable (a manifest whose active range contains a missing/malformed
+   record fails closed and is NEVER auto-healed);
+3. run deterministic above-head orphan recovery;
+4. allocate ``next_sequence = manifest.journal_head_seq + 1``;
+5. finalize/validate the immutable record (``previous_sequence == old
+   head``, ``published_epoch_id == current epoch``);
+6. durably write the complete immutable record file;
+7. only after record durability, atomically replace the manifest with the
+   advanced head;
+8. return the committed record and new manifest.
+
+The manifest may NEVER point past a missing or partial record.  If record
+publication succeeds but manifest publication fails,
+``JournalPublicationError`` is raised and the valid above-head record
+remains as recoverable evidence (adopted by a later locked open).
+
+Recovery authority ranking (audit amendment F2): account identity, global
+sequence contiguity, ``previous_sequence`` chaining, the base incorporation
+watermark, and record schema validity are the LOAD-BEARING validation;
+``published_epoch_id`` is publication-time provenance consulted only
+through the lineage rule.  S02's epoch-cut publication is implementable
+WITHOUT amending this protocol and WITHOUT any caller-side lineage input:
+the epoch publisher records the predecessor in the manifest's durable
+``previous_epoch_id`` field at each cut, and the manifest is the SOLE
+lineage authority (no caller whitelist exists).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .durable_io import DurableFileOps, atomic_write_json_durable
+from .effects import (
+    ApplicationMode,
+    SemanticEffect,
+    effect_from_dict,
+    validate_transaction_effects,
+)
+from .errors import (
+    CoherenceAccountMismatchError,
+    CoherenceError,
+    CoherenceSchemaError,
+    EffectValidationError,
+    JournalIntegrityError,
+    JournalPublicationError,
+)
+from .paths import (
+    CoherencePaths,
+    _coherence_lock_for,
+    journal_record_filename,
+    parse_journal_record_filename,
+)
+from .schema import (
+    CoherenceManifest,
+    JournalProducer,
+    JournalTransaction,
+    VerificationEvidence,
+    manifest_with_updates,
+    new_transaction_id,
+    read_manifest,
+    utc_now,
+    write_manifest,
+)
+
+# ---------------------------------------------------------------------------
+# Record IO
+# ---------------------------------------------------------------------------
+
+
+def _read_record_file(path: Path, paths: CoherencePaths) -> JournalTransaction:
+    """Read and strictly validate one journal record file."""
+
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except JournalIntegrityError:
+        raise
+    except Exception as exc:
+        raise JournalIntegrityError(
+            f"journal record unreadable/malformed: {exc}", path=path
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise JournalIntegrityError(
+            "journal record must contain a JSON object", path=path
+        )
+    try:
+        record = JournalTransaction.from_dict(payload, effect_decoder=effect_from_dict, path=path)
+    except CoherenceError as exc:
+        # A7: EVERY typed invalid-record failure (malformed schema, unknown
+        # version, invalid effect payload/version) normalizes into journal
+        # integrity handling, with the root cause preserved in the message
+        # and exception chain.
+        raise JournalIntegrityError(
+            f"journal record invalid ({type(exc).__name__}): {exc}", path=path
+        ) from exc
+    except (TypeError, ValueError, KeyError, AttributeError) as exc:
+        # R3: malformed record SHAPES (scalar/list/null nested entries) can
+        # raise raw Python errors before a typed coherence error exists;
+        # they normalize identically.  Process-control exceptions
+        # (KeyboardInterrupt/SystemExit) are deliberately NOT caught.
+        raise JournalIntegrityError(
+            f"journal record malformed ({type(exc).__name__}): {exc}", path=path
+        ) from exc
+    filename_seq = parse_journal_record_filename(path.name)
+    if filename_seq is None or filename_seq != record.sequence:
+        raise JournalIntegrityError(
+            f"journal record filename/sequence mismatch: {path.name} vs {record.sequence}",
+            path=path,
+            sequence=record.sequence,
+        )
+    return record
+
+
+def _epoch_lineage_valid(
+    record: JournalTransaction,
+    manifest: CoherenceManifest,
+) -> bool:
+    """The lineage rule (F2): the record names the current epoch, or — after
+    an S02 epoch cut — the manifest's DURABLE ``previous_epoch_id`` while the
+    record's sequence lies above the new base incorporation watermark.
+
+    The manifest is the ONLY lineage authority (audit residual R2): no
+    caller-supplied whitelist can bless a foreign epoch.
+    """
+
+    if record.published_epoch_id == manifest.epoch_id:
+        return True
+    return bool(
+        manifest.previous_epoch_id
+        and record.sequence > manifest.base_incorporated_through_seq
+        and record.published_epoch_id == manifest.previous_epoch_id
+    )
+
+
+def _validate_record_against_manifest(
+    record: JournalTransaction,
+    manifest: CoherenceManifest,
+    *,
+    path: Path,
+) -> None:
+    if record.account_scope_id != manifest.account_scope_id:
+        raise CoherenceAccountMismatchError(
+            "journal record belongs to another account scope",
+            path=path,
+            account_scope_id=manifest.account_scope_id,
+            epoch_id=record.published_epoch_id,
+            sequence=record.sequence,
+        )
+    if record.previous_sequence != record.sequence - 1:  # schema already enforces; belt-and-suspenders
+        raise JournalIntegrityError(
+            "journal record predecessor chain broken", path=path, sequence=record.sequence
+        )
+    if not _epoch_lineage_valid(record, manifest):
+        raise JournalIntegrityError(
+            f"journal record names lineage-invalid epoch {record.published_epoch_id!r}",
+            path=path,
+            epoch_id=record.published_epoch_id,
+            sequence=record.sequence,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Committed-range validation and orphan recovery
+# ---------------------------------------------------------------------------
+
+
+def _validate_committed_range(
+    paths: CoherencePaths,
+    manifest: CoherenceManifest,
+) -> None:
+    """Every record in the ACTIVE range floor..head must exist, parse, chain,
+    and match account/lineage.  Fail closed; never auto-heal."""
+
+    for sequence in range(manifest.journal_floor_seq, manifest.journal_head_seq + 1):
+        path = paths.journal_dir / journal_record_filename(sequence)
+        if not path.exists():
+            raise JournalIntegrityError(
+                "manifest points at a missing committed journal record",
+                path=path,
+                epoch_id=manifest.epoch_id,
+                sequence=sequence,
+            )
+        record = _read_record_file(path, paths)
+        _validate_record_against_manifest(record, manifest, path=path)
+
+
+def _quarantine(path: Path, paths: CoherencePaths, *, reason: str) -> Path:
+    """Atomically move corrupt evidence to quarantine.  Quarantine is not
+    deletion and never converts corrupt state into a claim of coherence."""
+
+    paths.quarantine_dir.mkdir(parents=True, exist_ok=True)
+    stamp = utc_now().replace(":", "").replace("-", "").replace("+", "p")
+    target = paths.quarantine_dir / f"quarantined-{stamp}-{path.name}"
+    counter = 0
+    while target.exists():
+        counter += 1
+        target = paths.quarantine_dir / f"quarantined-{stamp}-{counter}-{path.name}"
+    os.replace(path, target)
+    return target
+
+
+# @beacon[
+#   id=auto-beacon@_recover_orphans_locked-gvon,
+#   role=_recover_orphans_locked,
+#   slice_labels=mci-journal-tail,
+#   kind=ast,
+# ]
+def _recover_orphans_locked(
+    paths: CoherencePaths,
+    manifest: CoherenceManifest,
+    *,
+    fs_ops: DurableFileOps | None,
+) -> CoherenceManifest:
+    """Deterministic above-head recovery (§9.3).
+
+    A single valid record at exactly ``head + 1`` (right account, chained,
+    lineage-valid epoch) is ADOPTED by advancing the manifest head; recovery
+    repeats for a strictly contiguous valid tail.  Any gap, wrong account,
+    lineage-invalid epoch, malformed/unknown-version record, or predecessor
+    mismatch is quarantined and raises ``JournalIntegrityError``.
+    """
+
+    current = manifest
+    while True:
+        head = current.journal_head_seq
+        above: list[tuple[int, Path]] = []
+        seen_sequences: dict[int, Path] = {}
+        duplicate_sequences: list[tuple[int, Path]] = []
+        if paths.journal_dir.exists():
+            for entry in paths.journal_dir.iterdir():
+                sequence = parse_journal_record_filename(entry.name)
+                if sequence is None:
+                    continue
+                if sequence in seen_sequences:
+                    duplicate_sequences.append((sequence, entry))
+                    continue
+                seen_sequences[sequence] = entry
+                if sequence > head:
+                    above.append((sequence, entry))
+        if duplicate_sequences:
+            sequence, path = sorted(duplicate_sequences)[0]
+            _quarantine(path, paths, reason="duplicate_sequence_artifact")
+            raise JournalIntegrityError(
+                f"duplicate journal sequence artifact for seq {sequence}",
+                path=path,
+                epoch_id=current.epoch_id,
+                sequence=sequence,
+            )
+        if not above:
+            return current
+        above.sort(key=lambda item: item[0])
+        sequence, path = above[0]
+        if sequence != head + 1:
+            _quarantine(path, paths, reason="gap_above_head")
+            raise JournalIntegrityError(
+                f"journal gap above head: first orphan is seq {sequence}, expected {head + 1}",
+                path=path,
+                epoch_id=current.epoch_id,
+                sequence=sequence,
+            )
+        try:
+            record = _read_record_file(path, paths)
+            _validate_record_against_manifest(record, current, path=path)
+            if record.previous_sequence != head:
+                raise JournalIntegrityError(
+                    f"orphan record predecessor {record.previous_sequence} != head {head}",
+                    path=path,
+                    sequence=record.sequence,
+                )
+        except JournalIntegrityError:
+            _quarantine(path, paths, reason="invalid_orphan")
+            raise
+        except CoherenceAccountMismatchError:
+            _quarantine(path, paths, reason="wrong_account")
+            raise
+        # Adopt exactly once: advance the manifest head CAS-guarded.
+        current = write_manifest(
+            paths,
+            manifest_with_updates(current, journal_head_seq=head + 1),
+            expected_epoch_id=current.epoch_id,
+            expected_head_seq=head,
+            fs_ops=fs_ops,
+        )
+
+
+def inspect_journal(
+    paths: CoherencePaths, manifest: CoherenceManifest
+) -> dict[str, Any]:
+    """Structured journal diagnostics WITHOUT mutating state."""
+
+    present: list[int] = []
+    unparsed: list[str] = []
+    seen: dict[int, str] = {}
+    duplicates: list[int] = []
+    if paths.journal_dir.exists():
+        for entry in sorted(paths.journal_dir.iterdir()):
+            sequence = parse_journal_record_filename(entry.name)
+            if sequence is None:
+                unparsed.append(entry.name)
+            else:
+                if sequence in seen:
+                    duplicates.append(sequence)
+                else:
+                    seen[sequence] = entry.name
+                present.append(sequence)
+    present.sort()
+    floor = manifest.journal_floor_seq
+    head = manifest.journal_head_seq
+    active = [seq for seq in present if floor <= seq <= head]
+    missing = [seq for seq in range(floor, head + 1) if seq not in set(present)]
+    above_head = [seq for seq in present if seq > head]
+    below_floor = [seq for seq in present if seq < floor]
+    quarantine: list[str] = []
+    if paths.quarantine_dir.exists():
+        quarantine = sorted(entry.name for entry in paths.quarantine_dir.iterdir())
+    return {
+        "account_scope_id": manifest.account_scope_id,
+        "epoch_id": manifest.epoch_id,
+        "floor": floor,
+        "head": head,
+        "active_range_records": active,
+        "missing_in_active_range": missing,
+        "above_head": above_head,
+        "below_floor_residue": below_floor,
+        "unparsed_filenames": unparsed,
+        "duplicate_sequence_artifacts": sorted(set(duplicates)),
+        "quarantined": quarantine,
+        "contiguous_active_range": not missing,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Active-tail statistics + incorporated-record retirement (S04 §9.2/§10.7)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class JournalTailStats:
+    """Statistics over the ACTIVE replay tail (floor..head) only (S04 §9.2).
+
+    Files already incorporated at or below the base watermark are cleanup
+    residue, never active replay debt, and never count toward checkpoint
+    due state (invariant 14).
+    """
+
+    floor_seq: int
+    head_seq: int
+    record_count: int
+    total_bytes: int
+    largest_record_bytes: int
+    largest_record_sequence: int | None
+
+
+# @beacon[
+#   id=auto-beacon@inspect_active_journal_tail-qf3n,
+#   role=inspect_active_journal_tail,
+#   slice_labels=mci-journal-tail,
+#   kind=ast,
+# ]
+def inspect_active_journal_tail(
+    paths: CoherencePaths,
+    manifest: CoherenceManifest,
+    *,
+    diagnostics: list[dict[str, Any]] | None = None,
+) -> JournalTailStats:
+    """Exact active-tail statistics with strict contiguity + schema validation.
+
+    Only ``journal_floor_seq..journal_head_seq`` count (§9.2).  Every record
+    in the range is read and validated through the S01 interfaces (missing,
+    malformed, or unchained records fail closed as JournalIntegrityError).
+    File sizes come from the same record files.  A record above
+    ``journal_record_warning_bytes`` (config) is reported by the CALLER as a
+    bounded diagnostic naming sequence and bytes — this function records
+    only the measurement, never payload content.
+    """
+
+    floor = manifest.journal_floor_seq
+    head = manifest.journal_head_seq
+    if head < floor:
+        return JournalTailStats(
+            floor_seq=floor,
+            head_seq=head,
+            record_count=0,
+            total_bytes=0,
+            largest_record_bytes=0,
+            largest_record_sequence=None,
+        )
+    # Strict contiguous-range validation through the S01 read authority.
+    records = []
+    for sequence in range(floor, head + 1):
+        record_path = paths.journal_dir / journal_record_filename(sequence)
+        if not record_path.exists():
+            raise JournalIntegrityError(
+                "manifest points at a missing committed journal record",
+                path=record_path,
+                epoch_id=manifest.epoch_id,
+                sequence=sequence,
+            )
+        records.append((sequence, record_path, _read_record_file(record_path, paths)))
+    total_bytes = 0
+    largest_bytes = 0
+    largest_sequence: int | None = None
+    for sequence, record_path, _record in records:
+        size = record_path.stat().st_size
+        total_bytes += size
+        if size > largest_bytes:
+            largest_bytes = size
+            largest_sequence = sequence
+    if diagnostics is not None:
+        diagnostics.append(
+            {
+                "kind": "active_journal_tail",
+                "floor_seq": floor,
+                "head_seq": head,
+                "record_count": len(records),
+                "total_bytes": total_bytes,
+            }
+        )
+    return JournalTailStats(
+        floor_seq=floor,
+        head_seq=head,
+        record_count=len(records),
+        total_bytes=total_bytes,
+        largest_record_bytes=largest_bytes,
+        largest_record_sequence=largest_sequence,
+    )
+
+
+# @beacon[
+#   id=coherence@journal-retirement,
+#   slice_labels=ra-coherence,ra-coherence-journal,carto-governance,mci-journal-tail,
+#   kind=ast,
+#   comment=Captures the current durable floor without waiting; a held in-process coherence lock defers the warning-only pass. Exact below-floor paths are retired afterward; residue never hard-dirties an already coherent epoch.,
+# ]
+def retire_incorporated_journal_records(
+    paths: CoherencePaths,
+    *,
+    fs_ops: DurableFileOps | None = None,
+) -> tuple[int, list[str]]:
+    """Physically retire incorporated (below-floor) journal record files.
+
+    Observe the short in-process coherence lock without waiting. If held,
+    defer before any manifest or directory read. Otherwise current-floor and
+    eligible-path capture runs synchronously to completion on the loop; exact
+    below-floor deletion follows. The floor never moves backward and a
+    sequence at or above it is never deleted (re-checked per file).
+
+    Crash after manifest publication but before retirement is harmless;
+    crash before manifest publication retires nothing.  Cleanup failure
+    produces a warning, never a hard barrier — the new epoch is already
+    coherent.  Returns ``(retired_count, warnings)``.
+    """
+
+    if _coherence_lock_for(paths).locked():
+        return 0, [
+            "journal retirement deferred: coherence lock busy; the "
+            "warning-only pass defers to the next run"
+        ]
+    manifest = read_manifest(paths, required=True)
+    assert manifest is not None
+    floor = manifest.journal_floor_seq
+    eligible: list[Path] = []
+    if paths.journal_dir.exists():
+        for entry in sorted(paths.journal_dir.iterdir()):
+            sequence = parse_journal_record_filename(entry.name)
+            if sequence is not None and sequence < floor:
+                eligible.append(entry)
+    retired = 0
+    warnings: list[str] = []
+    for path in eligible:
+        sequence = parse_journal_record_filename(path.name)
+        if sequence is None or sequence >= floor:
+            # Exact-path/sequence re-check: never delete a sequence at or
+            # above the captured floor (an append landed meanwhile).
+            continue
+        try:
+            if fs_ops is not None:
+                fs_ops.unlink(path)
+            else:
+                path.unlink()
+            retired += 1
+        except OSError as exc:
+            warnings.append(f"journal retirement could not delete {path.name}: {exc}")
+    return retired, warnings
+
+
+# ---------------------------------------------------------------------------
+# Append — §9.2
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=coherence@journal-append,
+#   slice_labels=carto-governance,mci-journal-commit,
+#   kind=ast,
+#   comment=S01 physical journal commit protocol: single-loop run-to-completion validate/recover/allocate/write-record/advance-head; manifest never points past a missing record; deterministic orphan adoption/quarantine with F2 epoch-lineage rule; the ATTEMPTED SEQUENCE is stamped onto every post-record publication failure (type preserved) so the S04 sealer's recovery can identify the exact transaction, and PHASE-AWARE exact-record durability evidence (record_durable: True exactly when the failure phase proves the exact record occupied the attempted sequence) rides with it so sequence allocation alone can never manufacture committed recovery (Remediation Chain 2, Rounds 1–2); CALLER-SUPPLIED effect-validation / verified-record-construction failures are stamped (verified_record_construction_failed) so the sealer hard-dirties them as verified_effect_unpublishable before the failure returns, never confused with EXISTING-lineage typed errors which propagate unstamped under invariant 6 (Remediation Chain 3); the append's transaction LINEAGE CONTEXT (actual pre-attempt manifest journal head + account/epoch, plus the attempted sequence as a distinct value) is stamped onto every caller-supplied failure so the sealer's DirtyBarrierPublicationError carries real lineage coordinates with no second manifest read (Remediation Chain 4).,
+# ]
+def append_journal_transaction(
+    paths: CoherencePaths,
+    *,
+    operation_kind: str,
+    effects: Sequence[SemanticEffect],
+    producer: JournalProducer,
+    verification: Sequence[VerificationEvidence] = (),
+    transaction_id: str | None = None,
+    committed_at: str | None = None,
+    mode: ApplicationMode = ApplicationMode.PUBLICATION_STRICT,
+    cache_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+    fs_ops: DurableFileOps | None = None,
+) -> tuple[JournalTransaction, CoherenceManifest]:
+    """Append one verified semantic transaction to the journal.
+
+    Synchronous single-loop transaction; no suspension separates validation,
+    recovery, allocation and publication. No current CRUD/cache path is wired
+    to this journal; N08a owns activation.
+    """
+
+    manifest = read_manifest(paths, required=True)
+    assert manifest is not None
+    _validate_committed_range(paths, manifest)
+    manifest = _recover_orphans_locked(paths, manifest, fs_ops=fs_ops)
+
+    next_sequence = manifest.journal_head_seq + 1
+    try:
+        validated_effects = validate_transaction_effects(effects, cache_by_id, mode=mode)
+        record = JournalTransaction(
+            schema_version=1,
+            account_scope_id=manifest.account_scope_id,
+            sequence=next_sequence,
+            previous_sequence=manifest.journal_head_seq,
+            transaction_id=transaction_id or new_transaction_id(),
+            published_epoch_id=manifest.epoch_id,
+            operation_kind=operation_kind,
+            committed_at=committed_at or utc_now(),
+            producer=producer,
+            verification=tuple(verification),
+            effects=validated_effects,
+        )
+    except (EffectValidationError, CoherenceSchemaError) as exc:
+        # Verified-record construction failure stamping (S04 Remediation
+        # Chain 3, work-order item 1): the failure arose from the
+        # CALLER's new-transaction validation/construction region —
+        # never from EXISTING manifest/journal lineage (the read /
+        # committed-range / orphan-recovery steps above carry NO stamp
+        # and propagate as their original typed errors, invariant 6).
+        # The sealer hard-dirties stamped failures as
+        # verified_effect_unpublishable BEFORE returning the failure;
+        # the exception TYPE is preserved.
+        exc.verified_record_construction_failed = True
+        # Lineage-context threading (S04 Remediation Chain 4, work-order
+        # item 4): the transaction retains the strictly-read manifest,
+        # so stamp the ACTUAL pre-attempt manifest journal head + account/epoch
+        # and the ATTEMPTED sequence as a distinct value — the sealer's
+        # DirtyBarrierPublicationError can carry real lineage coordinates
+        # with NO second manifest read or speculative rewrite.
+        exc.manifest_journal_head_seq = manifest.journal_head_seq
+        exc.manifest_account_scope_id = manifest.account_scope_id
+        exc.manifest_epoch_id = manifest.epoch_id
+        exc.attempted_journal_sequence = next_sequence
+        raise
+
+    # 6. Durably write the complete immutable record file FIRST.
+    record_path = paths.journal_dir / journal_record_filename(next_sequence)
+    try:
+        atomic_write_json_durable(record_path, record.to_dict(), fs_ops=fs_ops)
+    except JournalPublicationError as exc:
+        # Attempted-identity preservation (S04 Remediation Chain 2): the
+        # ATTEMPTED SEQUENCE must ride EVERY post-record append failure
+        # so the sealer's recovery can identify the exact transaction
+        # without depending on the durable layer's error shape (a bare
+        # JournalPublicationError — e.g. the harness's InjectedFault —
+        # does not reliably carry it).  The exception TYPE is preserved
+        # (S01 fault tests assert the exact injected seam).
+        exc.sequence = next_sequence
+        # Phase-aware exact-record durability evidence (Remediation
+        # Chain 2 Round 2, item 1): the failure surfaced from the
+        # record-write step, so the exact record is durable EXACTLY
+        # when its atomic replace landed. The final path was absent
+        # before this synchronous transaction, so file presence here proves
+        # OUR record — never another transaction's — occupies the sequence.
+        # Sequence ALLOCATION alone is never durable ownership.
+        exc.record_durable = record_path.exists()
+        # Lineage-context threading (Remediation Chain 4, item 4): the
+        # ACTUAL pre-attempt manifest head + account/epoch ride the
+        # failure; exc.sequence remains the ATTEMPTED sequence.
+        exc.manifest_journal_head_seq = manifest.journal_head_seq
+        exc.manifest_account_scope_id = manifest.account_scope_id
+        exc.manifest_epoch_id = manifest.epoch_id
+        raise
+    except Exception as exc:
+        wrapped = JournalPublicationError(
+            f"journal record publication failed before durability: {exc}",
+            path=record_path,
+            epoch_id=manifest.epoch_id,
+            sequence=next_sequence,
+        )
+        wrapped.record_durable = record_path.exists()
+        # Lineage-context threading (Remediation Chain 4, item 4).
+        wrapped.manifest_journal_head_seq = manifest.journal_head_seq
+        wrapped.manifest_account_scope_id = manifest.account_scope_id
+        wrapped.manifest_epoch_id = manifest.epoch_id
+        raise wrapped from exc
+
+    # 7. Only after record durability, advance the manifest head.
+    try:
+        new_manifest = write_manifest(
+            paths,
+            manifest_with_updates(manifest, journal_head_seq=next_sequence),
+            expected_epoch_id=manifest.epoch_id,
+            expected_head_seq=manifest.journal_head_seq,
+            fs_ops=fs_ops,
+        )
+    except JournalIntegrityError:
+        raise
+    except JournalPublicationError as exc:
+        # Same attempted-sequence preservation on the head-advancement
+        # failure (the record IS durable above head: leave it as
+        # recoverable evidence — a later journal open adopts it exactly
+        # once). Type preserved for the S01/S02 injected-fault seams.
+        exc.sequence = next_sequence
+        # The record write COMPLETED before this failure: the exact
+        # record is durably occupied at the attempted sequence
+        # (phase-aware durability evidence, Remediation Chain 2
+        # Round 2, item 1).
+        exc.record_durable = True
+        # Lineage-context threading (Remediation Chain 4, item 4): the
+        # ACTUAL pre-attempt manifest head + account/epoch ride the
+        # failure; exc.sequence remains the ATTEMPTED sequence.
+        exc.manifest_journal_head_seq = manifest.journal_head_seq
+        exc.manifest_account_scope_id = manifest.account_scope_id
+        exc.manifest_epoch_id = manifest.epoch_id
+        raise
+    except Exception as exc:
+        wrapped = JournalPublicationError(
+            f"manifest head publication failed after durable record write: {exc}",
+            path=paths.manifest_path,
+            epoch_id=manifest.epoch_id,
+            sequence=next_sequence,
+        )
+        wrapped.record_durable = True
+        # Lineage-context threading (Remediation Chain 4, item 4).
+        wrapped.manifest_journal_head_seq = manifest.journal_head_seq
+        wrapped.manifest_account_scope_id = manifest.account_scope_id
+        wrapped.manifest_epoch_id = manifest.epoch_id
+        raise wrapped from exc
+    return record, new_manifest

@@ -1,0 +1,473 @@
+"""Stage2-12 (Locked Work Order §6.12) — REAL claim adopter / finalizer /
+canceller triple (PAIR-025 / T3-09).
+
+REAL OS processes on one jobs root per arm; each actor is FORCED TO WIN
+ONCE, and every authority rule is observed:
+
+  ARM A (FINALIZER wins): a live-owned running claim is finalized first —
+  tombstone-before-delete is proven (the claim file is gone, the cooldown
+  tombstone exists); a later canceller sees no claim (cooperative); a
+  later adopter is refused loudly.  Then a REPLACEMENT claim (same job,
+  new claim id) is planted and a STALE finalizer for the old token is an
+  idempotent no-op — the replacement is never clobbered.
+
+  ARM B (ADOPTER wins): a spawning/launcher-owned claim is adopted by a
+  REAL worker subprocess first — the claim flips to running /
+  detached_worker under the WORKER's exact PID+creation-time; a second
+  adopter with a different PID is REFUSED (exact identity authority,
+  zero mutation); the finalizer then releases by exact claim token.
+
+  ARM C (CANCELLER wins): a detached-worker claim owned by a REAL worker
+  subprocess is cancelled — exact PID + creation-time + exact job-file
+  cmdline verification passes, the worker is terminated/killed for real
+  (``forced``), and the post-stop sweep finalizes the dead claim with a
+  tombstone.  The companion launcher-owned claim yields
+  ``kill_refused_in_process_job`` — NO in-process owner kill, ever.
+
+SENSITIVITY (would-it-fail): ``STAGE2_NEUTRALIZE_PID_VERIFY=1`` feeds the
+canceller a psutil double whose cmdline never matches the job file (creation time delegates to real psutil) — the kill is
+then refused as ``kill_refused_unverified_pid``, the worker stays alive, and the ``forced`` assertion fails.  Never set
+in the shipped test.
+
+Every actor logs its real PID; the parent asserts pairwise distinctness.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+import pytest
+
+from stage2_harness import (
+    REPO,
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp import carto_job_governance as gov
+
+_ACCOUNT = "a" * 32
+
+
+def _seed(root):
+    jobs_root = root / "cartographer_jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    return jobs_root
+
+
+def _write_claim_and_job(
+    root,
+    *,
+    job_id: str,
+    identity: "gov.ProcessIdentity",
+    handoff_state: str,
+    execution_owner: str,
+    footprint_root: str,
+):
+    jobs_root = root / "cartographer_jobs"
+    claim = gov.build_claim(
+        job_id=job_id,
+        job_type="CARTO_REFRESH",
+        dedupe_key="d" * 64,
+        account_scope_id=_ACCOUNT,
+        footprint={
+            "kind": "file",
+            "path": str(root / "f"),
+            "root_uuid": footprint_root,
+            "ancestor_chain": [footprint_root],
+        },
+        launcher="agent",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=identity.pid,
+        pid_create_time=identity.create_time,
+        pid_start_ticks=identity.start_ticks,
+        pid_boot_id=identity.boot_id,
+        handoff_state=handoff_state,
+        spawn_started_at=(
+            gov.utc_now_iso() if handoff_state == "spawning" else None
+        ),
+        execution_owner=execution_owner,
+    )
+    gov.write_claim(claim, str(jobs_root))
+    job = {
+        "id": job_id,
+        "kind": "CARTO_REFRESH",
+        "status": "running",
+        "claim_id": claim["claim_id"],
+        "updated_at": gov.utc_now_iso(),
+    }
+    job_file = jobs_root / f"{job_id}.json"
+    job_file.write_text(json.dumps(job), encoding="utf-8")
+    return claim, job_file
+
+
+# ---------------------------------------------------------------------------
+# Shared actors
+# ---------------------------------------------------------------------------
+
+_SLEEPER = (
+    "import os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch, wait_for_file\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "root = Path(sys.argv[1])\n"
+    "identity = gov.current_process_identity()\n"
+    "touch(root / f'pid_worker_{sys.argv[3]}', str(identity.pid))\n"
+    "(root / f'worker_identity_{sys.argv[3]}').write_text(\n"
+    "    f'{identity.pid} {identity.create_time} {identity.start_ticks} {identity.boot_id}'\n"
+    ")\n"
+    "assert wait_for_file(root / 'test_done', timeout=300)\n"
+)
+
+_FINALIZER = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "root = Path(sys.argv[1])\n"
+    "touch(root / 'pid_finalizer', str(os.getpid()))\n"
+    "ok = asyncio.run(gov.finalize_claim_async(sys.argv[3], root / 'cartographer_jobs'))\n"
+    "write_result(root / 'finalizer_result.json', {'released': ok})\n"
+)
+
+_CANCELLER = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "root = Path(sys.argv[1])\n"
+    "touch(root / 'pid_canceller', str(os.getpid()))\n"
+    "psutil_module = None\n"
+    "if os.environ.get('STAGE2_NEUTRALIZE_PID_VERIFY'):\n"
+    "    # SENSITIVITY-ONLY (never set in the shipped test): a psutil\n"
+    "    # double whose cmdline NEVER matches the job file — exact argv\n"
+    "    # verification then REFUSES the kill (kill_refused_unverified_pid),\n"
+    "    # the worker stays alive, and the 'forced' assertion fails.  (U01:\n"
+    "    # liveness classification never consulted this double's create_time;\n"
+    "    # it reads the child's clock-independent identity directly.)\n"
+    "    # 'forced' assertion fails.\n"
+    "    import psutil as _real_psutil\n"
+    "\n"
+    "    class _FakeProcess:\n"
+    "        def __init__(self, pid):\n"
+    "            self._pid = pid\n"
+    "        def create_time(self):\n"
+    "            return _real_psutil.Process(self._pid).create_time()\n"
+    "        def cmdline(self):\n"
+    "            return []\n"
+    "        def terminate(self):\n"
+    "            raise AssertionError('kill must have been refused')\n"
+    "\n"
+    "    class _FakePsutil:\n"
+    "        Process = _FakeProcess\n"
+    "        NoSuchProcess = _real_psutil.NoSuchProcess\n"
+    "        TimeoutExpired = _real_psutil.TimeoutExpired\n"
+    "\n"
+    "    psutil_module = _FakePsutil()\n"
+    "kwargs = {'requested_by': 'stage2-test', 'cooperative_timeout_seconds': 0.1}\n"
+    "if psutil_module is not None:\n"
+    "    kwargs['psutil_module'] = psutil_module\n"
+    "result = asyncio.run(gov.cancel_carto_job(sys.argv[3], **kwargs))\n"
+    "write_result(root / sys.argv[4], result)\n"
+)
+
+_ADOPTER = (
+    "import os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "root = Path(sys.argv[1])\n"
+    "touch(root / f'pid_adopter_{sys.argv[4]}', str(os.getpid()))\n"
+    "try:\n"
+    "    result = gov.adopt_carto_worker_claim(sys.argv[3])\n"
+    "    outcome = {'adopted': True, 'claim_pid': result['claim'].get('pid')}\n"
+    "except Exception as exc:\n"
+    "    outcome = {'adopted': False, 'error': f'{type(exc).__name__}: {exc}'}\n"
+    "write_result(root / f'adopter_{sys.argv[4]}_result.json', outcome)\n"
+)
+
+
+def _read_worker_identity(root, tag: str) -> "gov.ProcessIdentity":
+    text = (root / f"worker_identity_{tag}").read_text().split()
+    return gov.ProcessIdentity(
+        pid=int(text[0]),
+        create_time=float(text[1]),
+        start_ticks=None if text[2] == "None" else int(text[2]),
+        boot_id=None if text[3] == "None" else text[3],
+    )
+
+
+def _tombstones(root) -> list:
+    tomb_dir = root / "cartographer_jobs" / ".refresh_tombstones"
+    return list(tomb_dir.glob("*.json")) if tomb_dir.exists() else []
+
+
+# ---------------------------------------------------------------------------
+# ARM A — the finalizer wins (tombstone-before-delete; replacement safe)
+# ---------------------------------------------------------------------------
+
+
+def test_arm_a_finalizer_wins_tombstone_before_delete_and_replacement_preserved(tmp_path):
+    """The finalizer releases the live claim first (tombstone before
+    delete); the canceller then sees nothing (cooperative); the adopter is
+    refused.  A stale finalizer for the OLD token never clobbers the
+    replacement claim."""
+    root = tmp_path / "share"
+    _seed(root)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    worker = launch_actor(_SLEEPER, str(root), str(REPO), "a")
+    finalizer = canceller = adopter = None
+    try:
+        identity = (
+            _read_worker_identity(root, "a")
+            if wait_for_file(root / "worker_identity_a", timeout=60)
+            else gov.ProcessIdentity(pid=0, start_ticks=None, boot_id=None, create_time=0.0)
+        )
+        claim, job_file = _write_claim_and_job(
+            root,
+            job_id="arm-a-job",
+            identity=identity,
+            handoff_state="running",
+            execution_owner="detached_worker",
+            footprint_root="file-a",
+        )
+        claim_path = gov.claim_path_for(claim, str(root / "cartographer_jobs"))
+
+        finalizer = launch_actor(_FINALIZER, str(root), str(REPO), claim["claim_id"])
+        fin = read_result(root / "finalizer_result.json", timeout=120)
+        assert fin["released"] is True
+        # TOMBSTONE-BEFORE-DELETE: the claim is gone, the tombstone exists.
+        assert not claim_path.exists()
+        assert _tombstones(root)
+
+        canceller = launch_actor(
+            _CANCELLER, str(root), str(REPO), str(job_file), "canceller_result.json"
+        )
+        cancel = read_result(root / "canceller_result.json", timeout=120)
+        assert cancel["outcome"] == "cooperative"
+
+        adopter = launch_actor(_ADOPTER, str(root), str(REPO), str(job_file), "a")
+        adopt = read_result(root / "adopter_a_result.json", timeout=120)
+        assert adopt["adopted"] is False
+        assert "Expected one claim suffix match" in adopt["error"]
+
+        # REPLACEMENT claim (same job id, new claim id); the STALE
+        # finalizer for the old token is an idempotent no-op.
+        replacement, _job_file2 = _write_claim_and_job(
+            root,
+            job_id="arm-a-job",
+            identity=identity,
+            handoff_state="running",
+            execution_owner="detached_worker",
+            footprint_root="file-a",
+        )
+        replacement_path = gov.claim_path_for(
+            replacement, str(root / "cartographer_jobs")
+        )
+        stale_ok = gov_finalize(root, claim["claim_id"])
+        assert stale_ok is True  # already_absent — an idempotent no-op
+        assert replacement_path.exists()  # the replacement is NEVER clobbered
+
+        pids = collect_distinct_pids(
+            root, ["parent", "worker_a", "finalizer", "canceller", "adopter_a"]
+        )
+        assert len(set(pids.values())) == 5
+    finally:
+        touch(root / "test_done")
+        for proc, label in (
+            (adopter, "late adopter"),
+            (canceller, "late canceller"),
+            (finalizer, "finalizer"),
+            (worker, "worker"),
+        ):
+            if proc is not None:
+                finish_actor(proc, label=label)
+
+
+def gov_finalize(root, claim_id: str) -> bool:
+    import asyncio
+
+    return asyncio.run(gov.finalize_claim_async(claim_id, root / "cartographer_jobs"))
+
+
+# ---------------------------------------------------------------------------
+# ARM B — the adopter wins (exact PID+creation-time authority)
+# ---------------------------------------------------------------------------
+
+
+def test_arm_b_adopter_wins_exact_pid_authority_second_adopter_refused(tmp_path):
+    """A spawning launcher-owned claim is adopted by a REAL worker first
+    (the claim flips to running/detached_worker under the WORKER's exact
+    identity); a second adopter with a different PID is REFUSED (exact
+    PID+creation-time authority); the finalizer then releases by token."""
+    root = tmp_path / "share"
+    _seed(root)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    parent_identity = gov.current_process_identity()
+    claim, job_file = _write_claim_and_job(
+        root,
+        job_id="arm-b-job",
+        identity=parent_identity,
+        handoff_state="spawning",
+        execution_owner="launcher",
+        footprint_root="file-b",
+    )
+    claim_path = gov.claim_path_for(claim, str(root / "cartographer_jobs"))
+
+    # The ADOPTER is the worker: adopt_carto_worker_claim flips ownership to
+    # the CALLING process's exact identity (a real subprocess).
+    adopter1 = adopter2 = finalizer = None
+    try:
+        adopter1 = launch_actor(_ADOPTER, str(root), str(REPO), str(job_file), "w1")
+        adopt1 = read_result(root / "adopter_w1_result.json", timeout=120)
+        assert adopt1["adopted"] is True
+        worker_pid = int((root / "pid_adopter_w1").read_text().strip())
+        # The adoption flipped ownership to the ADOPTER's exact identity.
+        assert adopt1["claim_pid"] == worker_pid
+        adopted_claim = gov.read_claim(claim_path)
+        assert adopted_claim["handoff_state"] == "running"
+        assert adopted_claim["execution_owner"] == "detached_worker"
+        assert adopted_claim["pid"] == worker_pid
+
+        # A second adopter with a DIFFERENT real PID is REFUSED (exact
+        # PID+creation-time authority, zero mutation).
+        adopter2 = launch_actor(_ADOPTER, str(root), str(REPO), str(job_file), "w2")
+        adopt2 = read_result(root / "adopter_w2_result.json", timeout=120)
+        assert adopt2["adopted"] is False
+        assert "another worker identity" in adopt2["error"]
+        # The claim is unchanged (the refusal was zero-mutation).
+        assert gov.read_claim(claim_path)["pid"] == worker_pid
+
+        # The finalizer then releases by exact claim token.
+        finalizer = launch_actor(_FINALIZER, str(root), str(REPO), claim["claim_id"])
+        fin = read_result(root / "finalizer_result.json", timeout=120)
+        assert fin["released"] is True
+        assert not claim_path.exists()
+        assert _tombstones(root)
+
+        pids = collect_distinct_pids(
+            root, ["parent", "adopter_w1", "adopter_w2", "finalizer"]
+        )
+        assert len(set(pids.values())) == 4
+    finally:
+        touch(root / "test_done")
+        for proc, label in (
+            (finalizer, "finalizer"),
+            (adopter2, "second adopter"),
+            (adopter1, "first adopter"),
+        ):
+            if proc is not None:
+                finish_actor(proc, label=label)
+
+
+# ---------------------------------------------------------------------------
+# ARM C — the canceller wins (forced; no in-process owner kill)
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=auto-beacon@test_arm_c_canceller_wins_forced_and_no_in_process_owner_kill-kevx,
+#   role=test_arm_c_canceller_wins_forced_and_no_in_process_owner_kill,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason=(
+        "Windows process-kill semantics: a killed process disappears "
+        "immediately, so the canceller's post-stop sweep observes the worker "
+        "dead and finalizes the claim. On POSIX the killed worker becomes a "
+        "zombie until its parent reaps it, so the sweep conservatively "
+        "preserves the claim."
+    ),
+)
+def test_arm_c_canceller_wins_forced_and_no_in_process_owner_kill(tmp_path):
+    """A detached-worker claim owned by a REAL worker is force-cancelled
+    (exact PID+creation-time+cmdline verification → terminate/kill →
+    ``forced`` → the sweep finalizes the dead claim with a tombstone); a
+    launcher-owned claim yields ``kill_refused_in_process_job`` — no
+    in-process owner kill, ever."""
+    root = tmp_path / "share"
+    _seed(root)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    # The job file path is deterministic before it exists, so the worker
+    # can carry it in its cmdline from the start as a real detached worker
+    # would (--carto-job-file <path>) — the canceller's exact argv
+    # verification matches THIS worker's identity.
+    jobs_root = root / "cartographer_jobs"
+    job_file = jobs_root / "arm-c-job.json"
+    worker = launch_actor(
+        _SLEEPER, str(root), str(REPO), "c", "--carto-job-file", str(job_file)
+    )
+    canceller = canceller2 = None
+    try:
+        assert wait_for_file(root / "worker_identity_c", timeout=60)
+        worker_identity = _read_worker_identity(root, "c")
+        claim, job_file = _write_claim_and_job(
+            root,
+            job_id="arm-c-job",
+            identity=worker_identity,
+            handoff_state="running",
+            execution_owner="detached_worker",
+            footprint_root="file-c",
+        )
+        claim_path = gov.claim_path_for(claim, str(jobs_root))
+
+        canceller = launch_actor(
+            _CANCELLER, str(root), str(REPO), str(job_file), "canceller_result.json"
+        )
+        cancel = read_result(root / "canceller_result.json", timeout=120)
+        assert cancel["outcome"] == "forced"
+
+        # The worker died FOR REAL (terminate/kill verified).
+        out, err = worker.communicate(timeout=60)
+        assert worker.returncode is not None
+
+        # The post-stop sweep finalized the dead claim: tombstone exists,
+        # claim file gone.
+        assert not claim_path.exists()
+        assert _tombstones(root)
+
+        # NO IN-PROCESS OWNER KILL: a launcher-owned claim refuses the kill.
+        parent_identity = gov.current_process_identity()
+        claim2, job_file2 = _write_claim_and_job(
+            root,
+            job_id="arm-c2-job",
+            identity=parent_identity,
+            handoff_state="running",
+            execution_owner="launcher",
+            footprint_root="file-c2",
+        )
+        claim2_path = gov.claim_path_for(claim2, str(root / "cartographer_jobs"))
+        canceller2 = launch_actor(
+            _CANCELLER, str(root), str(REPO), str(job_file2), "canceller2_result.json"
+        )
+        cancel2 = read_result(root / "canceller2_result.json", timeout=120)
+        assert cancel2["outcome"] == "kill_refused_in_process_job"
+        assert claim2_path.exists()  # intact — never finalized, never killed
+
+        pids = collect_distinct_pids(root, ["parent", "worker_c", "canceller"])
+        assert len(set(pids.values())) == 3
+    finally:
+        touch(root / "test_done")
+        if canceller2 is not None:
+            finish_actor(canceller2, label="canceller (launcher-owned)")
+        if canceller is not None:
+            finish_actor(canceller, label="canceller")

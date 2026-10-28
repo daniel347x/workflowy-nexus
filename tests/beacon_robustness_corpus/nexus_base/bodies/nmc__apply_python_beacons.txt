@@ -1,0 +1,613 @@
+def apply_python_beacons(
+    file_path: str,
+    lines: list[str],
+    outline_nodes: list[dict[str, Any]],
+    *,
+    decorator_ranges_by_definition: Optional[dict[int, list[tuple[int, int]]]] = None,
+) -> None:
+    """Apply Python @beacon[...] metadata to an existing AST outline tree.
+
+    - AST beacons (kind=ast): decorate existing AST nodes (no new nodes).
+    - SPAN beacons (kind=span): create child nodes under the enclosing AST node
+      (or at file-level if no enclosing AST node is found).
+
+    Snippet-less beacons:
+    - If kind is span and start_snippet is missing, we:
+      1) Find the next non-blank, non-comment, non-decorator line after the
+         beacon block, and treat that as the anchor line.
+      2) If that line is exactly the start of a class/function/async AST node,
+         we auto-upgrade the beacon to kind=ast and decorate that node.
+      3) Otherwise, we treat it as a span beacon anchored under the enclosing
+         AST node for that line.
+
+    Comment context:
+    - For both AST and SPAN beacons, we capture nearby Python comments and
+      triple-quoted blocks (treated as комментарий-like) above and below the
+      beacon block and append them into the beacon note for Workflowy.
+    """
+    # IMPORTANT: do not bail out just because the Python AST outline is empty.
+    # File-level SPAN beacons are still valid for AST-less modules such as
+    # package __init__.py files that only contain imports/re-exports/constants.
+    beacons = parse_python_beacon_blocks(lines)
+    if not beacons:
+        return
+    # Warn early if there are duplicate beacon IDs in the file.
+    _prepend_duplicate_beacon_id_warning_nodes(outline_nodes, beacons, language="PY")
+
+    # Precompute AST-backed nodes and a helper for line lookups
+    ast_nodes = list(_iter_ast_outline_nodes(outline_nodes))
+
+    # The normal outline caller injects its ONE already-built syntax index;
+    # standalone callers use the identical pure authority, never a second
+    # physical-line '@' heuristic. Keep attachment policy local to this pass.
+    if decorator_ranges_by_definition is None:
+        decorator_ranges_by_definition = _python_decorator_ranges_by_definition(lines)
+    decorator_lines = {
+        idx
+        for ranges in decorator_ranges_by_definition.values()
+        for start, end in ranges
+        for idx in range(start, end + 1)
+    }
+
+    # Precompute triple-quoted spans so we can treat them as comment-like.
+    triple_spans: List[tuple[int, int]] = []
+    in_block = False
+    quote_type: Optional[str] = None
+    start_line_q: Optional[int] = None
+
+    for idx, raw in enumerate(lines, start=1):
+        if not in_block:
+            if '"""' in raw or "'''" in raw:
+                # Prefer the first occurrence on the line
+                dq_index = raw.find('"""') if '"""' in raw else -1
+                sq_index = raw.find("'''") if "'''" in raw else -1
+                if dq_index != -1 and (sq_index == -1 or dq_index <= sq_index):
+                    q = '"""'
+                else:
+                    q = "'''"
+                count = raw.count(q)
+                if count >= 2:
+                    triple_spans.append((idx, idx))
+                else:
+                    in_block = True
+                    quote_type = q
+                    start_line_q = idx
+        else:
+            if quote_type and quote_type in raw:
+                triple_spans.append((start_line_q or idx, idx))
+                in_block = False
+                quote_type = None
+                start_line_q = None
+
+    # @beacon[
+    #   id=auto-beacon@apply_python_beacons._find_triple_span_for_line-3dh3,
+    #   role=apply_python_beacons._find_triple_span_for_line,
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _find_triple_span_for_line(line_no: int) -> Optional[tuple[int, int]]:
+        for s, e in triple_spans:
+            if s <= line_no <= e:
+                return (s, e)
+        return None
+
+    # @beacon[
+    #   id=auto-beacon@apply_python_beacons._header_line_for_node-ifew,
+    #   role=apply_python_beacons._header_line_for_node,
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _header_line_for_node(node: dict[str, Any]) -> Optional[str]:
+        ln = node.get("orig_lineno_start_unused")
+        if not isinstance(ln, int) or ln <= 0 or ln > len(lines):
+            return None
+        return lines[ln - 1]
+
+    span_sort_lines: dict[int, int] = {}
+
+    # @beacon[
+    #   id=carto-beacon-order@py-node-source-order-line,
+    #   role=ƒ _node_source_order_line(node),
+    #   slice_labels=carto-js-ts,carto-js-ts-beacons,ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _node_source_order_line(node: dict[str, Any]) -> int:
+        cached = span_sort_lines.get(id(node))
+        if isinstance(cached, int):
+            return cached
+        ln = node.get("orig_lineno_start_unused") if isinstance(node, dict) else None
+        if isinstance(ln, int):
+            return ln
+        return 10**9
+
+    # @beacon[
+    #   id=carto-beacon-order@py-insert-child-in-source-order,
+    #   role=ƒ _insert_child_in_source_order(siblings, child_node, sort_line: int),
+    #   slice_labels=carto-js-ts,carto-js-ts-beacons,ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _insert_child_in_source_order(
+        siblings: List[Dict[str, Any]],
+        child_node: Dict[str, Any],
+        sort_line: int,
+    ) -> None:
+        span_sort_lines[id(child_node)] = sort_line
+        insert_at = len(siblings)
+        for idx, existing in enumerate(siblings):
+            if _node_source_order_line(existing) > sort_line:
+                insert_at = idx
+                break
+        siblings.insert(insert_at, child_node)
+
+    # @beacon[
+    #   id=auto-beacon@apply_python_beacons._next_anchor_line_after-9xn4,
+    #   role=apply_python_beacons._next_anchor_line_after,
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _next_anchor_line_after(line_no: int) -> Optional[int]:
+        """Find the next significant line, crossing only owned decorator syntax.
+
+        ``line_no`` is the beacon opener's 1-based line. A beacon embedded
+        inside a decorator expression is not a leading AST beacon. Unlike
+        reverse matching, forward mapping still permits ordinary comments.
+        """
+        if line_no - 1 in decorator_lines:
+            return None
+        for idx in range(line_no + 1, len(lines) + 1):
+            if idx - 1 in decorator_lines:
+                continue
+            stripped = lines[idx - 1].lstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            return idx
+        return None
+
+    # @beacon[
+    #   id=carto-js-ts@_extract_python_beacon_context-7u3n,
+    #   role=ƒ _extract_python_beacon_context(comment_line: int, decor_start: Optional[int], beacon_id: Optional[str]),
+    #   slice_labels=carto-js-ts,ra-snippet-range-span-beacon,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _extract_python_beacon_context(
+        comment_line: int,
+        decor_start: Optional[int] = None,
+        beacon_id: Optional[str] = None,
+    ) -> List[str]:
+        """Extract nearby comment-like lines around a Python beacon.
+
+        Includes:
+        - # comments above/below the beacon block (stripped of leading '#')
+        - triple-quoted blocks (triple quotes) treated as comment-like
+
+        Skips:
+        - blank lines
+        - decorator lines starting with '@'
+        """
+        context: List[str] = []
+        seen_spans: set[tuple[int, int]] = set()
+
+        # Determine end of the beacon metadata block
+        j = comment_line
+        block_end = comment_line
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+            else:
+                body = stripped
+            if body.strip().startswith("]"):
+                block_end = j
+                break
+            j += 1
+
+        # Above: walk past decorators to reach true leading comments, and
+        # skip any decorator region attached to the enclosing AST node
+        # (when known) so multiline decorators do not block comment capture.
+        j = comment_line - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j -= 1
+                continue
+            if decor_start is not None and decor_start <= j <= block_end:
+                j -= 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.insert(0, body)
+                j -= 1
+                continue
+            span = _find_triple_span_for_line(j)
+            if span and span not in seen_spans:
+                s, e = span
+                # IMPORTANT: preserve original order when prepending a multi-line
+                # triple-quoted block. Using insert(0, ...) in a forward loop
+                # reverses the block.
+                for k in range(e, s - 1, -1):
+                    context.insert(0, lines[k - 1])
+                seen_spans.add(span)
+                j = s - 1
+                continue
+            if stripped.startswith("@"):
+                # Skip decorator lines but keep walking upward so that
+                # comments above a decorator are still captured as
+                # CONTEXT COMMENTS (PYTHON).
+                j -= 1
+                continue
+            break
+
+        # Below
+        j = block_end + 1
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j += 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                # Never include beacon delimiter blocks as "context comments".
+                # Also support overlapping span beacons by only stopping on a
+                # matching @beacon-close id (when beacon_id is provided).
+                if body.startswith("@beacon["):
+                    # Skip nested opener metadata block.
+                    j += 1
+                    while j <= len(lines):
+                        nxt = lines[j - 1].lstrip()
+                        nb = nxt.lstrip("#").lstrip() if nxt.startswith("#") else nxt
+                        if nb.strip().startswith("]"):
+                            j += 1
+                            break
+                        j += 1
+                    continue
+                if body.startswith("@beacon-close["):
+                    close_id: Optional[str] = None
+                    j += 1
+                    while j <= len(lines):
+                        nxt = lines[j - 1].lstrip()
+                        nb = nxt.lstrip("#").lstrip() if nxt.startswith("#") else nxt
+                        nb_strip = nb.strip()
+                        if nb_strip.startswith("id=") and close_id is None:
+                            close_id = nb_strip.split("=", 1)[1].strip().strip(",").strip("]")
+                        if nb_strip.startswith("]"):
+                            break
+                        j += 1
+                    # Ignore close blocks for other beacon ids (supports overlap).
+                    if beacon_id and close_id and close_id != beacon_id:
+                        j += 1
+                        continue
+                    break
+                if body.startswith("@beacon"):
+                    break
+                if body:
+                    context.append(body)
+                j += 1
+                continue
+            span = _find_triple_span_for_line(j)
+            if span and span not in seen_spans:
+                s, e = span
+                for k in range(s, e + 1):
+                    context.append(lines[k - 1])
+                seen_spans.add(span)
+                j = e + 1
+                continue
+            if stripped.startswith("@"):
+                break
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)
+
+    # Pre-pass: for snippet-less beacons (AST or SPAN), compute an anchor
+    # lineno (the next significant line after the metadata block).
+    #
+    # For SPAN beacons only, we may auto-upgrade to AST when the anchor is a
+    # clean class/function/async start.
+    #
+    # IMPORTANT RULES:
+    # - Do NOT auto-upgrade an explicit span region (paired opener/closer),
+    #   indicated by span_lineno_end.
+    # - Do NOT auto-upgrade when the author explicitly wrote kind=span.
+    #   Explicit span means “create a span node”, not “decorate the next AST”.
+    for beacon in beacons:
+        kind = beacon.get("kind")
+        start_snippet = beacon.get("start_snippet")
+        if kind not in {"span", "ast"}:
+            continue
+        if start_snippet:
+            continue
+
+        comment_line = beacon.get("comment_line") or 0
+        if isinstance(comment_line, int) and comment_line > 0:
+            anchor = _next_anchor_line_after(comment_line)
+        else:
+            anchor = None
+        if anchor is None:
+            continue
+        beacon["_anchor_lineno"] = anchor
+
+        # Auto-upgrade logic is SPAN-only.
+        if kind != "span":
+            continue
+
+        # Never auto-upgrade an explicit span region.
+        if isinstance(beacon.get("span_lineno_end"), int):
+            continue
+
+        # Never auto-upgrade an explicitly-declared kind=span beacon.
+        if bool(beacon.get("kind_explicit")):
+            continue
+
+        # See if this line is exactly the start of a class/function/async
+        # AST node. If so, we treat this beacon as an AST beacon by default.
+        ast_candidates: list[dict[str, Any]] = []
+        for node in ast_nodes:
+            ast_type = node.get("ast_type")
+            if ast_type not in {"class", "function", "async_function", "const", "const_decl"}:
+                continue
+            ln = node.get("orig_lineno_start_unused")
+            if isinstance(ln, int) and ln == anchor:
+                ast_candidates.append(node)
+
+        if len(ast_candidates) == 1:
+            beacon["kind"] = "ast"
+
+    # Pass 1: AST beacons
+    for beacon in beacons:
+        if beacon.get("kind") != "ast":
+            continue
+        b_id = beacon.get("id") or "(no-id)"
+        start_snippet = beacon.get("start_snippet")
+        comment_line = beacon.get("comment_line") or 0
+        anchor_lineno = beacon.get("_anchor_lineno")
+
+        chosen: Optional[dict[str, Any]] = None
+
+        if start_snippet:
+            # Legacy mode: use start_snippet to match header line
+            norm_snip = normalize_for_match(start_snippet)
+            if not norm_snip:
+                continue
+
+            candidates: list[dict[str, Any]] = []
+            for node in ast_nodes:
+                header = _header_line_for_node(node)
+                if header is None:
+                    continue
+                if norm_snip in normalize_for_match(header):
+                    candidates.append(node)
+
+            if not candidates:
+                # Beacon is stale or misconfigured – skip
+                continue
+
+            if len(candidates) == 1:
+                chosen = candidates[0]
+            else:
+                # Prefer the first candidate whose header is AFTER the beacon
+                after = [
+                    n
+                    for n in candidates
+                    if isinstance(n.get("orig_lineno_start_unused"), int)
+                    and n["orig_lineno_start_unused"] > comment_line
+                ]
+                if len(after) == 1:
+                    chosen = after[0]
+                else:
+                    # Ambiguous – skip for now
+                    continue
+        else:
+            # Snippet-less AST beacon: use precomputed anchor lineno
+            anchor = beacon.get("_anchor_lineno")
+            if not isinstance(anchor, int):
+                continue
+            ast_candidates = [
+                node
+                for node in ast_nodes
+                if node.get("ast_type") in {"class", "function", "async_function", "const", "const_decl"}
+                and isinstance(node.get("orig_lineno_start_unused"), int)
+                and node["orig_lineno_start_unused"] == anchor
+            ]
+            if len(ast_candidates) == 1:
+                chosen = ast_candidates[0]
+            else:
+                continue
+
+        if not chosen:
+            continue
+
+        # Decorate chosen AST node
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        # Defaults: derive role from id prefix (before '@')
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "ast-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = chosen.get("name") or "Untitled"
+        if "🔱" not in name:
+            name = f"{name} 🔱"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+        chosen["name"] = name
+
+        # Merge beacon metadata into note. For AST beacons, we rely on the
+        # AST node itself to carry CONTEXT COMMENTS (PYTHON) so we do not
+        # duplicate comment blocks in the BEACON section.
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+        meta_lines = [
+            "BEACON (AST)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: ast",
+        ]
+        if comment:
+            meta_lines.append(f"comment: {comment}")
+        note = chosen.get("note") or ""
+        if note:
+            # Keep the identifier (AST_QUALNAME) at the top, then insert the
+            # BEACON metadata block, then the rest of the content.
+            note_lines = note.splitlines()
+            insert_idx = (
+                1
+                if (note_lines and note_lines[0].strip().startswith("AST_QUALNAME:"))
+                else 0
+            )
+            new_note_lines: list[str] = []
+            new_note_lines.extend(note_lines[:insert_idx])
+            new_note_lines.extend(meta_lines)
+            if insert_idx < len(note_lines):
+                if note_lines[insert_idx].strip():
+                    new_note_lines.append("")
+                new_note_lines.extend(note_lines[insert_idx:])
+            chosen["note"] = "\n".join(new_note_lines)
+        else:
+            chosen["note"] = "\n".join(meta_lines)
+
+    # Pass 2: SPAN beacons
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+        start_snippet = beacon.get("start_snippet")
+        comment_line = beacon.get("comment_line") or 0
+
+        attachment_line: Optional[int] = None
+
+        if start_snippet:
+            norm_snip = normalize_for_match(start_snippet)
+            if not norm_snip:
+                continue
+
+            # Find candidate start lines, but IGNORE lines that are comments
+            # (including the @beacon block itself) so we never anchor spans to
+            # their own metadata.
+            start_candidates: list[int] = []
+            for idx, line in enumerate(lines, start=1):
+                stripped = line.lstrip()
+                if stripped.startswith("#"):
+                    continue
+                if norm_snip in normalize_for_match(line):
+                    start_candidates.append(idx)
+
+            if not start_candidates:
+                # No match – skip for now
+                continue
+
+            if len(start_candidates) == 1:
+                attachment_line = start_candidates[0]
+            else:
+                after = [ln for ln in start_candidates if ln > comment_line]
+                if len(after) == 1:
+                    attachment_line = after[0]
+                else:
+                    # Ambiguous span; require beacon refinement
+                    continue
+        else:
+            # Snippet-less spans attach based on the beacon's own location,
+            # not the next code line. This keeps file-level/documentation spans
+            # at file scope even when the next AST node is a function/class.
+            span_start = beacon.get("span_lineno_start")
+            if isinstance(span_start, int):
+                attachment_line = span_start
+            elif isinstance(comment_line, int) and comment_line > 0:
+                attachment_line = comment_line
+            else:
+                anchor = beacon.get("_anchor_lineno")
+                attachment_line = anchor if isinstance(anchor, int) else None
+
+        if attachment_line is None:
+            continue
+
+        # Decide enclosing AST node (if any)
+        enclosing = _find_enclosing_ast_node_for_line(outline_nodes, attachment_line)
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        # Defaults: derive role from id prefix (before '@')
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "span-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        enclosing_decor_start: Optional[int] = None
+        if enclosing is not None:
+            dsl = enclosing.get("decor_start_lineno")
+            if isinstance(dsl, int):
+                enclosing_decor_start = dsl
+        context_lines = _extract_python_beacon_context(
+            comment_line,
+            enclosing_decor_start,
+            beacon_id=b_id,
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (PYTHON):")
+            note_lines.extend(context_lines)
+
+        # Raw Python span text between @beacon[...] and @beacon-close[...] (if available)
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        span_text_lines: List[str] = []
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            span_start = max(1, span_start)
+            span_end = min(len(lines), span_end)
+            if span_start <= span_end:
+                span_text_lines = lines[span_start - 1 : span_end]
+                # Trim leading/trailing blank lines inside the span
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+            "orig_lineno_start_unused": attachment_line,
+            "orig_lineno_end_unused": attachment_line,
+        }
+
+        if enclosing is not None:
+            children = enclosing.get("children") or []
+            _insert_child_in_source_order(children, span_node, attachment_line)
+            enclosing["children"] = children
+        else:
+            # File-level span: attach directly under top-level outline
+            _insert_child_in_source_order(outline_nodes, span_node, attachment_line)

@@ -1,0 +1,42 @@
+"""WorkFlowy API client implementation - Compatibility wrapper.
+
+This file delegates to modular components:
+- api_client_core.py: CRUD operations, validation, logging
+- api_client_etch.py: ETCH and export/import
+- api_client_nexus.py: NEXUS pipeline (GLIMPSE, snippet helpers, F12 refresh)
+
+For backward compatibility, this wrapper re-exports WorkFlowyClient
+as an alias for WorkFlowyClientNexus (the topmost class in the chain).
+"""
+
+# Re-export the topmost client class.
+# Inheritance chain: WorkFlowyClientCore <- WorkFlowyClientEtch <- WorkFlowyClientNexus
+from .api_client_nexus import WorkFlowyClientNexus as WorkFlowyClient
+
+# Re-export helpers that may be imported elsewhere
+from .api_client_core import (
+    log_event,
+    _log,
+    _ClientLogger,
+    API_RATE_LIMIT_DELAY,
+)
+
+from .api_client_etch import (
+    _log_to_file_helper,
+    _current_weave_context,
+    export_nodes_impl,
+    bulk_export_to_file_impl,
+)
+
+# Compatibility aliases (for code that imports from api_client directly)
+__all__ = [
+    "WorkFlowyClient",
+    "log_event",
+    "_log",
+    "_ClientLogger",
+    "API_RATE_LIMIT_DELAY",
+    "_log_to_file_helper",
+    "_current_weave_context",
+    "export_nodes_impl",
+    "bulk_export_to_file_impl",
+]

@@ -1,0 +1,172 @@
+def parse_yaml_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    """Parse @beacon[...] blocks from YAML/Helm using '#'-style comments.
+
+    Syntax mirrors the Python beacon form but is language-agnostic:
+
+        # @beacon[
+        #   id=segment@001,
+        #   role=my:role,             # optional
+        #   slice_labels=TAG1,TAG2,   # optional
+        #   kind=span,                # optional, defaults to span
+        # ]
+
+    ``diagnostics``, when a list, receives the parser's own decisions in
+    discovery order: one ``block`` record per opener (outcome ``kept`` or
+    ``skipped_unknown_kind``), one ``close`` record per close candidate the
+    second pass examines, one ``close_match`` per close it matches. The
+    return value is the same with or without it.
+    """
+    beacons: list[dict[str, Any]] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            body = stripped.lstrip("#").lstrip()
+            if body.startswith("@beacon["):
+                comment_line = i + 1
+                block_lines = [body]
+                i += 1
+                block_end_line = None
+                while i < n:
+                    next_line = lines[i].lstrip()
+                    if next_line.startswith("#"):
+                        next_body = next_line.lstrip("#").lstrip()
+                    else:
+                        next_body = next_line
+                    block_lines.append(next_body)
+                    # Close only on the STRUCTURAL ']' delimiter line, not on a
+                    # stray ']' inside a role=/comment= value. (Dan, June 2026.)
+                    if next_body.strip().startswith("]"):
+                        block_end_line = i + 1
+                        i += 1
+                        break
+                    i += 1
+
+                field_texts: list[str] = []
+                inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+                for raw in inner_lines:
+                    text = raw.strip()
+                    if not text or text.startswith("@beacon"):
+                        continue
+                    field_texts.append(text)
+                # THE ONE shared field parser (beacon_mutation_contract): a line
+                # starts a field only with a known key + '='; others continue it.
+                fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+                kind = (fields.get("kind") or "span").strip().lower() or "span"
+                if kind not in {"ast", "span"}:
+                    if diagnostics is not None:
+                        diagnostics.append(_beacon_block_diagnostic(
+                            comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                        ))
+                    continue
+
+                show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+                beacon = {
+                    "id": fields.get("id"),
+                    "role": fields.get("role"),
+                    "slice_labels": fields.get("slice_labels"),
+                    "kind": kind,
+                    "start_snippet": fields.get("start_snippet"),
+                    "end_snippet": fields.get("end_snippet"),
+                    "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                    "comment_line": comment_line,
+                    "show_span": show_span,
+                    "show_span_explicit": show_span_explicit,
+                }
+                beacons.append(beacon)
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "kept", fields, field_texts,
+                    ))
+                continue
+        i += 1
+
+    # Second pass: compute span ranges for YAML span beacons
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        # Find end of opener's metadata block (the STRUCTURAL closing ']'
+        # line, NOT merely the first line containing a ']' -- a role=/comment=
+        # value can legitimately contain ']'. (Dan, June 2026.)
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1].lstrip()
+            if raw.startswith("#"):
+                body = raw.lstrip("#").lstrip()
+            else:
+                body = raw
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        # Scan forward for matching @beacon-close[...] with same id
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1].lstrip()
+            if raw.startswith("#"):
+                body = raw.lstrip("#").lstrip()
+            else:
+                body = raw
+
+            if "@beacon-close[" in body:
+                close_lines = [body]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1].lstrip()
+                    if next_raw.startswith("#"):
+                        next_body = next_raw.lstrip("#").lstrip()
+                    else:
+                        next_body = next_raw
+                    close_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    cl = cl.strip()
+                    if cl.startswith("id="):
+                        close_id = cl.split("=", 1)[1].strip().strip(",").strip("]")
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons

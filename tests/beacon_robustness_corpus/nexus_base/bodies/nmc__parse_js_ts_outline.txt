@@ -1,0 +1,48 @@
+def parse_js_ts_outline(file_path: str) -> List[Dict[str, Any]]:
+    """Parse a single JavaScript / TypeScript file into a NEXUS outline tree.
+
+    This mirrors parse_file_outline for Python but uses Tree-sitter to
+    discover classes, functions, and methods and produces nodes with the
+    same schema (ast_type, ast_name, ast_qualname, file_path,
+    orig_lineno_start_unused, orig_lineno_end_unused, children, priority).
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext not in {".js", ".jsx", ".ts", ".tsx"}:
+        return [{
+            "name": _warn_name("⚠️ Unsupported JS/TS extension"),
+            "note": f"File {file_path!r} does not look like a JS/TS source file.",
+            "children": [],
+        }]
+
+    if not _HAVE_TREE_SITTER:
+        return [{
+            "name": _warn_name("⚠️ JS/TS parsing not available"),
+            "note": (
+                "Tree-sitter / tree_sitter_language_pack could not be imported. "
+                "Install 'tree_sitter' and 'tree_sitter-language-pack' "
+                "(plus language wheels like 'tree-sitter-javascript' and 'tree-sitter-typescript') "
+                "in the Windows Python environment to enable JS/TS Cartographer support."
+            ),
+            "children": [],
+        }]
+
+    language_name = "javascript"
+    if ext == ".ts":
+        language_name = "typescript"
+    elif ext == ".tsx":
+        language_name = "tsx"
+
+    try:
+        outline_nodes, lines = parse_js_ts_outline_core(file_path)
+        return group_outline_by_carto_markers(
+            lines=lines,
+            outline_nodes=outline_nodes,
+            language="js_ts",
+            comment_style="js_ts",
+        )
+    except Exception as e:  # pragma: no cover - safety net
+        return [{
+            "name": _warn_name("⚠️ Parse Error (JS/TS)"),
+            "note": str(e),
+            "children": [],
+        }]

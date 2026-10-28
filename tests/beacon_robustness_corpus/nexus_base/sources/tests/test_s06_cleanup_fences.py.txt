@@ -1,0 +1,144 @@
+"""S06 Gate C — permanent cleanup fences (§12 + H5 expanded denylist).
+
+Repository-wide AST/text fences that fail if production source reintroduces
+any retired WEAVE/JEWEL/salvage identifier. Exact identifiers and dispatch
+modes only — never broad English words (§12). Includes injected-violation
+detection fixtures and the surviving-governed-modes assertion.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+SRC = REPO / "src" / "workflowy_mcp"
+ROOT_MODULES = [
+    REPO / "nexus_map_codebase.py",
+    REPO / "beacon_obtain_code_snippet.py",
+    REPO / "markdown_roundtrip.py",
+    REPO / "glimpse_deploy_trampoline.py",
+    REPO / "beacon_mutation_contract.py",
+]
+WORKER = SRC / "weave_worker.py"
+GOVERNANCE = SRC / "carto_job_governance.py"
+SERVER = SRC / "server.py"
+RECONCILE = SRC / "client" / "workflowy_move_reconcile.py"
+NEXUS = SRC / "client" / "api_client_nexus.py"
+ETCH = SRC / "client" / "api_client_etch.py"
+
+# Repo-wide retired identifiers (S06 §12 + H5). Exact tokens; prose-safe by
+# construction (identifier-shaped, never English words).
+RETIRED_REPO_WIDE = [
+    "nexus_weave_enchanted",
+    "bulk_import_from_file",
+    "jewel_file",
+    "jewel_sync_ledger",
+    "jewel_sync_summary",
+    "update_jewel_with_uuid",
+    "transform_jewel",
+    "completed_jewel_ok",
+    "completed_jewel_failed",
+    "jewelstorm",
+    "protect_notes_emoji_delete_guard",
+    "_is_salvageable_notes_delete_guard",
+    "NotesSalvageContext",
+    "_collect_notes_salvage_context_for_file",
+    "_restore_notes_for_file",
+    "_stash_notes_node",
+    "stashed_notes_by_abs_path",
+    "Notes (salvaged)",
+    "NOTES_MARKER_PREFIXES",
+    "NOTES_MARKER_FIRST_CODEPOINTS",
+    "_is_notes_name",
+    "_is_persistent_notes_subtree",
+    "_load_notes_name_predicate",
+    "ra-notes-salvage",
+    "notes_stashed",
+    "notes_moved_to_root",
+    "notes_reattached",
+    "notes_unmatched",
+    ".weave.pid",
+    "wkv1@detached-weave-lab",
+    "NotesMapping",
+    "compute_sha1",
+    "bocsv1@refresh-scaffold-boundary",
+    "notes_prefixes",
+    "_notes_marker_cps",
+]
+
+# Retired worker-surface arguments (scoped to the worker + its launchers;
+# nexus_map_codebase's standalone historical CLI legitimately keeps its own).
+RETIRED_WORKER_ARGS = ["--nexus-tag", "--json-file", "--parent-id", "--import-policy", "--dry-run"]
+
+
+def _production_py_files() -> list[Path]:
+    files = [p for p in SRC.rglob("*.py") if p.is_file()]
+    files.extend(p for p in ROOT_MODULES if p.is_file())
+    return files
+
+
+def _scan_repo_wide(paths: list[Path] | None = None) -> list[str]:
+    violations: list[str] = []
+    for path in paths if paths is not None else _production_py_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for token in RETIRED_REPO_WIDE:
+            if token in text:
+                violations.append(f"{path.name}: {token}")
+    return violations
+
+
+def test_production_source_has_zero_retired_identifiers() -> None:
+    assert _scan_repo_wide() == []
+
+
+def test_injected_violations_are_detected(tmp_path: Path) -> None:
+    for token in RETIRED_REPO_WIDE:
+        fixture = tmp_path / f"injected_{abs(hash(token))}.py"
+        fixture.write_text(f"# synthetic S06 fence fixture\nX = {token!r}\n", encoding="utf-8")
+        found = _scan_repo_wide([fixture])
+        assert found, f"scanner failed to detect injected {token!r}"
+
+
+def test_worker_modes_are_exactly_the_governed_pair() -> None:
+    source = WORKER.read_text(encoding="utf-8")
+    assert 'choices=["carto_refresh", "markdown_generate"]' in source
+    assert '"enchanted"' not in source
+    assert '"direct"' not in source
+    assert '"carto_refresh"' in source
+    assert '"markdown_generate"' in source
+
+
+def test_worker_and_launchers_have_no_retired_arguments() -> None:
+    for path in (WORKER, GOVERNANCE, SERVER):
+        text = path.read_text(encoding="utf-8")
+        for arg in RETIRED_WORKER_ARGS:
+            assert arg not in text, f"{arg} still accepted/emitted by {path.name}"
+
+
+def test_no_nexus_runs_base_worker_plumbing() -> None:
+    worker_source = WORKER.read_text(encoding="utf-8")
+    server_source = SERVER.read_text(encoding="utf-8")
+    assert "NEXUS_RUNS_BASE" not in worker_source
+    assert 'setdefault("NEXUS_RUNS_BASE"' not in server_source
+
+
+def test_reconcile_and_nexus_have_no_jewel_word() -> None:
+    for path in (RECONCILE, NEXUS):
+        assert "JEWEL" not in path.read_text(encoding="utf-8")
+
+
+def test_etch_logger_has_no_jewelstorm() -> None:
+    assert "jewelstorm" not in ETCH.read_text(encoding="utf-8")
+
+
+def test_zero_ra_notes_salvage_beacon_labels() -> None:
+    import re
+
+    for path in _production_py_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        assert "ra-notes-salvage" not in text, f"{path.name} retains ra-notes-salvage"
+        # Belt-and-suspenders: no beacon block mentions the retired label even
+        # with separator variations.
+        for match in re.finditer(r"slice_labels=([^\n]*)", text):
+            labels = [lbl.strip() for lbl in match.group(1).split(",")]
+            assert "ra-notes-salvage" not in labels, f"{path.name}: {match.group(0)}"

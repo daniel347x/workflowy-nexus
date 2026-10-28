@@ -1,0 +1,1405 @@
+"""Pure operation-registry kernel for the consolidated public MCP API.
+
+The registry is the single source for operation identity, aliases, envelope
+validation, dispatch, progressive ``describe`` output, and declared effects.
+It deliberately imports no server/client code and performs no I/O.
+"""
+
+from __future__ import annotations
+
+import copy
+import inspect
+import json
+import re
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, Awaitable, Callable, Iterable, Mapping
+
+from .handle_corrections import reset_handle_corrections
+
+
+SIDE_EFFECT_VALUES = (
+    "pure_read",
+    "render",
+    "modal_push",
+    "artifact_write",
+    "workflowy_mutation",
+    "disk_mutation",
+    "config_mutation",
+    "local_state_mutation",
+)
+ASYNC_MODES = ("never", "always", "optional")
+CORE_ERROR_CODES = (
+    "missing_verb",
+    "missing_parameter",
+    "forbidden_parameter",
+    "invalid_parameter_type",
+    "invalid_enum_value",
+    "malformed_params",
+    "invalid_parameter_combination",
+    "unknown_operation",
+    "operation_failed",
+    # S04 §7.1 universal codes: ONE kernel-owned declaration each (H1(c)) —
+    # every family expresses the coherence hard-barrier refusal and the
+    # external-dirt refresh refusal through these, never through duplicated
+    # domain-code declarations.
+    "coherence_barrier_active",
+    "refresh_required",
+    # Archive Reads U2 (§4.7.3): the universal archive read-only refusal —
+    # every family expresses "this handle is an archived node; the full
+    # story is in the message" through this ONE code.
+    "archived_node_read_only",
+)
+READ_SAFE_FINAL_SEGMENTS = frozenset(
+    {
+        "list",
+        "get",
+        "read",
+        "search",
+        "resolve",
+        "snippet",
+        "peek",
+        "render",
+        "sift",
+        "describe",
+        "status",
+        "gather",
+        "preview",
+        "ping",
+        "scry",
+        "export",
+    }
+)
+_READ_SAFE_EFFECTS = frozenset(
+    {"pure_read", "render", "modal_push", "artifact_write"}
+)
+_TOKEN_RE = re.compile(r"^[a-z0-9_.]+$")
+_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class OperationSpecError(ValueError):
+    """Registration-time operation-registry misconfiguration."""
+
+
+class OperationValidationError(ValueError):
+    """Call-time operation-envelope validation failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class _SearchLiteralValidationError(OperationValidationError):
+    """Self-contained literal-flag error; dispatch returns it without a doc dump."""
+
+    def __init__(self, spec: OperationSpec, code: str, message: str) -> None:
+        super().__init__(code, message)
+        self.spec = spec
+
+
+def _deep_freeze(value: Any) -> Any:
+    """Deep-copy and freeze registry metadata against caller mutation."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {copy.deepcopy(key): _deep_freeze(item) for key, item in value.items()}
+        )
+    if isinstance(value, tuple):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, list):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_deep_freeze(item) for item in value)
+    return copy.deepcopy(value)
+
+
+def _deep_thaw(value: Any) -> Any:
+    """Return mutable, JSON-friendly defensive copies for public describe."""
+
+    if isinstance(value, Mapping):
+        return {copy.deepcopy(key): _deep_thaw(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_deep_thaw(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [_deep_thaw(item) for item in value]
+    return copy.deepcopy(value)
+
+
+def _is_read_safe_verb(verb: str) -> bool:
+    final_segment = verb.rsplit(".", 1)[-1]
+    return final_segment in READ_SAFE_FINAL_SEGMENTS or (
+        "." not in verb and verb.startswith("render_")
+    )
+
+
+# @beacon[
+#   id=mcp-api@operation-spec,
+#   role=📦 OperationSpec,
+#   slice_labels=nexus--mcp-api,
+#   kind=ast,
+#   comment=Frozen single-source contract for one public family operation: canonical identity, aliases, harmless-ignored params, real params JSON Schema, effects, async metadata, describe mini-skill metadata, declared domain error vocabulary, and async handler. describe_suffix is one line shown ONLY by describe (appended to the summary there), never in the always-on tool description: detail an agent rarely needs leaves the description without leaving describe. Registration metadata is deep-frozen so executable behavior cannot drift through caller mutation.,
+# ]
+@dataclass(frozen=True)
+class OperationSpec:
+    """One immutable public operation contract and handler binding."""
+
+    family: str
+    verb: str
+    summary: str
+    side_effects: tuple[str, ...]
+    async_mode: str
+    params_schema: Mapping[str, Any]
+    returns: Mapping[str, Any]
+    examples: tuple[Mapping[str, Any], ...]
+    related: tuple[str, ...]
+    handler: Callable[[dict[str, Any]], Awaitable[Any]]
+    cache_backed: bool
+    param_aliases: Mapping[str, str] = field(default_factory=dict)
+    # Harmless-ignored arguments: the drop-sibling of ``param_aliases``,
+    # registered per verb in exactly the same way.  A registered key passes
+    # the validation gate and is then DROPPED before the handler runs --
+    # never mapped, never forwarded, whatever its value.  Deliberately
+    # advertised on no published surface (the tolerated-slips discipline,
+    # not the legacy-alias index note); silent acceptance is the feature.
+    param_harmless_ignored: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
+    domain_error_codes: tuple[str, ...] = ()
+    # One line appended to the summary in describe output ONLY (describe_full);
+    # the tool description's index line and describe index show the summary
+    # alone. For detail an agent rarely needs on every request.
+    describe_suffix: str = ""
+
+    def __post_init__(self) -> None:
+        family = self.family.strip() if isinstance(self.family, str) else ""
+        verb = self.verb.strip() if isinstance(self.verb, str) else ""
+        summary = self.summary.strip() if isinstance(self.summary, str) else ""
+        if not family or not verb or not summary:
+            raise OperationSpecError("family, verb, and summary must be non-empty")
+        if "\n" in summary or "\r" in summary:
+            raise OperationSpecError("summary must be exactly one line")
+        if not _TOKEN_RE.fullmatch(family) or not _TOKEN_RE.fullmatch(verb):
+            raise OperationSpecError(
+                "family and verb may contain only lowercase letters, digits, '_', and '.'"
+            )
+        if verb in {"describe", f"{family}.describe"}:
+            raise OperationSpecError("'describe' is reserved by the registry")
+        if not isinstance(self.describe_suffix, str):
+            raise OperationSpecError("describe_suffix must be a string")
+        if "\n" in self.describe_suffix or "\r" in self.describe_suffix:
+            raise OperationSpecError("describe_suffix must be exactly one line")
+        if not callable(self.handler):
+            raise OperationSpecError("handler must be callable")
+        # S03 §7.2: the cache-backed classification is REQUIRED and explicit
+        # for every public operation (no silent default either way) — the
+        # dispatch funnel wraps only cache-backed handlers in the operation
+        # cache boundary; cache-free operations keep their zero-coherence-I/O
+        # contracts (system.ping et al.).
+        if not isinstance(self.cache_backed, bool):
+            raise OperationSpecError("cache_backed must be an explicit bool")
+
+        try:
+            effects = tuple(self.side_effects)
+        except TypeError as exc:
+            raise OperationSpecError(
+                "side_effects must be an iterable of strings"
+            ) from exc
+        if not effects or any(effect not in SIDE_EFFECT_VALUES for effect in effects):
+            raise OperationSpecError(
+                f"side_effects must be a non-empty subset of {SIDE_EFFECT_VALUES!r}"
+            )
+        if len(set(effects)) != len(effects):
+            raise OperationSpecError("side_effects must not contain duplicates")
+        if self.async_mode not in ASYNC_MODES:
+            raise OperationSpecError(f"async_mode must be one of {ASYNC_MODES!r}")
+        if _is_read_safe_verb(verb) and not set(effects).issubset(_READ_SAFE_EFFECTS):
+            raise OperationSpecError(
+                f"read-safe operation {family}.{verb} declares mutating effects {effects!r}"
+            )
+
+        if not isinstance(self.params_schema, Mapping):
+            raise OperationSpecError("params_schema must be a mapping")
+        schema = copy.deepcopy(dict(self.params_schema))
+        if schema.get("type") != "object":
+            raise OperationSpecError("params_schema must be object-rooted")
+        if not isinstance(schema.get("additionalProperties"), bool):
+            raise OperationSpecError(
+                "params_schema must explicitly declare boolean additionalProperties"
+            )
+
+        if not isinstance(self.param_aliases, Mapping):
+            raise OperationSpecError("param_aliases must be a mapping")
+        canonical_properties = schema.get("properties") or {}
+        if not isinstance(canonical_properties, Mapping):
+            raise OperationSpecError("params_schema properties must be a mapping")
+        param_aliases: dict[str, str] = {}
+        for legacy_name, canonical_name in self.param_aliases.items():
+            if not isinstance(legacy_name, str) or not legacy_name:
+                raise OperationSpecError(
+                    "param_aliases keys must be non-empty legacy parameter names"
+                )
+            if not isinstance(canonical_name, str) or not canonical_name:
+                raise OperationSpecError(
+                    "param_aliases targets must be non-empty canonical parameter names"
+                )
+            if legacy_name in canonical_properties:
+                raise OperationSpecError(
+                    f"param alias {legacy_name!r} collides with a canonical property"
+                )
+            if legacy_name in param_aliases:
+                raise OperationSpecError(
+                    f"duplicate parameter alias {legacy_name!r}"
+                )
+            if canonical_name not in canonical_properties:
+                raise OperationSpecError(
+                    f"param alias target {canonical_name!r} is not a canonical property"
+                )
+            param_aliases[legacy_name] = canonical_name
+
+        # Harmless-ignored registration, validated exactly like the alias
+        # registry above: a harmless key must not be a canonical property
+        # (then it is a real parameter, not harmless) and must not be one of
+        # this verb's alias keys (a key cannot be both mapped and dropped).
+        try:
+            param_harmless_ignored = tuple(self.param_harmless_ignored)
+        except TypeError as exc:
+            raise OperationSpecError(
+                "param_harmless_ignored must be an iterable of strings"
+            ) from exc
+        for harmless_name in param_harmless_ignored:
+            if not isinstance(harmless_name, str) or not harmless_name:
+                raise OperationSpecError(
+                    "param_harmless_ignored entries must be non-empty parameter names"
+                )
+            if harmless_name in canonical_properties:
+                raise OperationSpecError(
+                    f"harmless-ignored parameter {harmless_name!r} collides "
+                    f"with a canonical property"
+                )
+            if harmless_name in param_aliases:
+                raise OperationSpecError(
+                    f"harmless-ignored parameter {harmless_name!r} collides "
+                    f"with a param alias"
+                )
+        if len(set(param_harmless_ignored)) != len(param_harmless_ignored):
+            raise OperationSpecError(
+                "param_harmless_ignored must not contain duplicates"
+            )
+
+        try:
+            aliases = tuple(self.aliases)
+        except TypeError as exc:
+            raise OperationSpecError("aliases must be an iterable of strings") from exc
+        reserved_aliases = {"describe", f"{family}.describe"}
+        if any(
+            not isinstance(alias, str)
+            or not alias.strip()
+            or not _TOKEN_RE.fullmatch(alias.strip())
+            or alias.strip() in reserved_aliases
+            for alias in aliases
+        ):
+            raise OperationSpecError("aliases must be non-empty and may not claim describe")
+        aliases = tuple(alias.strip() for alias in aliases)
+        if len(set(aliases)) != len(aliases):
+            raise OperationSpecError("aliases must be unique within an operation")
+
+        try:
+            domain_codes = tuple(self.domain_error_codes)
+        except TypeError as exc:
+            raise OperationSpecError(
+                "domain_error_codes must be an iterable of strings"
+            ) from exc
+        if len(set(domain_codes)) != len(domain_codes):
+            raise OperationSpecError("domain_error_codes must be unique")
+        for code in domain_codes:
+            if not isinstance(code, str) or not _ERROR_CODE_RE.fullmatch(code):
+                raise OperationSpecError(
+                    "domain error codes must be non-empty lowercase snake_case tokens"
+                )
+            if code in CORE_ERROR_CODES:
+                raise OperationSpecError(
+                    f"domain error code {code!r} duplicates a kernel-owned code"
+                )
+
+        if not isinstance(self.returns, Mapping):
+            raise OperationSpecError("returns must be a mapping")
+        try:
+            examples = tuple(self.examples)
+            related = tuple(self.related)
+        except TypeError as exc:
+            raise OperationSpecError("examples and related must be iterable") from exc
+        if any(not isinstance(example, Mapping) for example in examples):
+            raise OperationSpecError("every example must be an object")
+        if any(not isinstance(item, str) or not item.strip() for item in related):
+            raise OperationSpecError("related entries must be non-empty canonical names")
+
+        object.__setattr__(self, "family", family)
+        object.__setattr__(self, "verb", verb)
+        object.__setattr__(self, "summary", summary)
+        object.__setattr__(self, "side_effects", effects)
+        object.__setattr__(self, "params_schema", _deep_freeze(schema))
+        object.__setattr__(self, "param_aliases", _deep_freeze(param_aliases))
+        object.__setattr__(self, "param_harmless_ignored", param_harmless_ignored)
+        object.__setattr__(self, "returns", _deep_freeze(dict(self.returns)))
+        object.__setattr__(self, "examples", _deep_freeze(examples))
+        object.__setattr__(self, "related", related)
+        object.__setattr__(self, "aliases", aliases)
+        object.__setattr__(self, "domain_error_codes", domain_codes)
+
+    @property
+    def canonical_name(self) -> str:
+        return f"{self.family}.{self.verb}"
+
+
+@dataclass(frozen=True)
+class _IntrinsicDescribeSpec:
+    family: str
+    verb: str = "describe"
+    summary: str = "Describe this family or one operation."
+    side_effects: tuple[str, ...] = ("pure_read",)
+    async_mode: str = "never"
+    params_schema: Mapping[str, Any] | None = None
+    returns: Mapping[str, Any] | None = None
+    examples: tuple[Mapping[str, Any], ...] = ()
+    related: tuple[str, ...] = ()
+    domain_error_codes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "detail": {"type": "string", "enum": ["index", "full"]},
+                "of": {"type": "string"},
+            },
+            "additionalProperties": False,
+        }
+        returns = {
+            "type": "object",
+            "description": "Family index or one operation's full mini-skill.",
+        }
+        object.__setattr__(self, "params_schema", _deep_freeze(schema))
+        object.__setattr__(self, "returns", _deep_freeze(returns))
+
+    @property
+    def canonical_name(self) -> str:
+        return f"{self.family}.describe"
+
+
+# @beacon[
+#   id=mcp-api@operation-registry,
+#   role=📦 OperationRegistry,
+#   slice_labels=nexus--mcp-api,
+#   kind=ast,
+#   comment=Ordered per-family registry and sole authority for canonical routes, aliases, collision checks, family error-code union, compact index text, and full progressive-disclosure describe output. Owns the intrinsic describe operation so families cannot register a competing route.,
+# ]
+class OperationRegistry:
+    """Ordered operation registry for one public MCP family."""
+
+    def __init__(
+        self, family: str, family_summary: str, handle_grammar: str = ""
+    ) -> None:
+        family = family.strip() if isinstance(family, str) else ""
+        family_summary = (
+            family_summary.strip() if isinstance(family_summary, str) else ""
+        )
+        if not family or not _TOKEN_RE.fullmatch(family):
+            raise OperationSpecError("registry family must be a lowercase token")
+        if not family_summary:
+            raise OperationSpecError("registry family_summary must be non-empty")
+        self.family = family
+        self.family_summary = family_summary
+        self.handle_grammar = str(handle_grammar or "")
+        self._ops: dict[str, OperationSpec] = {}
+        self._alias_map: dict[str, str] = {}
+        self._describe_spec = _IntrinsicDescribeSpec(family)
+
+    def register(self, spec: OperationSpec) -> OperationSpec:
+        if not isinstance(spec, OperationSpec):
+            raise OperationSpecError("registry entries must be OperationSpec instances")
+        if spec.family != self.family:
+            raise OperationSpecError(
+                f"operation family {spec.family!r} does not match registry {self.family!r}"
+            )
+        canonical = spec.verb
+        if canonical in self._ops or canonical in self._alias_map:
+            raise OperationSpecError(f"operation route collision: {canonical!r}")
+
+        aliases = (spec.canonical_name, *spec.aliases)
+        seen_new: set[str] = set()
+        for alias in aliases:
+            if alias == canonical or alias in seen_new:
+                raise OperationSpecError(f"operation alias collision: {alias!r}")
+            if alias in self._ops or alias in self._alias_map:
+                raise OperationSpecError(f"operation alias collision: {alias!r}")
+            if alias in {"describe", f"{self.family}.describe"}:
+                raise OperationSpecError("operation alias collides with intrinsic describe")
+            seen_new.add(alias)
+
+        self._ops[canonical] = spec
+        for alias in aliases:
+            self._alias_map[alias] = canonical
+        return spec
+
+    def resolve(self, verb: str) -> OperationSpec | None:
+        if not isinstance(verb, str):
+            return None
+        route = verb.strip()
+        if route in self._ops:
+            return self._ops[route]
+        canonical = self._alias_map.get(route)
+        return self._ops.get(canonical) if canonical is not None else None
+
+    def operations(self) -> tuple[OperationSpec, ...]:
+        return tuple(self._ops.values())
+
+    def error_codes(self) -> tuple[str, ...]:
+        out = list(CORE_ERROR_CODES)
+        seen = set(out)
+        for spec in self._ops.values():
+            for code in spec.domain_error_codes:
+                if code not in seen:
+                    seen.add(code)
+                    out.append(code)
+        return tuple(out)
+
+    def _resolve_describable(self, value: str) -> OperationSpec | _IntrinsicDescribeSpec | None:
+        route = value.strip() if isinstance(value, str) else ""
+        if route in {"describe", f"{self.family}.describe"}:
+            return self._describe_spec
+        return self.resolve(route)
+
+    @staticmethod
+    def _index_record(spec: OperationSpec | _IntrinsicDescribeSpec) -> dict[str, Any]:
+        return {
+            "verb": spec.verb,
+            "canonical_name": spec.canonical_name,
+            "summary": spec.summary,
+            "side_effects": list(spec.side_effects),
+            "async": spec.async_mode,
+        }
+
+    def index_lines(self) -> list[str]:
+        specs: tuple[OperationSpec | _IntrinsicDescribeSpec, ...] = (
+            *self.operations(),
+            self._describe_spec,
+        )
+        # async is printed only when it is not the default "never".
+        return [
+            f"{spec.verb} — {spec.summary} "
+            f"[effects: {', '.join(spec.side_effects)}"
+            + ("" if spec.async_mode == "never" else f"; async: {spec.async_mode}")
+            + "]"
+            for spec in specs
+        ]
+
+    def describe_index(self) -> dict[str, Any]:
+        result = {
+            "family": self.family,
+            "summary": self.family_summary,
+            "operations": [
+                self._index_record(spec)
+                for spec in (*self.operations(), self._describe_spec)
+            ],
+            "handle_grammar": self.handle_grammar,
+            "describe_usage": {
+                "index": {"verb": "describe", "params": {"detail": "index"}},
+                "full": {
+                    "verb": "describe",
+                    "params": {"of": "OPERATION", "detail": "full"},
+                },
+            },
+        }
+        if any(spec.param_aliases for spec in self.operations()):
+            result["legacy_field_aliases"] = (
+                "Legacy parameter names are accepted silently for one transition "
+                "release; full operation schemas show canonical fields only."
+            )
+        return result
+
+    def describe_full(self, of: str) -> dict[str, Any]:
+        spec = self._resolve_describable(of)
+        if spec is None:
+            raise OperationValidationError(
+                "unknown_operation",
+                f"Unknown {self.family} operation {of!r}.\n" + "\n".join(self.index_lines()),
+            )
+        domain_codes = getattr(spec, "domain_error_codes", ())
+        return {
+            "operation": spec.canonical_name,
+            "summary": spec.summary + getattr(spec, "describe_suffix", ""),
+            "side_effects": list(spec.side_effects),
+            "async": spec.async_mode,
+            "params_schema": _deep_thaw(spec.params_schema),
+            "returns": _deep_thaw(spec.returns),
+            "examples": _deep_thaw(spec.examples),
+            "related": list(spec.related),
+            "error_codes": [*CORE_ERROR_CODES, *domain_codes],
+        }
+
+
+def _value_matches_type(value: Any, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "integer":
+        if isinstance(value, bool):
+            return False
+        return isinstance(value, int) or (
+            isinstance(value, float) and value.is_integer()
+        )
+    if expected == "number":
+        return not isinstance(value, bool) and isinstance(value, (int, float))
+    return False
+
+
+def _display_types(raw_type: Any) -> str:
+    if isinstance(raw_type, (list, tuple)):
+        return " | ".join(str(item) for item in raw_type)
+    return str(raw_type)
+
+
+# @beacon[
+#   id=mcp-api@validate-params,
+#   role=ƒ validate_params(spec, params),
+#   slice_labels=nexus--mcp-api,
+#   kind=ast,
+#   comment=Hand-rolled JSON-Schema-subset envelope validator shared by every family dispatcher. Enforces required/forbidden/type/enum/items-type rules, rejects Python bool as integer/number, and gathers every envelope problem into one deterministic OperationValidationError.,
+# ]
+def validate_params(
+    spec: OperationSpec | _IntrinsicDescribeSpec, params: dict[str, Any]
+) -> None:
+    """Validate the documented closed JSON-Schema subset for one envelope."""
+
+    if not isinstance(params, dict):
+        raise OperationValidationError("malformed_params", "params must be an object")
+    schema = spec.params_schema or {}
+    properties = schema.get("properties") or {}
+    required = schema.get("required") or []
+    additional = schema.get("additionalProperties")
+    problems: list[tuple[str, str]] = []
+
+    for key in required:
+        if key not in params:
+            problems.append(
+                ("missing_parameter", f"missing required parameter {key!r}")
+            )
+
+    if additional is False:
+        allowed = list(properties.keys())
+        for key in params:
+            if key not in properties:
+                problems.append(
+                    (
+                        "forbidden_parameter",
+                        f"forbidden parameter {key!r}; allowed parameters: {allowed!r}",
+                    )
+                )
+
+    for key, value in params.items():
+        prop = properties.get(key)
+        if not isinstance(prop, Mapping):
+            continue
+        raw_type = prop.get("type")
+        if raw_type is not None:
+            expected_types = (
+                raw_type if isinstance(raw_type, (list, tuple)) else [raw_type]
+            )
+            if not any(_value_matches_type(value, expected) for expected in expected_types):
+                problems.append(
+                    (
+                        "invalid_parameter_type",
+                        f"parameter {key!r} must be {_display_types(raw_type)}",
+                    )
+                )
+                continue
+        if "enum" in prop and value not in prop.get("enum", []):
+            problems.append(
+                (
+                    "invalid_enum_value",
+                    f"parameter {key!r} must be one of {list(prop.get('enum', []))!r}",
+                )
+            )
+        if isinstance(value, list):
+            items = prop.get("items")
+            if isinstance(items, Mapping) and items.get("type") is not None:
+                item_type = items.get("type")
+                item_types = (
+                    item_type if isinstance(item_type, (list, tuple)) else [item_type]
+                )
+                for index, item in enumerate(value):
+                    if not any(
+                        _value_matches_type(item, expected) for expected in item_types
+                    ):
+                        problems.append(
+                            (
+                                "invalid_parameter_type",
+                                f"parameter {key!r}[{index}] must be "
+                                f"{_display_types(item_type)}",
+                            )
+                        )
+
+    if problems:
+        raise OperationValidationError(
+            problems[0][0], "; ".join(message for _code, message in problems)
+        )
+
+
+# @beacon[
+#   id=mcp-api@make-error,
+#   role=ƒ make_error(...),
+#   slice_labels=nexus--mcp-api,
+#   kind=ast,
+#   comment=The standardized public family error-envelope builder. Produces operation-aware describe hints, preserves structured error.extra, and fail-closes on undeclared domain codes so handlers cannot leak undocumented vocabularies.,
+# ]
+def make_error(
+    *,
+    family: str,
+    operation: str | None,
+    code: str,
+    message: str,
+    extra: Any = None,
+    operation_spec: OperationSpec | _IntrinsicDescribeSpec | None = None,
+) -> dict[str, Any]:
+    """Build the sole standardized dispatcher/domain error envelope."""
+
+    allowed = set(CORE_ERROR_CODES)
+    if operation_spec is not None:
+        allowed.update(getattr(operation_spec, "domain_error_codes", ()))
+    if code not in allowed:
+        raise OperationSpecError(
+            f"undeclared error code {code!r} for operation {operation!r}"
+        )
+    if operation_spec is None and code not in CORE_ERROR_CODES:
+        raise OperationSpecError(
+            f"domain error code {code!r} requires its resolved OperationSpec"
+        )
+
+    if operation is None:
+        hint = {"tool": family, "verb": "describe", "detail": "index"}
+    else:
+        hint = {"tool": family, "verb": "describe", "of": operation.split(".", 1)[-1]}
+    error: dict[str, Any] = {
+        "code": code,
+        "message": message,
+        "describe_hint": hint,
+    }
+    if extra is not None:
+        error["extra"] = copy.deepcopy(extra)
+    return {"success": False, "operation": operation, "error": error}
+
+
+# @beacon[
+#   id=mcp-api@make-job-record,
+#   role=ƒ make_job_record(operation, job_id, state, extra),
+#   slice_labels=nexus--mcp-api,
+#   kind=ast,
+#   comment=Canonical asynchronous family-operation acknowledgement: one operation-qualified job envelope with optional operation-specific job metadata merged beneath job. Every family uses system.job.status and system.job.cancel for later control.,
+# ]
+def make_job_record(
+    *,
+    operation: str,
+    job_id: str,
+    state: str,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the normalized public job record used by every async family op."""
+
+    job: dict[str, Any] = {"id": job_id, "state": state}
+    if extra:
+        job.update(copy.deepcopy(dict(extra)))
+    return {"success": True, "operation": operation, "job": job}
+
+
+# @beacon[
+#   id=mcp-api@make-mutation-ack,
+#   role=ƒ make_mutation_ack(operation, result, changed, warnings),
+#   slice_labels=nexus--mcp-api,
+#   kind=ast,
+#   comment=Canonical mutation acknowledgement wrapper. Keeps the complete legacy payload or ledger verbatim under detail while giving every family a consistent success/operation/changed/warnings top level. Changed is explicit caller knowledge, never guessed from payload shape.,
+# ]
+def make_mutation_ack(
+    *,
+    operation: str,
+    result: Any,
+    changed: bool | None = None,
+    warnings: Iterable[Any] = (),
+) -> dict[str, Any]:
+    """Wrap one legacy mutation result without destroying its useful detail."""
+
+    if isinstance(result, Mapping) and "success" in result:
+        success = bool(result.get("success"))
+    elif isinstance(result, bool):
+        success = result
+    else:
+        success = True
+    return {
+        "success": success,
+        "operation": operation,
+        "changed": bool(changed),
+        "warnings": list(warnings),
+        "detail": result,
+    }
+
+
+def _json_params_top_level_key_at(params: str, pos: int) -> str | None:
+    """Best-effort top-level key whose value region contains ``pos``.
+
+    One cheap scan for the last ``"key":`` before ``pos`` at nesting depth 1
+    (the top-level object's own members).  A string token that never
+    terminates and has already swallowed ``pos`` counts as its preceding
+    key's value region, so the common mangled-quote failures still get a
+    key guess.  Diagnostic only; a wrong or missing guess is acceptable.
+    """
+    best: str | None = None
+    depth = 0
+    i = 0
+    n = len(params)
+    while i < n:
+        ch = params[i]
+        if ch == '"':
+            j = i + 1
+            while j < n:
+                if params[j] == "\\":
+                    j += 2
+                    continue
+                if params[j] == '"':
+                    break
+                j += 1
+            k = j + 1
+            while k < n and params[k] in " \t\r\n":
+                k += 1
+            terminated = j < n
+            is_key = terminated and k < n and params[k] == ":"
+            swallows_pos = not terminated and pos > i
+            if depth == 1 and i < pos and (is_key or swallows_pos):
+                best = params[i + 1 : j]
+            i = j + 1
+            continue
+        if ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+        i += 1
+    return best
+
+
+def _malformed_json_params_message(params: str, exc: Exception) -> str:
+    """The ``malformed_params`` message for a JSON-string ``params``.
+
+    A ``JSONDecodeError`` names where the string broke: the char position,
+    a short escaped excerpt around it (invisible characters become visible),
+    and a best-effort top-level key guess, plus one teaching sentence -- the
+    params string arrived malformed before NEXUS parsed it, usually the
+    calling client's serialization.  The code stays ``malformed_params``.
+    """
+    if not isinstance(exc, json.JSONDecodeError):
+        return f"params is not valid JSON: {exc}"
+    pos = exc.pos
+    total = len(params)
+    lo = max(0, pos - 40)
+    hi = min(total, pos + 40)
+    excerpt = params[lo:hi].encode("unicode_escape").decode("ascii")
+    prefix = "…" if lo > 0 else ""
+    suffix = "…" if hi < total else ""
+    lines = [
+        f"params is not valid JSON: {exc}",
+        f"at char {pos} of {total}: {prefix}\"{excerpt}\"{suffix}",
+    ]
+    key = _json_params_top_level_key_at(params, pos)
+    if key:
+        lines.append(f'likely inside the value of top-level key "{key}"')
+    lines.append(
+        "The params string arrived malformed before NEXUS parsed it; "
+        "usually the calling client's serialization."
+    )
+    return "\n".join(lines)
+
+
+def _normalize_params(params: Any) -> dict[str, Any]:
+    if params is None:
+        return {}
+    if isinstance(params, dict):
+        return params
+    if isinstance(params, str):
+        try:
+            decoded = json.loads(params)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise OperationValidationError(
+                "malformed_params", _malformed_json_params_message(params, exc)
+            ) from exc
+        if not isinstance(decoded, dict):
+            raise OperationValidationError(
+                "malformed_params", "JSON-string params must decode to an object"
+            )
+        return decoded
+    raise OperationValidationError(
+        "malformed_params", "params must be an object, JSON object string, or null"
+    )
+
+
+# Tolerated key slips -- deliberately undocumented, like the JSON-string grace
+# above.  A model that means one parameter is a keystroke or a naming habit away
+# from typing another: ``node_edits`` for ``note_edits`` was hit four times in
+# one conversation; ``node_uuid`` for ``node_handle``, ``output`` for
+# ``output_file`` and ``node`` for point.capture's body key ``content`` are the
+# same failure.  The resulting ``forbidden_parameter`` is clear, but it still
+# costs a whole turn, so the slip is absorbed here, at the one
+# params-normalization seam, and advertised nowhere: not in any schema, describe
+# output, skill page or tool reference.  It is a grace, not an interface; do not
+# add a second table or a second call site, and do not document it.
+#
+# A row maps one slip spelling to one or more candidate intended keys.  The
+# candidates are tried in order and the first that is a real property of the
+# verb wins -- that is how the bare ``node`` resolves to ``note`` on ``node.edit``
+# yet to ``content`` (point.capture's body key) on ``anchor.point.capture``.
+#
+# The rules, in order:
+#
+#   (1) a slip is honoured only when the mistaken spelling is NOT itself a
+#       legitimate key of that verb (schema property or legacy alias) AND at
+#       least one candidate IS -- ``nodes`` (the ETCH payload on point.capture /
+#       node.etch) is a real key and is never touched, and a slip aimed at a
+#       verb with none of its candidates falls through to the ordinary
+#       forbidden_parameter;
+#   (2) a slip spelling must not itself be a published key or legacy alias of
+#       ANY verb, or the tolerance would show up on that surface.  This is why
+#       the already-advertised alias spellings (``node_id``, ``parent_id``,
+#       ``parent_uuid``, ``root_uuid``, ``root_uuids``, ``group_id``, ``tag``,
+#       ``symbol``) and the cross-verb real keys (``sort_by``, ``sort_direction``,
+#       ``context``, ``family``, ``local``) are NOT rows here;
+#   (3) the correct spelling always wins -- both spellings present with equal
+#       values drops the slip silently, both present with different values is a
+#       loud error, never a coin toss.
+_TOLERATED_KEY_SLIPS: Mapping[str, tuple[str, ...]] = _deep_freeze(
+    {
+        # note/node misspellings (U01); bare ``node`` also reaches point.capture's
+        # body key ``content`` (U02 / approved Ledger L1).
+        "node_edits": ("note_edits",),
+        "node_file": ("note_file",),
+        "node_search": ("note_search",),
+        "node_replace": ("note_replace",),
+        "node": ("note", "content"),
+        # ``<thing>_id`` / ``<thing>_uuid`` typed for ``<thing>_handle`` -- only
+        # the spellings that are not already legacy aliases of some verb.
+        "node_uuid": ("node_handle",),
+        "root_id": ("root_handle",),
+        "root_ids": ("root_handles",),
+        "dock_id": ("dock_handle",),
+        "dock_uuid": ("dock_handle",),
+        "group_uuid": ("group_handle",),
+        "source_id": ("source_handle",),
+        "source_uuid": ("source_handle",),
+        # a bare noun typed for the qualified handle key
+        "parent": ("parent_handle",),
+        "dock": ("dock_handle",),
+        "root": ("root_handle", "root_handles"),
+        # singular for plural
+        "range": ("ranges",),
+        # the distinctive stem or keyword typed for the qualified key
+        "direction": ("sort_direction",),
+        "regex": ("is_regex",),
+        "case": ("case_sensitive",),
+        "filter": ("name_filter",),
+        "output": ("output_file",),
+        "push": ("push_to_modal",),
+        "descend": ("descend_policy",),
+        "headings": ("headings_only",),
+        "markdown": ("as_markdown",),
+        "path": ("file_path",),
+        "recurse": ("recursive",),
+        "operation": ("operations",),
+        "max": ("max_matches", "max_name_chars", "max_chars"),
+        "completed": ("include_completed",),
+        "counts": ("show_counts",),
+        "ids": ("show_ids",),
+        "job": ("job_id",),
+    }
+)
+
+
+def _apply_tolerated_key_slips(
+    spec: OperationSpec, params: dict[str, Any]
+) -> dict[str, Any]:
+    """Map a tolerated misspelling onto its intended key (see the table above)."""
+
+    if not any(slip in params for slip in _TOLERATED_KEY_SLIPS):
+        return params
+    properties = spec.params_schema.get("properties") or {}
+    normalized = dict(params)
+    for slip, intended_keys in _TOLERATED_KEY_SLIPS.items():
+        if slip not in normalized:
+            continue
+        if slip in properties or slip in spec.param_aliases:
+            continue  # a legitimate key of this verb -- never shadow it
+        intended = next((key for key in intended_keys if key in properties), None)
+        if intended is None:
+            continue  # nothing to map onto; ordinary validation reports it
+        if intended in normalized:
+            if normalized[intended] == normalized[slip]:
+                normalized.pop(slip)
+                continue
+            raise OperationValidationError(
+                "forbidden_parameter",
+                f"parameters {slip!r} and {intended!r} are both present with "
+                f"different values; pass only {intended!r}",
+            )
+        normalized[intended] = normalized.pop(slip)
+    return normalized
+
+
+# @beacon[
+#   id=mcp-api@search-literal-grace,
+#   role=ƒ _apply_search_literal(spec, params),
+#   slice_labels=nexus--mcp-api,node-ops,slices,
+#   kind=ast,
+#   comment=Unadvertised fixed-string flag normalization at the shared parameter seam: literal=true preserves the grep default or lowers smart search to an escaped regex consumed by the existing predicate span and render-spec paths; false only drops the flag. Boolean/type and explicit-regex conflicts fail before admission with short typed errors and no operation-document attachment. Published schemas and unrelated verbs stay unchanged.,
+# ]
+def _apply_search_literal(
+    spec: OperationSpec, params: dict[str, Any]
+) -> dict[str, Any]:
+    """Absorb the familiar grep flag without changing any search defaults.
+
+    Like tolerated key slips, this grace is deliberately not published. Only
+    query-taking search schemas with an existing mode selector participate;
+    a real property/alias called literal would retain its own meaning.
+
+    Node/Anchor grep is already fixed-string by default. Sift/render_search
+    is NOT: smart mode tokenizes spaces, OR, negations, quotes and globs. Lower
+    its fixed-string request to the existing escaped-regex representation so
+    node selection, line spans, modal pushes and saved-spec reprojection all
+    consume exactly the same query, without a second matcher or wire mode.
+    False means opt out of this grace, not implicitly enable regex. Explicit
+    regex plus true is contradictory; the short error is the whole remedy.
+    """
+    if "literal" not in params:
+        return params
+    properties = spec.params_schema.get("properties") or {}
+    if (
+        "query" not in properties
+        or "literal" in properties
+        or "literal" in spec.param_aliases
+        or not ("is_regex" in properties or "query_mode" in properties)
+    ):
+        return params
+
+    normalized = dict(params)
+    literal = normalized.pop("literal")
+    if not isinstance(literal, bool):
+        raise _SearchLiteralValidationError(
+            spec, "invalid_parameter_type", "parameter 'literal' must be boolean"
+        )
+    if not literal:
+        return normalized
+
+    mode_key = "is_regex" if "is_regex" in properties else "query_mode"
+    mode = normalized.get(mode_key)
+    if (mode_key == "is_regex" and mode is True) or (
+        mode_key == "query_mode" and mode == "regex"
+    ):
+        choice = "true" if mode_key == "is_regex" else "'regex'"
+        raise _SearchLiteralValidationError(
+            spec, "invalid_parameter_combination",
+            f"literal=true conflicts with {mode_key}={choice}; choose one search mode.",
+        )
+    # Leave invalid canonical values intact for the ordinary schema validator.
+    if (
+        mode_key == "query_mode"
+        and normalized.get(mode_key, "smart") == "smart"
+        and isinstance(normalized.get("query"), str)
+    ):
+        normalized["query"] = re.escape(normalized["query"])
+        normalized["query_mode"] = "regex"
+    return normalized
+
+
+def _apply_param_aliases(
+    spec: OperationSpec, params: dict[str, Any]
+) -> dict[str, Any]:
+    """Rename legacy parameter keys before canonical schema validation."""
+
+    if not spec.param_aliases:
+        return dict(params)
+    normalized = dict(params)
+    for legacy_name, canonical_name in spec.param_aliases.items():
+        if legacy_name not in normalized:
+            continue
+        if canonical_name in normalized:
+            raise OperationValidationError(
+                "forbidden_parameter",
+                f"parameters {legacy_name!r} and {canonical_name!r} conflict; "
+                f"pass only canonical {canonical_name!r}",
+            )
+        normalized[canonical_name] = normalized.pop(legacy_name)
+    return normalized
+
+
+def apply_item_aliases(
+    item: dict[str, Any],
+    aliases: Mapping[str, str],
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Resolve legacy alias keys inside ONE nested batch item.
+
+    Item-level sibling of :func:`_apply_param_aliases`, for batch payloads
+    whose entries carry their own closed key grammar (e.g. ``node.edit``'s
+    ``note_edits`` items, which accept the filesystem ``edit_file`` spelling
+    ``oldText``/``newText`` as aliases of ``search``/``replace``). Two
+    deliberate differences from the top-level rule: (1) a conflict is loud
+    ONLY when the alias and its canonical key carry DIFFERENT values --
+    identical values are accepted and the alias key dropped, because an
+    agent mixing both spellings of one value in one item is not an
+    ambiguity; (2) the error is a plain ``ValueError`` (the nested item is
+    validated in the handler layer, not at the registry boundary) and
+    ``label`` prefixes it so the rejection names the offending entry.
+    """
+
+    if not any(alias_key in item for alias_key in aliases):
+        return item
+    normalized = dict(item)
+    for alias_key, canonical_key in aliases.items():
+        if alias_key not in normalized:
+            continue
+        if canonical_key in normalized:
+            if normalized[canonical_key] == normalized[alias_key]:
+                normalized.pop(alias_key)
+                continue
+            prefix = f"{label}: " if label else ""
+            raise ValueError(
+                f"{prefix}keys {alias_key!r} and {canonical_key!r} are both "
+                f"present with different values; pass only {canonical_key!r} "
+                "(the alias is accepted only without its canonical key)"
+            )
+        normalized[canonical_key] = normalized.pop(alias_key)
+    return normalized
+
+
+def _apply_harmless_param_drop(
+    spec: OperationSpec, params: dict[str, Any]
+) -> dict[str, Any]:
+    """Drop registered harmless-ignored keys before canonical validation.
+
+    Sibling of ``_apply_param_aliases`` on the same normalization seam: a
+    key registered in ``spec.param_harmless_ignored`` passes the validation
+    gate without invalidating the call and is then dropped -- never mapped,
+    never forwarded to the handler, whatever its value.  Silent by design
+    (no warning, no informational output); advertised on no published
+    surface.  Registration discipline lives with the field's validation in
+    ``OperationSpec.__post_init__`` and the developer documentation.
+    """
+
+    if not spec.param_harmless_ignored:
+        return params
+    if not any(key in params for key in spec.param_harmless_ignored):
+        return params
+    normalized = dict(params)
+    for harmless_name in spec.param_harmless_ignored:
+        normalized.pop(harmless_name, None)
+    return normalized
+
+
+# 9a ([ap:G2UALX]): THE empty-output stub. A public verb whose whole result
+# is a bare whitespace-only string (raw Markdown / plain text) returns the
+# literal "(empty)" -- an empty string is indistinguishable from a fault or a
+# client-side fill-in stub; a literal marker is not. JSON is out by
+# construction (a dict result is its own envelope, with its own empty
+# representation). Applied ONCE per public boundary -- in
+# _dispatch_operation_core._invoke (consolidated) and the legacy profile's
+# single wrapper seam (_wrap_legacy_cache_operation_boundary) -- always on
+# the RAW handler result BEFORE the result finalizer, so an advisory,
+# correction echo or paging banner prepended above the body can never hide a
+# blank body from the stub (sequencing caveat C1). Never wired per verb,
+# never a side channel.
+EMPTY_RESULT_STUB = "(empty)"
+
+
+def stub_empty_text_result(result: Any) -> Any:
+    """9a ([ap:G2UALX]): the one pure empty-output stub.
+
+    A whitespace-only ``str`` result (``''`` included) becomes the literal
+    ``(empty)``; every other shape passes through byte-identically. Pure;
+    one implementation shared by the consolidated funnel and the legacy
+    wrapper seam.
+    """
+    if isinstance(result, str) and not result.strip():
+        return EMPTY_RESULT_STUB
+    return result
+
+
+# @beacon[
+#   id=mcp-api@dispatch-operation,
+#   role=⚡ dispatch_operation(registry, verb, params, error_logger, operation_boundary),
+#   slice_labels=nexus--mcp-api,ra-coherence,
+#   kind=ast,
+#   comment=One public family-dispatch and immediate failure-documentation funnel. The _dispatch_operation_core owns validation including unadvertised search-literal normalization before admission, cache boundaries, handlers and advisory/exception hooks. Explicit success=false outcomes for known verbs receive the existing describe_full document on a new top-level envelope, except typed literal-flag errors whose short remedy is returned without a doc dump; successes and unknown verbs pass through. No new cache transport mutation or job path. The core resets handle-correction echo state before each handler invocation and applies the ONE empty-output stub to the raw handler result before the finalizer so advisory/echo lines cannot hide a blank body. The optional injected archive operation_invoker runs where _invoke runs inside the existing cache boundary; absent behavior is unchanged.,
+# ]
+async def dispatch_operation(
+    registry: OperationRegistry,
+    verb: Any,
+    params: Any,
+    error_logger: Callable[[str], Any] | None = None,
+    operation_boundary: Callable[[str], Any] | None = None,
+    mutation_admission: Callable[[OperationSpec], Any] | None = None,
+    exception_mapper: Callable[[OperationSpec, BaseException], Any] | None = None,
+    result_finalizer: Callable[[OperationSpec, Any], Any] | None = None,
+    operation_invoker: (
+        Callable[[OperationSpec, dict, Callable[[], Any]], Any] | None
+    ) = None,
+) -> Any:
+    """Dispatch once, then attach exact operation documentation to failures.
+
+    Only an explicit top-level ``success is False`` qualifies. Typed search
+    literal-flag errors are the narrow exception: their short remedy is returned
+    directly, without the operation document that prompted this grace. All
+    other validation/handler failures retain the ordinary attachment. No error-text
+    parsing or reinterpretation of partial mutations, raw strings, or job
+    status records. The core retains ALL execution and coherence ordering;
+    this response-only step runs after that invocation has finished.
+
+    ``operation_doc`` is the ordinary describe_full result, not a second
+    serializer. It is newly owned metadata; the returned envelope is a shallow
+    copy and no original error/ledger/advisory or nested payload is modified.
+    A documentation failure must never mask the original operation outcome:
+    expose operation_doc_error instead, without fabricating fallback docs.
+
+    ``operation_invoker`` (Archive Reads, §4.3.1) is an optional injected
+    hook the core calls with ``(spec, normalized_params, _invoke)`` exactly
+    where it would call ``_invoke()`` — inside the cache boundary for
+    ``cache_backed`` specs, outside it otherwise.  Absent: byte-identical
+    behaviour.  The kernel stays client/server independent (injected).
+    """
+    try:
+        result = await _dispatch_operation_core(
+            registry, verb, params,
+            error_logger=error_logger,
+            operation_boundary=operation_boundary,
+            mutation_admission=mutation_admission,
+            exception_mapper=exception_mapper,
+            result_finalizer=result_finalizer,
+            operation_invoker=operation_invoker,
+        )
+    except _SearchLiteralValidationError as exc:
+        return make_error(
+            family=registry.family, operation=exc.spec.canonical_name,
+            code=exc.code, message=exc.message, operation_spec=exc.spec,
+        )
+    if not isinstance(result, dict) or result.get("success") is not False:
+        return result
+    if not isinstance(verb, str):
+        return result
+    spec = registry._resolve_describable(verb)
+    if spec is None:
+        return result
+    try:
+        document = registry.describe_full(spec.verb)
+    except Exception as exc:  # preserve the original failure, including partial writes
+        return {**result, "operation_doc_error": f"{type(exc).__name__}: {exc}"}
+    return {**result, "operation_doc": document}
+
+
+async def _dispatch_operation_core(
+    registry: OperationRegistry,
+    verb: Any,
+    params: Any,
+    error_logger: Callable[[str], Any] | None = None,
+    operation_boundary: Callable[[str], Any] | None = None,
+    mutation_admission: Callable[[OperationSpec], Any] | None = None,
+    exception_mapper: Callable[[OperationSpec, BaseException], Any] | None = None,
+    result_finalizer: Callable[[OperationSpec, Any], Any] | None = None,
+    operation_invoker: (
+        Callable[[OperationSpec, dict, Callable[[], Any]], Any] | None
+    ) = None,
+) -> Any:
+    """Normalize, validate, resolve, and invoke one registered operation.
+
+    Search literal-flag normalization follows ordinary aliases/key slips and
+    precedes canonical validation/admission. Its typed self-contained errors
+    bubble only to dispatch_operation for a short, document-free response.
+
+    S03 §7.1/§7.2: ``operation_boundary`` is an injected async-context-
+    manager factory (called with the canonical operation name) supplied by
+    the server fronts.  When the resolved spec is ``cache_backed`` and the
+    hook is present, the HANDLER INVOCATION ONLY runs inside the boundary —
+    describe, unknown-verb, and validation-failure paths never adopt.  The
+    kernel stays client/server independent (the hook is injected).
+
+    S04 §7 (coherence admission + result shaping, all injected and optional):
+
+    - ``mutation_admission`` — called with the resolved spec BEFORE any
+      handler invocation/boundary; returns ``None`` to proceed or a
+      ready-made error envelope to return verbatim (the universal
+      hard-barrier refusal).  Runs before side effects by construction.
+    - ``result_finalizer`` — called with ``(spec, result)`` after a
+      successful handler invocation (inside the operation boundary when
+      one wraps the call); may return a replacement result (the
+      standardized read advisory).  Never applied to validation/describe
+      paths.
+    - ``exception_mapper`` — called with ``(spec, exception)`` when the
+      handler raises; may return a ready-made error envelope (typed
+      coherence refusals) or ``None`` to fall back to the standard
+      ``operation_failed`` wrapping.
+    """
+
+    index_text = "\n".join(registry.index_lines())
+    if not isinstance(verb, str) or not verb.strip():
+        return make_error(
+            family=registry.family,
+            operation=None,
+            code="missing_verb",
+            message=f"A non-empty verb is required.\n{index_text}",
+        )
+
+    route = verb.strip()
+    try:
+        normalized_params = _normalize_params(params)
+    except OperationValidationError as exc:
+        return make_error(
+            family=registry.family,
+            operation=None,
+            code=exc.code,
+            message=exc.message,
+        )
+
+    if route in {"describe", f"{registry.family}.describe"}:
+        spec = registry._describe_spec
+        try:
+            validate_params(spec, normalized_params)
+            detail = normalized_params.get("detail")
+            of = normalized_params.get("of")
+            if detail is None:
+                detail = "full" if of is not None else "index"
+            if detail == "full" and of is None:
+                raise OperationValidationError(
+                    "missing_parameter", "describe detail='full' requires parameter 'of'"
+                )
+            if detail == "index" and of is not None:
+                raise OperationValidationError(
+                    "invalid_parameter_combination",
+                    "describe detail='index' cannot be combined with parameter 'of'",
+                )
+            if detail == "index":
+                return registry.describe_index()
+            return registry.describe_full(str(of))
+        except OperationValidationError as exc:
+            return make_error(
+                family=registry.family,
+                operation=spec.canonical_name,
+                code=exc.code,
+                message=exc.message,
+                operation_spec=spec,
+            )
+
+    spec = registry.resolve(route)
+    if spec is None:
+        return make_error(
+            family=registry.family,
+            operation=None,
+            code="unknown_operation",
+            message=f"Unknown {registry.family} operation {route!r}.\n{index_text}",
+        )
+
+    try:
+        normalized_params = _apply_param_aliases(spec, normalized_params)
+        normalized_params = _apply_harmless_param_drop(spec, normalized_params)
+        normalized_params = _apply_tolerated_key_slips(spec, normalized_params)
+        normalized_params = _apply_search_literal(spec, normalized_params)
+        validate_params(spec, normalized_params)
+    except _SearchLiteralValidationError:
+        raise
+    except OperationValidationError as exc:
+        return make_error(
+            family=registry.family,
+            operation=spec.canonical_name,
+            code=exc.code,
+            message=exc.message,
+            operation_spec=spec,
+        )
+
+    # S04 §7.2: mutation/identity admission is checked BEFORE any side
+    # effect (before the operation boundary, job creation, governor
+    # acquisition, or handler invocation).  The injected gate returns None
+    # (proceed) or a ready-made refusal envelope.
+    if mutation_admission is not None:
+        refusal = mutation_admission(spec)
+        if inspect.isawaitable(refusal):
+            refusal = await refusal
+        if refusal is not None:
+            return refusal
+
+    async def _invoke() -> Any:
+        result = spec.handler(normalized_params)
+        if inspect.isawaitable(result):
+            result = await result
+        else:
+            raise TypeError("operation handler did not return an awaitable")
+        # 9a ([ap:G2UALX]): the empty-output stub runs on the RAW handler
+        # result, BEFORE the finalizer (sequencing caveat C1) -- a finalizer
+        # that prepends advisory/echo/banner lines above the body must never
+        # hide a blank body from the stub.
+        result = stub_empty_text_result(result)
+        if result_finalizer is not None:
+            finalized = result_finalizer(spec, result)
+            if inspect.isawaitable(finalized):
+                finalized = await finalized
+            result = finalized
+        return result
+
+    # 23db916f (handle-correction echo): exactly one operation per echo.
+    # Clear any stale correction records right before this operation's
+    # handler runs, so the finalizer can only ever echo THIS operation's
+    # prefix-adoption corrections -- never a previous operation's leftovers.
+    reset_handle_corrections()
+
+    try:
+        if spec.cache_backed and operation_boundary is not None:
+            async with operation_boundary(spec.canonical_name):
+                if operation_invoker is not None:
+                    return await operation_invoker(spec, normalized_params, _invoke)
+                return await _invoke()
+        if operation_invoker is not None:
+            return await operation_invoker(spec, normalized_params, _invoke)
+        return await _invoke()
+    except Exception as exc:  # noqa: BLE001 - dispatcher is the public boundary
+        if exception_mapper is not None:
+            mapped = exception_mapper(spec, exc)
+            if inspect.isawaitable(mapped):
+                mapped = await mapped
+            if mapped is not None:
+                return mapped
+        if error_logger is not None:
+            try:
+                error_logger(
+                    f"{spec.canonical_name} failed: {type(exc).__name__}: {exc}"
+                )
+            except Exception:
+                pass
+        return make_error(
+            family=registry.family,
+            operation=spec.canonical_name,
+            code="operation_failed",
+            message=f"{type(exc).__name__}: {exc}",
+            operation_spec=spec,
+        )
+
+
+__all__ = [
+    "ASYNC_MODES",
+    "CORE_ERROR_CODES",
+    "READ_SAFE_FINAL_SEGMENTS",
+    "SIDE_EFFECT_VALUES",
+    "OperationRegistry",
+    "OperationSpec",
+    "OperationSpecError",
+    "OperationValidationError",
+    "dispatch_operation",
+    "make_error",
+    "make_job_record",
+    "make_mutation_ack",
+    "validate_params",
+]

@@ -1,0 +1,53 @@
+def _beacon_block_extent_for_language(
+    language: str,
+    lines: list[str],
+    beacon: dict,
+) -> Optional[tuple[int, int]]:
+    """Return the 0-based inclusive ``(start_idx, end_idx)`` extent of one
+    parsed beacon block, or ``None`` when it cannot be computed."""
+    cl = beacon.get("comment_line")
+    if not isinstance(cl, int) or cl <= 0 or cl > len(lines):
+        return None
+    if language == "markdown":
+        start_idx = cl - 1
+        j = cl - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            if "<!--" in raw:
+                start_idx = j - 1
+                break
+            if raw.strip():
+                break
+            j -= 1
+        end_idx = None
+        j = cl
+        while j <= len(lines):
+            raw = lines[j - 1]
+            if "-->" in raw:
+                end_idx = j - 1
+                break
+            j += 1
+        if end_idx is None:
+            # Unterminated block (malformed source): fail CLOSED rather than
+            # fabricate an extent reaching unintended content.
+            return None
+        return start_idx, end_idx
+    prefix = _BEACON_EXTENT_LINE_PREFIX.get(language)
+    if prefix is None:
+        return None
+    start_idx = cl - 1
+    end_idx = None
+    j = cl
+    while j <= len(lines):
+        raw = lines[j - 1]
+        stripped = raw.lstrip()
+        body = stripped[len(prefix):].lstrip() if stripped.startswith(prefix) else stripped
+        if body == "]":
+            end_idx = j - 1
+            break
+        j += 1
+    if end_idx is None:
+        # Unterminated block (malformed source): fail CLOSED rather than
+        # fabricate an extent reaching unintended content.
+        return None
+    return start_idx, end_idx

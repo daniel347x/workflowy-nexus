@@ -1,0 +1,330 @@
+"""Stage2-13 (Locked Work Order §6.13) — Acceptance-Gate-1 inventory
+closure for Q3 (PAIR-026 / PAIR-027).
+
+The instrument's Acceptance Gate 1 requires every distinct WAIT / REFUSE
+mechanism to be exercised by REAL OS processes contending on the REAL
+filesystem governance artifacts.  The pre-existing Q3 suites (e.g.
+``test_carto_job_governance_a1.py::test_q3_lease_overlap_is_symmetric_with_active_claim_and_other_lease``
+and ``test_carto_governance_phase_c.py::test_full_admission_refuses_claim_and_q3_overlap``)
+cover the overlap SEMANTICS in-process; this file closes the remaining
+real-process inventory — an in-process mock would NOT qualify:
+
+  1. Q3 ↔ Q3 (PAIR-026): a live Q3 holder blocks a second Q3 acquisition
+     on the same disk target (refusal), and the same acquisition succeeds
+     after the holder's release — two REAL subprocesses on real
+     ``.q3_leases`` artifacts.
+
+  2. Q3 → CARTO (PAIR-027): a live Q3 holder blocks a REAL CARTO
+     admission over the overlapping footprint
+     (``overlap_conflict``).
+
+  3. CARTO → Q3 (PAIR-027): a live CARTO claim holder blocks a REAL Q3
+     acquisition over the overlapping footprint
+     (``GovernanceConflictError``).
+
+  4. Dead-Q3-owner recovery witness: a REAL subprocess acquires a Q3
+     lease and dies (``os._exit``); the shared sweep clean-reaps it
+     (plain delete, no tombstone) and a NEW acquisition over the same
+     target succeeds.
+
+SENSITIVITY (would-it-fail): ``STAGE2_NEUTRALIZE_OVERLAP=1`` neutralizes
+``footprints_overlap`` in the contender — the acquisition then SUCCEEDS
+over a live holder and the refusal assertions fail.  Never set in the
+shipped tests.
+
+Every actor logs its real PID; the parent asserts pairwise distinctness.
+"""
+
+from __future__ import annotations
+
+import os
+import time
+
+from stage2_harness import (
+    REPO,
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp import carto_job_governance as gov
+
+_ACCOUNT = "a" * 32
+
+_COMMON = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch, wait_for_file\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "root = Path(sys.argv[1])\n"
+    "JOBS = str(root / 'cartographer_jobs')\n"
+    f"ACCOUNT = {_ACCOUNT!r}\n"
+    "TARGET = root / 'target.py'\n"
+    "FP = {\n"
+    "    'kind': 'file',\n"
+    "    'path': str(TARGET),\n"
+    "    'root_uuid': 'file-a',\n"
+    "    'ancestor_chain': ['file-a'],\n"
+    "}\n"
+)
+
+# A Q3 holder that acquires, parks, then releases on signal.
+_Q3_HOLDER = (
+    _COMMON
+    + """
+touch(root / "pid_q3_holder", str(os.getpid()))
+leases = gov.acquire_q3_leases([FP], account_scope_id=ACCOUNT, jobs_root=JOBS)
+(root / "q3_lease_id").write_text(leases[0]["lease_id"])
+touch(root / "q3_holding")
+assert wait_for_file(root / "release_q3", timeout=180)
+gov.release_q3_leases(leases, jobs_root=JOBS)
+touch(root / "q3_released")
+"""
+)
+
+# A Q3 contender: attempt while the holder holds (refusal), then after
+# release (success).
+_Q3_CONTENDER = (
+    _COMMON
+    + """
+touch(root / "pid_q3_contender", str(os.getpid()))
+assert wait_for_file(root / "q3_holding", timeout=120)
+
+if os.environ.get("STAGE2_NEUTRALIZE_OVERLAP"):
+    # SENSITIVITY-ONLY (never set in the shipped test): overlap is
+    # neutralized — the acquisition SUCCEEDS over a live holder and the
+    # refusal assertions fail.
+    gov.footprints_overlap = lambda a, b: False
+
+refused = False
+error = None
+try:
+    gov.acquire_q3_leases([FP], account_scope_id=ACCOUNT, jobs_root=JOBS)
+except gov.GovernanceConflictError as exc:
+    refused = True
+    error = str(exc)
+touch(root / "release_q3")
+assert wait_for_file(root / "q3_released", timeout=120)
+leases = gov.acquire_q3_leases([FP], account_scope_id=ACCOUNT, jobs_root=JOBS)
+gov.release_q3_leases(leases, jobs_root=JOBS)
+write_result(root / "q3_contender_result.json", {
+    "refused": refused, "error": error, "acquired_after_release": True,
+})
+"""
+)
+
+# A CARTO admission contender (Q3 holder blocks it).
+_CARTO_ADMISSION = (
+    _COMMON
+    + """
+touch(root / "pid_carto_admission", str(os.getpid()))
+assert wait_for_file(root / "q3_holding", timeout=120)
+refused_kind = None
+error = None
+try:
+    asyncio.run(gov.admit_carto_job(
+        job_file=str(root / "cartographer_jobs" / "contend-job.json"),
+        job_payload={"id": "contend-job"},
+        job_type="CARTO_REFRESH",
+        dedupe_key="e" * 64,
+        account_scope_id=ACCOUNT,
+        footprint=FP,
+        launcher="agent",
+        parent_job_id=None,
+        prepared=False,
+        jobs_root=JOBS,
+    ))
+except gov.AdmissionRefusal as exc:
+    refused_kind = exc.kind
+    error = str(exc)
+write_result(root / "carto_admission_result.json", {
+    "refused_kind": refused_kind, "error": error,
+})
+"""
+)
+
+# A CARTO claim holder that acquires a real claim, parks, then exits.
+_CLAIM_HOLDER = (
+    _COMMON
+    + """
+touch(root / "pid_claim_holder", str(os.getpid()))
+identity = gov.current_process_identity()
+claim = gov.build_claim(
+    job_id="claim-holder-job",
+    job_type="CARTO_REFRESH",
+    dedupe_key="d" * 64,
+    account_scope_id=ACCOUNT,
+    footprint=FP,
+    launcher="agent",
+    parent_job_id=None,
+    launcher_pid=identity.pid,
+    pid=identity.pid,
+    pid_create_time=identity.create_time,
+    pid_start_ticks=identity.start_ticks,
+    pid_boot_id=identity.boot_id,
+    handoff_state="running",
+    spawn_started_at=None,
+    execution_owner="detached_worker",
+)
+gov.write_claim(claim, JOBS)
+touch(root / "claim_holding")
+assert wait_for_file(root / "test_done", timeout=240)
+"""
+)
+
+# A Q3 contender against the live CARTO claim.
+_Q3_VS_CLAIM = (
+    _COMMON
+    + """
+touch(root / "pid_q3_vs_claim", str(os.getpid()))
+assert wait_for_file(root / "claim_holding", timeout=120)
+refused = False
+error = None
+try:
+    gov.acquire_q3_leases([FP], account_scope_id=ACCOUNT, jobs_root=JOBS)
+except gov.GovernanceConflictError as exc:
+    refused = True
+    error = str(exc)
+write_result(root / "q3_vs_claim_result.json", {
+    "refused": refused, "error": error,
+})
+"""
+)
+
+# A Q3 acquirer that acquires then dies for real.
+_Q3_DYING = (
+    _COMMON
+    + """
+touch(root / "pid_q3_dying", str(os.getpid()))
+leases = gov.acquire_q3_leases([FP], account_scope_id=ACCOUNT, jobs_root=JOBS)
+(root / "dying_lease_id").write_text(leases[0]["lease_id"])
+touch(root / "q3_dying_ready")
+os._exit(42)
+"""
+)
+
+
+# @beacon[
+#   id=auto-beacon@test_q3_vs_q3_real_process_refusal_then_acquire_after_release-qmof,
+#   role=test_q3_vs_q3_real_process_refusal_then_acquire_after_release,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_q3_vs_q3_real_process_refusal_then_acquire_after_release(tmp_path):
+    """PAIR-026: a live Q3 holder blocks a second Q3 acquisition (real
+    refusal on real .q3_leases artifacts); the same acquisition succeeds
+    after the holder's release."""
+    root = tmp_path / "share"
+    (root / "cartographer_jobs").mkdir(parents=True)
+    (root / "target.py").write_text("# target\n", encoding="utf-8")
+    touch(root / "pid_parent", str(os.getpid()))
+
+    holder = launch_actor(_Q3_HOLDER, str(root), str(REPO))
+    contender = launch_actor(_Q3_CONTENDER, str(root), str(REPO))
+    try:
+        result = read_result(root / "q3_contender_result.json", timeout=180)
+        assert result["refused"] is True
+        assert "overlaps active owner" in (result["error"] or "")
+        assert result["acquired_after_release"] is True
+
+        pids = collect_distinct_pids(root, ["parent", "q3_holder", "q3_contender"])
+        assert len(set(pids.values())) == 3
+    finally:
+        finish_actor(holder, label="q3 holder")
+        finish_actor(contender, label="q3 contender")
+
+
+def test_q3_holder_blocks_carto_admission_real_process(tmp_path):
+    """PAIR-027 (Q3 → CARTO): a live Q3 holder blocks a REAL CARTO
+    admission over the overlapping footprint (overlap_conflict)."""
+    root = tmp_path / "share"
+    (root / "cartographer_jobs").mkdir(parents=True)
+    (root / "target.py").write_text("# target\n", encoding="utf-8")
+    touch(root / "pid_parent", str(os.getpid()))
+
+    holder = launch_actor(_Q3_HOLDER, str(root), str(REPO))
+    admission = launch_actor(_CARTO_ADMISSION, str(root), str(REPO))
+    try:
+        result = read_result(root / "carto_admission_result.json", timeout=180)
+        assert result["refused_kind"] == "overlap_conflict"
+        assert "overlaps" in (result["error"] or "")
+
+        touch(root / "release_q3")
+        assert wait_for_file(root / "q3_released", timeout=60)
+
+        pids = collect_distinct_pids(root, ["parent", "q3_holder", "carto_admission"])
+        assert len(set(pids.values())) == 3
+    finally:
+        finish_actor(holder, label="q3 holder")
+        finish_actor(admission, label="carto admission")
+
+
+# @beacon[
+#   id=auto-beacon@test_carto_claim_holder_blocks_q3_acquisition_real_process-bzrs,
+#   role=test_carto_claim_holder_blocks_q3_acquisition_real_process,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_carto_claim_holder_blocks_q3_acquisition_real_process(tmp_path):
+    """PAIR-027 (CARTO → Q3): a live CARTO claim holder blocks a REAL Q3
+    acquisition over the overlapping footprint."""
+    root = tmp_path / "share"
+    (root / "cartographer_jobs").mkdir(parents=True)
+    (root / "target.py").write_text("# target\n", encoding="utf-8")
+    touch(root / "pid_parent", str(os.getpid()))
+
+    holder = launch_actor(_CLAIM_HOLDER, str(root), str(REPO))
+    contender = launch_actor(_Q3_VS_CLAIM, str(root), str(REPO))
+    try:
+        result = read_result(root / "q3_vs_claim_result.json", timeout=180)
+        assert result["refused"] is True
+        assert "overlaps active owner" in (result["error"] or "")
+
+        pids = collect_distinct_pids(root, ["parent", "claim_holder", "q3_vs_claim"])
+        assert len(set(pids.values())) == 3
+    finally:
+        touch(root / "test_done")
+        finish_actor(holder, label="claim holder")
+        finish_actor(contender, label="q3 contender vs claim")
+
+
+def test_dead_q3_owner_sweep_reaps_and_new_acquisition_succeeds(tmp_path):
+    """Dead-Q3-owner recovery witness: a REAL acquirer dies holding the
+    lease; the shared sweep clean-reaps it (plain delete, no tombstone);
+    a NEW acquisition over the same target succeeds."""
+    root = tmp_path / "share"
+    jobs_root = root / "cartographer_jobs"
+    jobs_root.mkdir(parents=True)
+    (root / "target.py").write_text("# target\n", encoding="utf-8")
+    touch(root / "pid_parent", str(os.getpid()))
+
+    dying = launch_actor(_Q3_DYING, str(root), str(REPO))
+    assert wait_for_file(root / "q3_dying_ready", timeout=60)
+    lease_id = (root / "dying_lease_id").read_text().strip()
+    out, err = dying.communicate(timeout=60)
+    assert dying.returncode == 42, f"q3 owner did not die at its kill point:\n{err}"
+    time.sleep(0.05)  # let the OS reap the handle (classification beat)
+
+    sweep = gov.sweep_region_governance(str(jobs_root))
+    assert lease_id in sweep.reaped_lease_ids
+    lease_files = list((jobs_root / ".q3_leases").glob("*.json"))
+    assert not any(lease_id in path.name for path in lease_files)
+
+    # A NEW acquisition over the same target succeeds immediately.
+    footprint = {
+        "kind": "file",
+        "path": str(root / "target.py"),
+        "root_uuid": "file-a",
+        "ancestor_chain": ["file-a"],
+    }
+    leases = gov.acquire_q3_leases([footprint], account_scope_id=_ACCOUNT, jobs_root=str(jobs_root))
+    assert len(leases) == 1
+    gov.release_q3_leases(leases, jobs_root=str(jobs_root))
+
+    pids = collect_distinct_pids(root, ["parent", "q3_dying"])
+    assert len(set(pids.values())) == 2

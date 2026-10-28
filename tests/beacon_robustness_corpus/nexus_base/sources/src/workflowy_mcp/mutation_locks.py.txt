@@ -1,0 +1,428 @@
+"""U01 — same-node mutation sequencing: the in-process, per-node-keyed serializer.
+
+Spec [ap:XKQQUO] rev 2 (LOCKED). Three concurrent ``node.edit`` calls on one
+note all returned success while two writes were silently lost ([ap:4HOBDR]):
+every note mutation is a read-modify-write, and two overlapping windows mean
+the later write was computed from a stale read. This module is the fix RECON
+selected ([ap:FUWYU2]): a small, deliberately boring keyed-lock registry —
+NO persistence, NO epochs, NO claims, NO lease plane, NO second coherence
+kingdom (I5). It rides the existing per-call operation-boundary lifetime and
+vanishes at process exit.
+
+The contract, in one paragraph: each mutating tool call acquires the exact
+resolved UUID key(s) of the node(s) it is about to read-modify-write, AFTER
+handle resolution and BEFORE its first live content read, and holds them
+through the return of its final write (the uniform seam rule, spec §6.2; the
+per-verb key table is §6.3 — the seams live in server.py / api_client_core.py,
+never here). A second call touching the same node waits its turn and SAYS SO
+(``serialization: {waited_seconds, waited_on}`` on its result — the §6.7
+honesty field, built from this module's per-task wait record). A call touching
+disjoint nodes never waits at all (I2 — there is no global lock here). Waiting
+is bounded by ``mutation_lock_acquire_timeout_seconds`` (default 60 s); on
+expiry the call fails typed (``mutation_serialization_timeout`` with
+``retry_after``) — refuse, never queue (I3). Hangs are impossible by
+construction (I4): multi-key acquisitions always take keys in sorted order,
+nested acquisitions of keys the calling task already holds are no-op grants
+(the ``MUTATION_LOCK_STATE`` ContextVar held-set), a NEW-operation spawn
+starts with an empty held set (``create_isolated_context_task`` clears it),
+and the bounded wait converts any residual wait-for cycle into a loud error.
+
+Design notes (spec §6.4–§6.6):
+
+* **Registry.** ``_LOCKS`` maps node UUID -> ``_KeyEntry`` (one
+  ``asyncio.Lock`` + a waiter refcount + the current holder). All registry
+  mutation (lookup-or-create + waiter increment; release + idle check +
+  delete) happens in SYNCHRONOUS segments between awaits — the single event
+  loop makes those segments atomic, so there is no guard lock (the pinned
+  invariant: no ``await`` inside any registry-mutation segment).
+* **Idle GC.** An entry with no holder and zero waiters is deleted, so the
+  registry never grows without bound. A waiter's reference is counted
+  synchronously BEFORE it awaits, so a release-then-delete check can never
+  strand a waiter on a deleted lock.
+* **Bounded wait — no task spawn.** ``asyncio.wait_for(entry.lock.acquire(),
+  remaining)`` runs the acquire inline in the calling task (Python 3.12+; on
+  3.10/3.11 wait_for wraps it in an asyncio-internal task with the same
+  cancellation routing). On deadline or external cancellation the
+  CancelledError lands inside ``Lock.acquire``, whose own cancellation path
+  on every supported interpreter (>=3.10) leaves the lock UNHELD for this
+  caller: a queued-not-granted acquire simply dequeues; a granted-then-
+  cancelled one passes the grant on (``if not self._locked:
+  self._wake_up_first()``), so no phantom holder and no lost wake-up. The
+  holder mark is set in the same task step as the successful return (no
+  await between), so ``locked() with holder None`` is never observable for
+  a live grant.
+* **Fairness.** ``asyncio.Lock`` wakes waiters FIFO; no scheduling policy is
+  added here.
+* **Re-entrancy.** ``MUTATION_LOCK_STATE`` holds the calling task's state
+  (held-key set + wait events). ``asyncio.create_task`` copies the context
+  by reference, so a same-operation subtask shares the parent's state —
+  intended inheritance. A NEW operation spawns through
+  ``create_isolated_context_task`` (coherence/operation_cache.py), which
+  clears this ContextVar alongside the cache snapshot: a background job must
+  never inherit its submitter's held set.
+
+Public surface (spec §5 — stable for later units; nothing else here is
+public): ``mutation_node_locks`` · ``MutationSerializationTimeoutError`` ·
+``held_mutation_lock_keys`` · ``registry_held_keys`` · ``MUTATION_LOCK_STATE``.
+The CUT-1 CARTO admission hook in ``admit_carto_job_locked`` consumes
+``registry_held_keys()``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextvars
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+from .models.config import ServerConfig
+
+__all__ = [
+    "MUTATION_LOCK_STATE",
+    "MutationSerializationTimeoutError",
+    "held_mutation_lock_keys",
+    "mutation_node_locks",
+    "registry_held_keys",
+]
+
+#: The acquire-budget default, read from the ONE source of truth (the
+#: ServerConfig field default) so this module and the config model can never
+#: drift. Runtime value: ``get_server_config().mutation_lock_acquire_timeout_seconds``.
+_DEFAULT_ACQUIRE_TIMEOUT_SECONDS = float(
+    ServerConfig.model_fields["mutation_lock_acquire_timeout_seconds"].default
+)
+
+
+# @beacon[
+#   id=mutation-locks@timeout-error,
+#   slice_labels=mutation-serialization,
+#   kind=ast,
+#   comment=U01 bounded-wait refusal (I3/P4, spec §5/§6.6). code=mutation_serialization_timeout is the family error vocabulary string — _mcp_exception_mapper turns it into the standard make_error envelope (extra: retry_after, contended_keys uuid8 prefixes, timeout_seconds); retry_after is 2 × the write governor's pacing interval. Refuse, never queue: nothing waits longer than the knob.,
+# ]
+class MutationSerializationTimeoutError(RuntimeError):
+    """The typed bounded-wait refusal: the acquire budget was exhausted.
+
+    Attributes (spec §5):
+      ``code``            — ``"mutation_serialization_timeout"`` (the declared
+                            domain error code of every affected mutation verb).
+      ``retry_after``     — seconds; 2 × the write governor's interval.
+      ``contended_keys``  — 8-char UUID prefixes of the key(s) that could not
+                            be acquired inside the budget.
+      ``timeout_seconds`` — the knob value that bounded this acquisition.
+
+    A ``RuntimeError`` so every existing broad ``except Exception`` ledger /
+    job runner keeps treating it as a loud failure; the MCP surface comes from
+    the exception mapper's dedicated branch, never a bespoke dict.
+    """
+
+    code = "mutation_serialization_timeout"
+
+    def __init__(
+        self,
+        *,
+        retry_after: float,
+        contended_keys: list[str],
+        timeout_seconds: float,
+    ) -> None:
+        self.retry_after = float(retry_after)
+        self.contended_keys = [str(key) for key in contended_keys]
+        self.timeout_seconds = float(timeout_seconds)
+        super().__init__(
+            f"mutation serialization: timed out after {self.timeout_seconds:g}s "
+            f"waiting for the node mutation lock on {', '.join(self.contended_keys)} "
+            "(another operation is mid read-modify-write on the same node); "
+            f"refusing rather than queueing — retry after {self.retry_after:g}s."
+        )
+
+
+class _TaskLockState:
+    """Per-task lock state — the value of :data:`MUTATION_LOCK_STATE`.
+
+    Members (consumed by the spec §6.7 honesty seams through the public
+    ContextVar; this class itself is private):
+
+    * ``held``  — the set of keys this task-context currently holds (the
+      re-entrancy authority: an acquisition whose keys are all held is a
+      no-op grant).
+    * ``waits`` — one ``(key, seconds)`` event per CONTENDED acquisition that
+      succeeded, in acquisition order, for the task's lifetime (the
+      operation). Timed-out acquisitions record nothing (they report through
+      the typed refusal instead).
+    * ``serialization(since)`` — builds the §6.7 ack field from the events at
+      index ``since`` onward (batch seams snapshot ``len(waits)`` around each
+      item for per-item attribution); ``None`` when there are none, so the
+      uncontended wire shape stays byte-identical (§10).
+    """
+
+    __slots__ = ("held", "waits")
+
+    def __init__(self) -> None:
+        self.held: set[str] = set()
+        self.waits: list[tuple[str, float]] = []
+
+    def serialization(self, since: int = 0) -> dict[str, Any] | None:
+        """The ``serialization: {waited_seconds, waited_on}`` field, or None."""
+        events = self.waits[since:]
+        if not events:
+            return None
+        return {
+            "waited_seconds": round(sum(seconds for _, seconds in events), 3),
+            "waited_on": sorted({key[:8] for key, _ in events}),
+        }
+
+
+# @beacon[
+#   id=mutation-locks@state-contextvar,
+#   slice_labels=mutation-serialization,
+#   kind=ast,
+#   comment=U01 re-entrancy ContextVar (spec §5/§6.5). Per-task state (held-key set + wait events), created on first acquisition; default None so a NEW-operation spawn cleared to None starts empty. create_isolated_context_task (coherence/operation_cache.py) MUST clear it alongside the cache snapshot — the one permitted external write (A6). asyncio.create_task copies the context by reference: a same-operation subtask shares the parent's state object (intended inheritance).,
+# ]
+MUTATION_LOCK_STATE: contextvars.ContextVar[_TaskLockState | None] = contextvars.ContextVar(
+    "MUTATION_LOCK_STATE", default=None
+)
+
+
+class _KeyEntry:
+    """One registry entry: the node's lock + waiter refcount + current holder.
+
+    ``waiters`` counts registered acquirers (incremented SYNCHRONOUSLY before
+    the await, decremented after it settles — success, timeout, or
+    cancellation). ``holder`` is the owning task state, marked in the same
+    task step as the successful acquire return and cleared in the same
+    synchronous segment as the release.
+    """
+
+    __slots__ = ("holder", "lock", "waiters")
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.waiters = 0
+        self.holder: _TaskLockState | None = None
+
+
+#: The keyed registry (spec §6.4). PRIVATE to this module — no other module
+#: reads or writes it (the sole imports elsewhere are the public names above;
+#: spec §14 PERMITTED DIRECT-STATE INTERNALS).
+_LOCKS: dict[str, _KeyEntry] = {}
+
+
+def _acquire_timeout_seconds() -> float:
+    """The bounded-wait knob (config; default mirrors the ServerConfig field)."""
+    try:
+        from .config import get_server_config
+
+        return float(get_server_config().mutation_lock_acquire_timeout_seconds)
+    except Exception:  # noqa: BLE001 — a lock helper must never die on config
+        return _DEFAULT_ACQUIRE_TIMEOUT_SECONDS
+
+
+def _governor_interval_seconds() -> float:
+    """The write governor's pacing interval (retry_after sizing, spec §6.6)."""
+    try:
+        from .config import get_server_config
+
+        return float(get_server_config().write_governor.interval_seconds)
+    except Exception:  # noqa: BLE001
+        from .carto_write_governor import DEFAULT_WRITE_INTERVAL_SECONDS
+
+        return float(DEFAULT_WRITE_INTERVAL_SECONDS)
+
+
+def _gc_entry(key: str, entry: _KeyEntry) -> None:
+    """Delete an idle entry (no holder, zero waiters). Synchronous segment."""
+    if entry.holder is None and not entry.lock.locked() and entry.waiters == 0:
+        if _LOCKS.get(key) is entry:
+            del _LOCKS[key]
+
+
+def _release_key(key: str, state: _TaskLockState) -> None:
+    """Release ONE held key for ``state`` and GC the entry when idle.
+
+    Synchronous segment; releases exactly what the grant acquired (never keys
+    the task already held from an outer scope — spec §6.4).
+    """
+    state.held.discard(key)
+    entry = _LOCKS.get(key)
+    if entry is None:
+        return
+    if entry.holder is state and entry.lock.locked():
+        entry.holder = None
+        entry.lock.release()
+    _gc_entry(key, entry)
+
+
+async def _bounded_acquire(
+    entry: _KeyEntry,
+    key: str,
+    state: _TaskLockState,
+    deadline: float,
+    loop: asyncio.AbstractEventLoop,
+    timeout_seconds: float,
+) -> None:
+    """Acquire one CONTENDED key under the deadline; mark the holder.
+
+    No task spawn: ``asyncio.wait_for`` runs the acquire inline in this task
+    (3.12+) or in an asyncio-internal task (3.10/3.11) — either way the
+    deadline/cancellation lands inside ``Lock.acquire``, whose cancellation
+    path on every supported interpreter leaves the lock unheld for this
+    caller and passes a granted-then-cancelled lock on to the next waiter
+    (no phantom holder, no lost wake-up; see the module docstring). On ANY
+    failure path this acquisition holds nothing for ``key`` — the grant
+    unwinding in :func:`mutation_node_locks` releases the keys it already
+    took. Refuse, never queue (I3): the deadline bounds the WHOLE
+    acquisition, so no call waits longer than the knob across several keys.
+    """
+    remaining = max(deadline - loop.time(), 0.0)
+    try:
+        await asyncio.wait_for(entry.lock.acquire(), timeout=remaining)
+    except (asyncio.TimeoutError, TimeoutError):
+        raise MutationSerializationTimeoutError(
+            retry_after=2.0 * _governor_interval_seconds(),
+            contended_keys=[key[:8]],
+            timeout_seconds=timeout_seconds,
+        ) from None
+    entry.holder = state
+
+
+class _Grant:
+    """The acquisition receipt yielded by :func:`mutation_node_locks` (spec §5).
+
+    ``waited_seconds`` / ``waited_on`` describe THIS acquisition only (the
+    task-cumulative record for the §6.7 result fields lives on
+    :data:`MUTATION_LOCK_STATE`). A no-op grant (every key already held by
+    this task) reports zero and releases nothing on exit.
+    """
+
+    __slots__ = ("acquired", "state", "waited_on", "waited_seconds")
+
+    def __init__(
+        self,
+        acquired: list[str] | None = None,
+        state: _TaskLockState | None = None,
+        events: list[tuple[str, float]] | None = None,
+    ) -> None:
+        self.acquired: list[str] = list(acquired or ())
+        self.state = state
+        events = events or []
+        self.waited_seconds: float = round(sum(seconds for _, seconds in events), 3)
+        self.waited_on: list[str] = sorted({key[:8] for key, _ in events})
+
+
+# @beacon[
+#   id=mutation-locks@acquire,
+#   slice_labels=mutation-serialization,
+#   kind=ast,
+#   comment=U01 THE acquisition seam (spec §5/§6.2/§6.4). async with mutation_node_locks(*uuids): dedupes+sorts the exact resolved node UUIDs, skips keys the calling task already holds (ContextVar re-entrancy — nested impls no-op), registers each waiter synchronously before awaiting (a release-then-delete can never strand one), waits under the bounded budget (mutation_lock_acquire_timeout_seconds, refuse-never-queue), records contention on the task wait record (the §6.7 honesty source), and releases EXACTLY the keys this grant acquired in its finally — cancellation-safe at both kill points (mid-wait: nothing held, waiter unregistered; mid-hold: released). Uncontended acquisition is a synchronous fast path (O(1) dict work, no loop yield — §10 latency).,
+# ]
+@asynccontextmanager
+async def mutation_node_locks(*uuids: str) -> AsyncIterator[_Grant]:
+    """Hold the given node keys for the calling task across its RMW window.
+
+    Usage (the spec §6.3 seams): after handles are resolved to exact UUIDs
+    and BEFORE the first live content read, through the final write::
+
+        async with mutation_node_locks(node_id):
+            current = await client.get_node(node_id)   # live read
+            ...compose...
+            await client.update_node(node_id, request)  # final write
+
+    Keys are deduped and sorted (multi-key acquisitions always happen in
+    sorted-UUID order — I4); blank values are ignored (call sites exclude
+    non-node destinations per the §6.3 table). Raises
+    :class:`MutationSerializationTimeoutError` when the budget expires;
+    propagates ``CancelledError`` holding nothing.
+    """
+    keys = sorted({str(uuid) for uuid in uuids if str(uuid or "").strip()})
+    state = MUTATION_LOCK_STATE.get()
+    if state is None:
+        state = _TaskLockState()
+        MUTATION_LOCK_STATE.set(state)
+
+    new_keys = [key for key in keys if key not in state.held]
+    if not new_keys:
+        # Re-entrant no-op grant (spec §6.5): every key is already held by
+        # this task-context; exit releases NOTHING.
+        yield _Grant()
+        return
+
+    loop = asyncio.get_running_loop()
+    timeout_seconds = _acquire_timeout_seconds()
+    deadline = loop.time() + timeout_seconds
+    acquired: list[str] = []
+    events: list[tuple[str, float]] = []
+    try:
+        for key in new_keys:
+            # --- synchronous registry segment (no await) -------------------
+            entry = _LOCKS.get(key)
+            if entry is None:
+                entry = _KeyEntry()
+                _LOCKS[key] = entry
+            entry.waiters += 1
+            # ---------------------------------------------------------------
+            contended = False
+            started = loop.time()
+            try:
+                if not entry.lock.locked() and entry.waiters == 1:
+                    # Uncontended fast path: the lock is free and this call is
+                    # the only registered waiter, so Lock.acquire()'s own fast
+                    # branch completes WITHOUT yielding (§10: O(1) dict work).
+                    await entry.lock.acquire()
+                    entry.holder = state
+                else:
+                    contended = True
+                    await _bounded_acquire(
+                        entry, key, state, deadline, loop, timeout_seconds
+                    )
+            finally:
+                # --- synchronous registry segment (no await) ---------------
+                entry.waiters -= 1
+                _gc_entry(key, entry)
+            acquired.append(key)
+            state.held.add(key)
+            if contended:
+                waited = max(loop.time() - started, 0.0)
+                events.append((key, waited))
+                state.waits.append((key, waited))
+    except BaseException:
+        # Any failure (timeout, cancellation, unexpected) releases everything
+        # THIS acquisition took, then re-raises (spec §6.4).
+        for key in reversed(acquired):
+            _release_key(key, state)
+        raise
+
+    try:
+        yield _Grant(acquired, state, events)
+    finally:
+        for key in reversed(acquired):
+            _release_key(key, state)
+
+
+# @beacon[
+#   id=mutation-locks@held-keys,
+#   slice_labels=mutation-serialization,
+#   kind=ast,
+#   comment=U01 diagnostics (spec §5): the CALLING task's currently held keys — its re-entrancy set (tests + diagnostics). Empty when the task holds none / has no state yet.,
+# ]
+def held_mutation_lock_keys() -> frozenset[str]:
+    """The calling task's currently held keys (empty when it holds none)."""
+    state = MUTATION_LOCK_STATE.get()
+    return frozenset(state.held) if state is not None else frozenset()
+
+
+# @beacon[
+#   id=mutation-locks@registry-held-keys,
+#   slice_labels=mutation-serialization,
+#   kind=ast,
+#   comment=Process-local synchronous snapshot of EVERY key actually held by ANY task. CUT-1 admit_carto_job_locked consults it once against the current view; this is admission-time protection, not a lifetime hold. Tests assert inner nested acquisitions take no key the outer did not already hold.,
+# ]
+def registry_held_keys() -> frozenset[str]:
+    """Every key currently held by any task in this process.
+
+    Synchronous snapshot; the holder mark is set/cleared in the same task
+    step / synchronous segment as the lock's grant/release, so this never
+    reports a phantom holder. CUT-1 admit_carto_job_locked consults this
+    process-local snapshot synchronously at admission; it is not a lifetime
+    hold and does not report waiting keys.
+    """
+    return frozenset(key for key, entry in _LOCKS.items() if entry.holder is not None)

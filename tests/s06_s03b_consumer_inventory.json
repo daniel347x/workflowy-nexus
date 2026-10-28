@@ -1,0 +1,116 @@
+{
+  "manifest": "S06 post-cleanup S03-B cache-consumer inventory (generated post-S06)",
+  "baseline_commit": "06cd024",
+  "consumer_idiom_sites": {
+    "_get_nodes_export_cache_nodes(": {
+      "src/workflowy_mcp/beacon_batch.py": 2,
+      "src/workflowy_mcp/client/api_client_core.py": 1,
+      "src/workflowy_mcp/client/api_client_nexus.py": 4,
+      "src/workflowy_mcp/markdown_generate_pipeline.py": 1,
+      "src/workflowy_mcp/server.py": 26
+    },
+    "export_nodes_impl(": {
+      "src/workflowy_mcp/client/api_client_core.py": 2,
+      "src/workflowy_mcp/client/api_client_etch.py": 3,
+      "src/workflowy_mcp/client/api_client_nexus.py": 12
+    },
+    "._nodes_export_cache": {
+      "src/workflowy_mcp/client/api_client_core.py": 3,
+      "src/workflowy_mcp/client/api_client_etch.py": 2
+    },
+    "publish_local_cache_view(": {
+      "src/workflowy_mcp/client/api_client_core.py": 7,
+      "src/workflowy_mcp/coherence/operation_cache.py": 1
+    },
+    "_publish_lineage_view(": {
+      "src/workflowy_mcp/client/api_client_core.py": 4
+    },
+    "load_nodes_by_id_from_cache(": {
+      "src/workflowy_mcp/client/api_client_nexus.py": 8,
+      "src/workflowy_mcp/server.py": 4
+    }
+  },
+  "deleted_consumers_absent": {
+    "_collect_notes_salvage_context_for_file": [],
+    "_restore_notes_for_file": [],
+    "_stash_notes_node": [],
+    "_is_notes_name": [],
+    "NotesSalvageContext": [],
+    "nexus_weave_enchanted": [],
+    "bulk_import_from_file": [],
+    "update_jewel_with_uuid": [],
+    "_is_salvageable_notes_delete_guard": []
+  },
+  "surviving_consumers_present": {
+    "refresh_file_node_beacons": [
+      "beacon_obtain_code_snippet.py",
+      "nexus_map_codebase.py",
+      "src/workflowy_mcp/beacon_refresh_support.py",
+      "src/workflowy_mcp/carto_job_governance.py",
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/markdown_generate_pipeline.py",
+      "src/workflowy_mcp/server.py"
+    ],
+    "refresh_folder_cartographer_sync": [
+      "src/workflowy_mcp/carto_job_governance.py",
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/server.py"
+    ],
+    "export_nodes_impl": [
+      "src/workflowy_mcp/client/api_client.py",
+      "src/workflowy_mcp/client/api_client_core.py",
+      "src/workflowy_mcp/client/api_client_etch.py",
+      "src/workflowy_mcp/client/api_client_nexus.py"
+    ],
+    "resolve_cartographer_path_from_node": [
+      "src/workflowy_mcp/beacon_fix.py",
+      "src/workflowy_mcp/beacon_integrity.py",
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/markdown_generate_pipeline.py",
+      "src/workflowy_mcp/server.py"
+    ],
+    "update_beacon_from_node": [
+      "nexus_map_codebase.py",
+      "src/workflowy_mcp/carto_job_governance.py",
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/legacy_tool_mapping.py",
+      "src/workflowy_mcp/server.py"
+    ],
+    "preflight_beacon_write_from_node": [
+      "src/workflowy_mcp/beacon_batch.py",
+      "src/workflowy_mcp/client/api_client_nexus.py"
+    ],
+    "plan_beacon_write_from_node": [
+      "src/workflowy_mcp/beacon_batch.py",
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/lightning_rod_mutation_spec.py"
+    ],
+    "commit_beacon_write_plan": [
+      "src/workflowy_mcp/beacon_batch.py",
+      "src/workflowy_mcp/client/api_client_nexus.py"
+    ],
+    "reconcile_tree": [
+      "nexus_map_codebase.py",
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/client/carto_reconcile_cpu.py",
+      "src/workflowy_mcp/client/workflowy_move_reconcile.py",
+      "src/workflowy_mcp/server.py"
+    ],
+    "run_markdown_generate_pipeline": [
+      "src/workflowy_mcp/carto_job_governance.py",
+      "src/workflowy_mcp/markdown_generate_pipeline.py",
+      "src/workflowy_mcp/server.py"
+    ],
+    "_get_nodes_export_cache_nodes": [
+      "src/workflowy_mcp/beacon_batch.py",
+      "src/workflowy_mcp/client/api_client_core.py",
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/markdown_generate_pipeline.py",
+      "src/workflowy_mcp/server.py"
+    ],
+    "load_nodes_by_id_from_cache": [
+      "src/workflowy_mcp/client/api_client_nexus.py",
+      "src/workflowy_mcp/server.py"
+    ]
+  }
+}

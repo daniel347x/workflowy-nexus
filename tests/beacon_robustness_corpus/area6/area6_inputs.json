@@ -1,0 +1,605 @@
+{
+ "meta": {
+  "schema": "beacon_robustness/u01/area6_freeze@1",
+  "generated_at": "2026-10-19T04:28:08.027186+00:00",
+  "base_rev": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+  "origin": {
+   "fixtures_a6.py": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/fixtures_a6.py",
+    "sha256": "c1547d206bd2d763f62ad2d260a57f81cc8f5e8fc66958c41de121158d513675"
+   },
+   "run_other.py": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/run_other.py",
+    "sha256": "24506b18e7e20190be6a1f3ca16684033e77e9c69477263b340ec65c5ec66d8b"
+   },
+   "out/matrix.json": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/matrix.json",
+    "sha256": "8af85d164c41d5edddc5de16f9b21d9edfbe47cfb9a9e657d55c937952896691"
+   },
+   "out/other.json": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/other.json",
+    "sha256": "e94c11f57e6ce60c63d537d48ba4abea1868f5d57d0bde39101df6f5b6323e1a"
+   },
+   "out/baseline_table.md": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/baseline_table.md",
+    "sha256": "c5963cd2d04db88bcc4e68756307ffa85f9b11ff02658ce8f3a65682a92ea2d3"
+   },
+   "out/corpus.json": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/corpus.json",
+    "sha256": "0b8d55e942edb6af35ab25103e279da62de16f6222810cdc914e8715a7e44daf"
+   }
+  },
+  "notes": [
+   "inputs are quoted verbatim; no test needs /mnt/c/tmp or git",
+   "matrix 'file_path' strings point at the ORIGINAL scratch run (historical provenance only)",
+   "cur = a345dc7 production normalize_duplicate_ast_beacons_in_file; sp = shared-parser prototype; spg = prototype with guard; see area-6/run_matrix.py (frozen sha256 above)",
+   "run_other.py 'other' rows: alias normalizer (A01-A12), C0 repair (C01-C06), EOF normalise (E01-E08)"
+  ]
+ },
+ "fixture_module": {
+  "module": "fixtures_a6",
+  "cases": [
+   {
+    "name": "py_01_two_good",
+    "ext": "py",
+    "good": [
+     "alpha@f",
+     "beta@f"
+    ],
+    "note": "two good ast blocks on one def (two sessions)",
+    "text": "import os\n\n\n# @beacon[\n#   id=alpha@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=First session.,\n# ]\n# @beacon[\n#   id=beta@f,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Second session.,\n# ]\ndef f(x):\n    return x + 1\n\n\n# @beacon[\n#   id=keep@g,\n#   slice_labels=lab-k,\n#   kind=ast,\n#   comment=Unrelated.,\n# ]\ndef g():\n    return 2\n",
+    "sha256": "619658144e91710e4f8de3feb450bbf69ad3a1e8052146e75a42c1d53c0a3c76",
+    "lines": 27
+   },
+   {
+    "name": "py_02_numeric_second",
+    "ext": "py",
+    "good": [
+     "auto-beacon@f-x1y2",
+     "carto@000123"
+    ],
+    "note": "numeric-suffix id second: survivor = numeric id at first position",
+    "text": "# @beacon[\n#   id=auto-beacon@f-x1y2,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=Agent-made.,\n# ]\n# @beacon[\n#   id=carto@000123,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Numeric id.,\n# ]\ndef f(x):\n    return x\n",
+    "sha256": "e1eac2e5fd4ed7e667dcc9f9d478de5132dda69fe0fc54392f2539a302a4341b",
+    "lines": 14
+   },
+   {
+    "name": "py_03_numeric_both",
+    "ext": "py",
+    "good": [
+     "x@001",
+     "y@002"
+    ],
+    "note": "two numeric ids: first numeric wins",
+    "text": "# @beacon[\n#   id=x@001,\n#   slice_labels=lab-x,\n#   kind=ast,\n# ]\n# @beacon[\n#   id=y@002,\n#   slice_labels=lab-y,\n#   kind=ast,\n# ]\ndef f():\n    pass\n",
+    "sha256": "8cb4f27afa3bf3cbe9962fc8ade6dd02fa0383d31a5252d315161a3fb546a624",
+    "lines": 12
+   },
+   {
+    "name": "py_04_span_over_ast",
+    "ext": "py",
+    "good": [
+     "s@f",
+     "a@f"
+    ],
+    "note": "stacked span + ast on one def",
+    "text": "# @beacon[\n#   id=s@f,\n#   slice_labels=lab-s,\n#   kind=span,\n#   comment=Span starts here.,\n# ]\n# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=Ast on f.,\n# ]\ndef f():\n    return 1\n# @beacon-close[\n#   id=s@f,\n# ]\n",
+    "sha256": "95d20bfc21ff4e09fb9ae90103345aa09b055e5b43797ed489d9996cd56af2e6",
+    "lines": 17
+   },
+   {
+    "name": "py_05_ast_over_span",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "s@f"
+    ],
+    "note": "stacked ast + span on one def (span between ast and def)",
+    "text": "# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=Ast on f.,\n# ]\n# @beacon[\n#   id=s@f,\n#   slice_labels=lab-s,\n#   kind=span,\n#   comment=Span starts here.,\n# ]\ndef f():\n    return 1\n# @beacon-close[\n#   id=s@f,\n# ]\n",
+    "sha256": "dd02343cfed4bf234abb6c4088a0601635e1c24a3d2bd0ab029912b304f7e354",
+    "lines": 17
+   },
+   {
+    "name": "py_06_F2_lost_bracket",
+    "ext": "py",
+    "good": [
+     "good@g"
+    ],
+    "note": "F2: lost ] + ]-led code line + good block",
+    "text": "# @beacon[\n#   id=lost@0,\n#   slice_labels=lab-lost,\n#   kind=ast,\n#   comment=Lost its bracket.,\nPRECIOUS = [\n    \"a\",\n    \"b\",\n]\n# @beacon[\n#   id=good@g,\n#   slice_labels=lab-good,\n#   kind=ast,\n#   comment=Good block.,\n# ]\ndef g():\n    return PRECIOUS\n",
+    "sha256": "9d0cc408913a0cff07fcc8b8991b3407339053bedc859da0b1f684fade27fa46",
+    "lines": 17
+   },
+   {
+    "name": "py_07_lost_bracket_no_code_bracket",
+    "ext": "py",
+    "good": [
+     "good@g"
+    ],
+    "note": "lost ] with no ]-led code line: swallows next block, no merge",
+    "text": "# @beacon[\n#   id=lost@0,\n#   slice_labels=lab-lost,\n#   kind=ast,\n#   comment=Lost its bracket.,\nx = 1\n\n# @beacon[\n#   id=good@g,\n#   slice_labels=lab-good,\n#   kind=ast,\n#   comment=Good block.,\n# ]\ndef g():\n    return x\n",
+    "sha256": "4e844591880cfc26b551188459bf741e66938b6045867a78adb648b041bcaff9",
+    "lines": 15
+   },
+   {
+    "name": "py_08_idless_opener",
+    "ext": "py",
+    "good": [
+     "good@g"
+    ],
+    "note": "id-less opener above a good block (c07)",
+    "text": "# @beacon[\n#   slice_labels=lab-noid,\n#   kind=ast,\n#   comment=No id here.,\n# ]\n\n# @beacon[\n#   id=good@g,\n#   slice_labels=lab-good,\n#   kind=ast,\n#   comment=Good block.,\n# ]\ndef g():\n    return 1\n",
+    "sha256": "044b3467cf904c858ef190172e84dde607a79c84cc093571a274526c69f1c6f6",
+    "lines": 14
+   },
+   {
+    "name": "py_09_nested_opener",
+    "ext": "py",
+    "good": [
+     "good@g"
+    ],
+    "note": "nested opener above a good block (c06)",
+    "text": "# @beacon[\n#   id=outer@0,\n#   slice_labels=lab-outer,\n#   kind=ast,\n#   comment=Outer opener.,\n# @beacon[\n#   id=inner@0,\n#   slice_labels=lab-inner,\n#   kind=ast,\n#   comment=Inner opener.,\n# ]\n\n# @beacon[\n#   id=good@g,\n#   slice_labels=lab-good,\n#   kind=ast,\n#   comment=Good block.,\n# ]\ndef g():\n    return 1\n",
+    "sha256": "6152625fe7bad256dee6c0133ec4d8d8112f0cfa58800a2527d84a445939b82a",
+    "lines": 20
+   },
+   {
+    "name": "py_10_junk_opener",
+    "ext": "py",
+    "good": [
+     "good@g"
+    ],
+    "note": "junk opener (trailing text) above a good block (c16)",
+    "text": "# @beacon[ junk after opener\n#   id=junk@0,\n#   slice_labels=lab-junk,\n#   kind=ast,\n# ]\n\n# @beacon[\n#   id=good@g,\n#   slice_labels=lab-good,\n#   kind=ast,\n#   comment=Good block.,\n# ]\ndef g():\n    return 1\n",
+    "sha256": "349de7873b0fab3dbdf05749786d54c8e27abe107e216e96b698854f495d43b6",
+    "lines": 14
+   },
+   {
+    "name": "py_11_docstring_two_examples",
+    "ext": "py",
+    "good": [
+     "real@h"
+    ],
+    "note": "two stacked example blocks inside a docstring (block inside a string)",
+    "text": "# @beacon[\n#   id=real@h,\n#   slice_labels=lab-real,\n#   kind=ast,\n#   comment=Real block.,\n# ]\ndef h():\n    \"\"\"Show the syntax.\n\n    # @beacon[\n    #   id=ex1@0,\n    #   slice_labels=lab-ex1,\n    #   kind=ast,\n    # ]\n    # @beacon[\n    #   id=ex2@0,\n    #   slice_labels=lab-ex2,\n    #   kind=ast,\n    # ]\n    def example():\n        pass\n    \"\"\"\n    return 0\n",
+    "sha256": "1a6e3f9d09cd6b7127613a9a9b22a9a1754bf9947e8a4acdc2fee43e33191046",
+    "lines": 23
+   },
+   {
+    "name": "py_12_test_fixture_string",
+    "ext": "py",
+    "good": [],
+    "note": "test fixture string with two stacked blocks (tests/ are mapped)",
+    "text": "FIXTURE = '''\\\n# @beacon[\n#   id=first,\n#   slice_labels=alpha,\n#   kind=ast,\n#   comment=legacy alias,\n# ]\n# @beacon[\n#   id=second,\n#   slice_labels=beta,\n#   kind=ast,\n#   comment=canonical second,\n# ]\ndef target():\n    return 1\n'''\n\n\ndef test_fixture():\n    assert FIXTURE.count('@beacon[') == 2\n",
+    "sha256": "aa3828af6fa0b8526e9ab2d209e8240ef784cd84c40bb3bcbe92cd46b142a2d3",
+    "lines": 20
+   },
+   {
+    "name": "py_13_unterminated_after_good",
+    "ext": "py",
+    "good": [
+     "good@f"
+    ],
+    "note": "good block then an unterminated block (no ] to EOF) on the same def",
+    "text": "# @beacon[\n#   id=good@f,\n#   slice_labels=lab-good,\n#   kind=ast,\n#   comment=Good block.,\n# ]\n# @beacon[\n#   id=unterm@0,\n#   slice_labels=lab-unterm,\n#   kind=ast,\n#   comment=Never closed.,\ndef f():\n    return 1\n\n\ndef g():\n    return 2\n",
+    "sha256": "19b3a3a4ed2ed33b72d6971e5b1f7a6c592eb96e676059b441408458de1fa360",
+    "lines": 17
+   },
+   {
+    "name": "py_14_multiline_showspan",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "multi-line comment + show_span on one of two blocks",
+    "text": "# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   show_span=true,\n#   comment=A long comment that wraps\n#     onto a second line,\n# ]\n# @beacon[\n#   id=b@f,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Second.,\n# ]\ndef f():\n    return 1\n",
+    "sha256": "4398571bc929171a1322b26f4928ba4a0efd095f603f66f74b1e4b32f561e38a",
+    "lines": 16
+   },
+   {
+    "name": "py_15_detached_indented",
+    "ext": "py",
+    "good": [
+     "stray@0",
+     "good@g"
+    ],
+    "note": "an indented block left at the end of f's body + good block on g",
+    "text": "def f():\n    x = 1\n    return x\n    # @beacon[\n    #   id=stray@0,\n    #   slice_labels=lab-stray,\n    #   kind=ast,\n    #   comment=Left behind at the end of f.,\n    # ]\n\n\n# @beacon[\n#   id=good@g,\n#   slice_labels=lab-good,\n#   kind=ast,\n#   comment=Good block.,\n# ]\ndef g():\n    return 2\n",
+    "sha256": "797f43c846fc57250ac287871788da9405751e0aa54cc55482ca077f8e3e17a8",
+    "lines": 19
+   },
+   {
+    "name": "py_16_method_two_blocks",
+    "ext": "py",
+    "good": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "note": "two blocks on one method (indented)",
+    "text": "class C:\n    # @beacon[\n    #   id=a@C.m,\n    #   slice_labels=lab-a,\n    #   kind=ast,\n    #   comment=First.,\n    # ]\n    # @beacon[\n    #   id=b@C.m,\n    #   slice_labels=lab-b,\n    #   kind=ast,\n    #   comment=Second.,\n    # ]\n    def m(self):\n        return 1\n",
+    "sha256": "6dd8a22fc14212532b5188f796d54df34515697fc37dac23d54e2c537cf7f0bd",
+    "lines": 15
+   },
+   {
+    "name": "py_17_crlf_two_good",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "CRLF file with two good blocks",
+    "text": "import os\r\n# @beacon[\r\n#   id=a@f,\r\n#   slice_labels=lab-a,\r\n#   kind=ast,\r\n#   comment=First.,\r\n# ]\r\n# @beacon[\r\n#   id=b@f,\r\n#   slice_labels=lab-b,\r\n#   kind=ast,\r\n#   comment=Second.,\r\n# ]\r\ndef f():\r\n    return 1\r\n\r\n\r\ndef g():\r\n    return 2\r\n",
+    "sha256": "42a45be4fb89cd48903ecabbf8bdcc7b8d3d1e8cf92f2289bc53e49577378451",
+    "lines": 19
+   },
+   {
+    "name": "py_18_multiline_decorator",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "two blocks on one decorated def, multi-line decorator between",
+    "text": "# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=Above decorator.,\n# ]\n@decorate(\n    arg=1,\n)\n# @beacon[\n#   id=b@f,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Between decorator and def.,\n# ]\ndef f():\n    return 1\n",
+    "sha256": "128d014e0befe30187001c03f7f41f6baf87c7a1f054a774363bd2bd54448060",
+    "lines": 17
+   },
+   {
+    "name": "py_19_three_blocks",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f",
+     "c@f"
+    ],
+    "note": "three blocks (comment and blank between); identical comments dedupe",
+    "text": "# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,shared,\n#   kind=ast,\n#   comment=One.,\n# ]\n# an ordinary comment between\n# @beacon[\n#   id=b@f,\n#   slice_labels=lab-b,shared,\n#   kind=ast,\n#   comment=One.,\n# ]\n\n# @beacon[\n#   id=c@f,\n#   slice_labels=lab-c,\n#   kind=ast,\n#   comment=Three.,\n# ]\ndef f():\n    return 1\n",
+    "sha256": "e7fa2f237d9cf23150acc4165e717abd5bb8afb87a5b949b0da90b0505c56703",
+    "lines": 22
+   },
+   {
+    "name": "py_20_double_hash_comments",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "## opener with comments= (alias missed): merge drops the comments= text",
+    "text": "##  @beacon[\n##   id=a@f,\n##   slice_labels=lab-a,\n##   kind=ast,\n##   comments=Typed with the alias.,\n## ]\n# @beacon[\n#   id=b@f,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Second.,\n# ]\ndef f():\n    return 1\n",
+    "sha256": "e84bc1e152853c94745ab1213014ad85d0a4d97156a630537f42e5263377a22f",
+    "lines": 14
+   },
+   {
+    "name": "py_21_formfeed",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "form feed in source: readlines vs splitlines line models diverge",
+    "text": "import os\n\f\nx = 'line\fbreak'\n# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=First.,\n# ]\n# @beacon[\n#   id=b@f,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Second.,\n# ]\ndef f():\n    return 1\n",
+    "sha256": "a20239f8e6fcec50fe6b8852bcb595c7279015ffef253388701625f7f0ebbd7a",
+    "lines": 19
+   },
+   {
+    "name": "py_22_comment_continuation_key",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "wrapped comment whose continuation line starts 'comments ='",
+    "text": "# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=This explains the\n#   comments = table layout,\n# ]\n# @beacon[\n#   id=b@f,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Second.,\n# ]\ndef f():\n    return 1\n",
+    "sha256": "bb0b79af57cc659e03b914762ff7e562fdde2f30a41c823eea23e060a285c430",
+    "lines": 15
+   },
+   {
+    "name": "js_01_two_good",
+    "ext": "js",
+    "good": [
+     "alpha@f",
+     "beta@f"
+    ],
+    "note": "two good // blocks on one function",
+    "text": "// @beacon[\n//   id=alpha@f,\n//   slice_labels=lab-a,\n//   kind=ast,\n//   comment=First session.,\n// ]\n// @beacon[\n//   id=beta@f,\n//   slice_labels=lab-b,\n//   kind=ast,\n//   comment=Second session.,\n// ]\nfunction f(x) {\n  return x + 1;\n}\n",
+    "sha256": "af68413ee070e96244dfcddf640a2ac43ae3e76b5289c56698722179ce9a1481",
+    "lines": 15
+   },
+   {
+    "name": "js_02_F2_lost_bracket",
+    "ext": "js",
+    "good": [
+     "good@g"
+    ],
+    "note": "F2 in JS: lost ] + ];-led code line + good block",
+    "text": "// @beacon[\n//   id=lost@0,\n//   slice_labels=lab-lost,\n//   kind=ast,\n//   comment=Lost its bracket.,\nconst PRECIOUS = [\n  \"a\",\n];\n// @beacon[\n//   id=good@g,\n//   slice_labels=lab-good,\n//   kind=ast,\n//   comment=Good block.,\n// ]\nfunction g() { return PRECIOUS; }\n",
+    "sha256": "b4498d1b78ed6747a521d1bbfdb500ef9af4424d60d9ebddf872ad6999a76537",
+    "lines": 15
+   },
+   {
+    "name": "js_03_jsdoc_two",
+    "ext": "js",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "two JSDoc-form blocks on one function",
+    "text": "/**\n * Doc for f.\n * @beacon[\n *   id=a@f,\n *   slice_labels=lab-a,\n *   kind=ast,\n * ]\n */\n/**\n * @beacon[\n *   id=b@f,\n *   slice_labels=lab-b,\n *   kind=ast,\n * ]\n */\nfunction f() {}\n",
+    "sha256": "387bcb6a08eaa329cc1bd5491e11ae78658c1bd56ab3c40088e409bde6c98622",
+    "lines": 16
+   },
+   {
+    "name": "js_04_cblock_plus_line",
+    "ext": "js",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "/* */ block + // block on one function",
+    "text": "/* @beacon[\n   id=a@f,\n   slice_labels=lab-a,\n   kind=ast,\n ] */\n// @beacon[\n//   id=b@f,\n//   slice_labels=lab-b,\n//   kind=ast,\n//   comment=Line form.,\n// ]\nfunction f() {}\n",
+    "sha256": "74f3ecabdaa23b1a0cf2bc383ea4191cbb74fa46b8d90dfca2d9d9ff386c1a92",
+    "lines": 12
+   },
+   {
+    "name": "js_05_template_literal",
+    "ext": "js",
+    "good": [],
+    "note": "two example blocks inside a template literal",
+    "text": "const DOC = `\n// @beacon[\n//   id=ex1@0,\n//   slice_labels=lab-ex1,\n//   kind=ast,\n// ]\n// @beacon[\n//   id=ex2@0,\n//   slice_labels=lab-ex2,\n//   kind=ast,\n// ]\nfunction example() {}\n`;\nexport default DOC;\n",
+    "sha256": "b5a89e0559cb04212b777e257622b152b85057d9c0df830ed7025a879a46856a",
+    "lines": 14
+   },
+   {
+    "name": "js_06_code_mentions_opener",
+    "ext": "js",
+    "good": [
+     "good@g"
+    ],
+    "note": "a code line containing @beacon[ (shared JS parser opens there; hygiene does not)",
+    "text": "const OPENER = \"@beacon[\";\nconst x = 1;\nconst arr = [\n  1,\n];\n// @beacon[\n//   id=good@g,\n//   slice_labels=lab-good,\n//   kind=ast,\n//   comment=Good block.,\n// ]\nfunction g() { return OPENER; }\n",
+    "sha256": "3891dacc655534c5c0c96d88d063805eae3ce9434b0bfbd37beceb5a9ff5d9d9",
+    "lines": 12
+   },
+   {
+    "name": "js_07_unterminated_after_good",
+    "ext": "js",
+    "good": [
+     "good@f"
+    ],
+    "note": "good block then an unterminated // block on the same function",
+    "text": "// @beacon[\n//   id=good@f,\n//   slice_labels=lab-good,\n//   kind=ast,\n//   comment=Good block.,\n// ]\n// @beacon[\n//   id=unterm@0,\n//   slice_labels=lab-unterm,\n//   kind=ast,\n//   comment=Never closed.,\nfunction f() { return 1; }\n",
+    "sha256": "afbdb7c70cedf594f838e55da145e16be0692d7f974bcc535af0b7687b22947b",
+    "lines": 12
+   },
+   {
+    "name": "js_08_idless_and_nested",
+    "ext": "js",
+    "good": [
+     "good@g"
+    ],
+    "note": "id-less // opener above a good block",
+    "text": "// @beacon[\n//   slice_labels=lab-noid,\n//   kind=ast,\n//   comment=No id.,\n// ]\n// @beacon[\n//   id=good@g,\n//   slice_labels=lab-good,\n//   kind=ast,\n//   comment=Good block.,\n// ]\nfunction g() {}\n",
+    "sha256": "bb8c8fa33f59239524f48558762b0c4a92eabe263b65c92851d7c79cc2b54582",
+    "lines": 12
+   },
+   {
+    "name": "ts_09_decorated_method",
+    "ext": "ts",
+    "good": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "note": "TS: two blocks around a decorator on one method",
+    "text": "class C {\n  // @beacon[\n  //   id=a@C.m,\n  //   slice_labels=lab-a,\n  //   kind=ast,\n  //   comment=First.,\n  // ]\n  @Input()\n  // @beacon[\n  //   id=b@C.m,\n  //   slice_labels=lab-b,\n  //   kind=ast,\n  //   comment=Second.,\n  // ]\n  m(): number { return 1; }\n}\n",
+    "sha256": "9cb840afc6f1bdf294f87574f9d614d5669cfd2261dd4de095ae8120d6e1b722",
+    "lines": 16
+   },
+   {
+    "name": "vue_10_script_two",
+    "ext": "vue",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "Vue: two // blocks on one script function",
+    "text": "<template>\n  <div>hi</div>\n</template>\n<script>\n// @beacon[\n//   id=a@f,\n//   slice_labels=lab-a,\n//   kind=ast,\n//   comment=First.,\n// ]\n// @beacon[\n//   id=b@f,\n//   slice_labels=lab-b,\n//   kind=ast,\n//   comment=Second.,\n// ]\nfunction f() {}\nexport default {};\n</script>\n",
+    "sha256": "3bc7197f6acd31dd81c79ea1dff4a5e887354a893bcb987ba7e3c980e60f9f1c",
+    "lines": 19
+   },
+   {
+    "name": "vue_11_template_two",
+    "ext": "vue",
+    "good": [
+     "ta@0",
+     "tb@0"
+    ],
+    "note": "Vue: two template HTML-comment blocks on one element",
+    "text": "<template>\n  <!--\n  @beacon[\n    id=ta@0,\n    slice_labels=lab-ta,\n    kind=ast,\n  ]\n  -->\n  <!--\n  @beacon[\n    id=tb@0,\n    slice_labels=lab-tb,\n    kind=ast,\n  ]\n  -->\n  <div>hi</div>\n</template>\n<script>\nexport default {};\n</script>\n",
+    "sha256": "1ed31d74ba88930048ceede498dac5156fd7a4189a582dc4c2eb21b7a7cf30e7",
+    "lines": 20
+   },
+   {
+    "name": "md_01_two_good",
+    "ext": "md",
+    "good": [
+     "a@h",
+     "b@h"
+    ],
+    "note": "two good blocks on one heading",
+    "text": "# Title\n\nIntro prose.\n\n<!--\n@beacon[\n  id=a@h,\n  slice_labels=lab-a,\n  kind=ast,\n  comment=First.,\n]\n-->\n<!--\n@beacon[\n  id=b@h,\n  slice_labels=lab-b,\n  kind=ast,\n  comment=Second.,\n]\n-->\n## Heading\n\nBody text.\n",
+    "sha256": "3bd3018c1e546e4ed2341c1f31d889d2462b26192a18b1b781194aba8d786836",
+    "lines": 23
+   },
+   {
+    "name": "md_02_numeric",
+    "ext": "md",
+    "good": [
+     "auto@h-1x",
+     "doc@000007"
+    ],
+    "note": "numeric-suffix survivor in Markdown",
+    "text": "<!--\n@beacon[\n  id=auto@h-1x,\n  slice_labels=lab-a,\n  kind=ast,\n]\n-->\n<!--\n@beacon[\n  id=doc@000007,\n  slice_labels=lab-b,\n  kind=ast,\n]\n-->\n## Heading\n",
+    "sha256": "1280359d592f77dffa29693cb0c3355b58db0cb97b09731a0561fc16a2d03354",
+    "lines": 15
+   },
+   {
+    "name": "md_03_ast_span",
+    "ext": "md",
+    "good": [
+     "a@h",
+     "s@h"
+    ],
+    "note": "stacked span + ast on one heading",
+    "text": "<!--\n@beacon[\n  id=s@h,\n  slice_labels=lab-s,\n  kind=span,\n]\n-->\n<!--\n@beacon[\n  id=a@h,\n  slice_labels=lab-a,\n  kind=ast,\n]\n-->\n## Heading\n\nBody.\n\n<!--\n@beacon-close[\n  id=s@h,\n]\n-->\n",
+    "sha256": "00db3063eb5c22153076103e22d7fcd8f374d72f541ce8344bad365d39755d33",
+    "lines": 23
+   },
+   {
+    "name": "md_04_lost_end",
+    "ext": "md",
+    "good": [
+     "good@h3"
+    ],
+    "note": "block lost its --> (md_m01 family)",
+    "text": "# Doc\n\n<!--\n@beacon[\n  id=lost@0,\n  slice_labels=lab-lost,\n  kind=ast,\n  comment=Lost its end.,\n]\n## Heading A\n\nPrecious prose A.\n\n<!--\n@beacon[\n  id=good@h3,\n  slice_labels=lab-good,\n  kind=ast,\n  comment=Good.,\n]\n-->\n## Heading B\n\nProse B.\n",
+    "sha256": "b72d4a1938005fd2a0e1875cccaa522750c9b3250446e3f05317a675ae0af7b0",
+    "lines": 24
+   },
+   {
+    "name": "md_05_oneline_open_after_note",
+    "ext": "md",
+    "good": [
+     "a@h",
+     "b@h"
+    ],
+    "note": "one-line <!-- @beacon[ opener after an unrelated HTML comment",
+    "text": "# Doc\n\n<!-- editor note: keep this -->\n\n<!-- @beacon[\n  id=a@h,\n  slice_labels=lab-a,\n  kind=ast,\n]\n-->\n<!--\n@beacon[\n  id=b@h,\n  slice_labels=lab-b,\n  kind=ast,\n]\n-->\n## Heading\n",
+    "sha256": "d15c82f03c8d46050338f4e260934c4f6f8881a7e35bae690383088fc01c5cb6",
+    "lines": 18
+   },
+   {
+    "name": "md_06_comment_with_arrow",
+    "ext": "md",
+    "good": [
+     "a@h",
+     "b@h"
+    ],
+    "note": "a field value containing --> (first --> ends the hygiene's extent)",
+    "text": "<!--\n@beacon[\n  id=a@h,\n  slice_labels=lab-a,\n  kind=ast,\n  comment=Maps a --> b.,\n]\n-->\n<!--\n@beacon[\n  id=b@h,\n  slice_labels=lab-b,\n  kind=ast,\n]\n-->\n## Heading\n",
+    "sha256": "18421949f4aba44ea5782527f10e78f1be130bd81ff8386609123ab3e220d405",
+    "lines": 16
+   },
+   {
+    "name": "md_07_fenced_examples",
+    "ext": "md",
+    "good": [],
+    "note": "two example blocks inside a fenced code block",
+    "text": "# Doc\n\n```markdown\n<!--\n@beacon[\n  id=ex1@0,\n  slice_labels=lab-ex1,\n  kind=ast,\n]\n-->\n<!--\n@beacon[\n  id=ex2@0,\n  slice_labels=lab-ex2,\n  kind=ast,\n]\n-->\n## Example heading\n```\n\nProse.\n",
+    "sha256": "fa789373181f50538525bf5636dc2b88a219d3267f7332e6b66f601a4f75f0f2",
+    "lines": 21
+   },
+   {
+    "name": "md_08_lost_bracket",
+    "ext": "md",
+    "good": [
+     "good@h"
+    ],
+    "note": "block lost its ] (md_m04 family)",
+    "text": "<!--\n@beacon[\n  id=lost@0,\n  slice_labels=lab-lost,\n  kind=ast,\n  comment=Lost ].,\n-->\nProse line.\n\n<!--\n@beacon[\n  id=good@h,\n  slice_labels=lab-good,\n  kind=ast,\n]\n-->\n## Heading\n",
+    "sha256": "95d070cc2aa15815ef5441d9793a6304a4b34f8000dce7842ea911d48fc7b146",
+    "lines": 17
+   },
+   {
+    "name": "md_09_heading_in_html_comment_between",
+    "ext": "md",
+    "good": [
+     "a@h",
+     "b@h"
+    ],
+    "note": "multi-line ordinary HTML comment between two blocks",
+    "text": "<!--\n@beacon[\n  id=a@h,\n  slice_labels=lab-a,\n  kind=ast,\n]\n-->\n<!-- TODO\n# not a heading, inside a comment\n-->\n<!--\n@beacon[\n  id=b@h,\n  slice_labels=lab-b,\n  kind=ast,\n]\n-->\n## Heading\n",
+    "sha256": "9cc2afcf2cd9a3e2090b06d43cd64677eff687679792e2f6b16acf0ec792d06b",
+    "lines": 18
+   },
+   {
+    "name": "py_23_single_decorator",
+    "ext": "py",
+    "good": [
+     "a@f",
+     "b@f"
+    ],
+    "note": "block above a one-line decorator + block between decorator and def",
+    "text": "import functools\n\n\n# @beacon[\n#   id=a@f,\n#   slice_labels=lab-a,\n#   kind=ast,\n#   comment=Above decorator.,\n# ]\n@functools.lru_cache\n# @beacon[\n#   id=b@f,\n#   slice_labels=lab-b,\n#   kind=ast,\n#   comment=Between decorator and def.,\n# ]\ndef f():\n    return 1\n",
+    "sha256": "7dad8613033e072e7c166cc5b1de42536aa0cf494a6423a81c01e500c9345e26",
+    "lines": 18
+   },
+   {
+    "name": "ts_24_single_above_decorator",
+    "ext": "ts",
+    "good": [
+     "a@C.m"
+    ],
+    "note": "TS: one block above a decorator (mapper attachment probe)",
+    "text": "class C {\n  // @beacon[\n  //   id=a@C.m,\n  //   slice_labels=lab-a,\n  //   kind=ast,\n  //   comment=Above decorator.,\n  // ]\n  @Input()\n  m(): number { return 1; }\n}\n",
+    "sha256": "e5015c80b1bc45c95c3340f6896a20a54b6625b3dcda91dfaa8925e3e55252a9",
+    "lines": 10
+   }
+  ],
+  "case_count": 44
+ },
+ "other_inputs": {
+  "source": "area-6/run_other.py literals (ast.literal_eval, not executed)",
+  "alias_cases": {
+   "A01_py_block.py": "# @beacon[\n#   id=a@f,\n#   slice_labels=x,\n#   kind=ast,\n#   comments=Alias.,\n# ]\ndef f():\n    comments = []\n    return comments\n",
+   "A02_py_docstring_example.py": "def h():\n    \"\"\"Example:\n\n    # @beacon[\n    #   id=ex@0,\n    #   comments=documented alias,\n    # ]\n    \"\"\"\n    return 0\n",
+   "A03_js_cblock_lost_bracket.js": "/* @beacon[\n   id=a@f,\n   slice_labels=x,\n   kind=ast,\n*/\nfunction f() {\n  let comments = 0;\n  comments = load();\n  return comments;\n}\nconst arr = [\n  1,\n];\n",
+   "A04_md_fenced_example.md": "# Doc\n\nYou may type the alias:\n\n```markdown\n<!--\n@beacon[\n  id=ex@0,\n  comments=old spelling,\n]\n-->\n```\n",
+   "A05_sql_block.sql": "-- @beacon[\n--   id=q@0,\n--   slice_labels=x,\n--   kind=span,\n--   comments=Alias.,\n-- ]\nSELECT 1;\n-- @beacon-close[\n--   id=q@0,\n-- ]\n",
+   "A06_vue_template.vue": "<template>\n  <!--\n  @beacon[\n    id=t@0,\n    kind=ast,\n    comments=Alias in template.,\n  ]\n  -->\n  <div/>\n</template>\n<script>\nexport default {};\n</script>\n",
+   "A07_py_crlf.py": "# @beacon[\r\n#   id=a@f,\r\n#   kind=ast,\r\n#   comments=Alias.,\r\n# ]\r\ndef f():\r\n    return 1\r\n",
+   "A08_py_lost_bracket_then_comment.py": "# @beacon[\n#   id=a@f,\n#   kind=ast,\nx = 1\n# comments = these are notes about x\ndef f():\n    return 1\n",
+   "A09_py_continuation_key.py": "# @beacon[\n#   id=a@f,\n#   kind=ast,\n#   comment=This explains the\n#   comments = table layout,\n# ]\ndef f():\n    return 1\n",
+   "A10_js_template_bare_opener.js": "const DOC = `\n@beacon[\ncomments = 1\n`;\nlet comments = 2;\n",
+   "A11_sh_block.sh": "# @beacon[\n#   id=s@0,\n#   kind=span,\n#   comments=Alias.,\n# ]\necho hi\n# @beacon-close[\n#   id=s@0,\n# ]\n",
+   "A12_py_double_hash.py": "##  @beacon[\n##   id=a@f,\n##   kind=ast,\n##   comments=Missed.,\n## ]\ndef f():\n    return 1\n"
+  },
+  "c0_cases": {
+   "C01_bel_prose.md": "# Doc\n\nPath C:\\agentic\u0007 here.\n",
+   "C02_esc_in_fence.md": "# Doc\n\n```text\n\u001b[31mred\u001b[0m\n```\n",
+   "C03_latin1.md": "# Doc\n\ncafé\n",
+   "C04_crlf_vt.md": "# Doc\r\n\r\nA\u000bB\r\n",
+    "C05_bom.md": "﻿# Doc\n\nx\u0000y\n",
+    "C06_noclaim.md": "x\u0007\n"
+  },
+   "c0_cases_note": "C03_latin1.md text is a Latin-1 display only; use c0_case_bytes_base64 for its exact bytes. C06_noclaim.md is quoted from run_other.py line 75, with an empty claim_id.",
+   "c0_case_bytes_base64": {"C03_latin1.md": "IyBEb2MKCmNhZukK"},
+   "c0_case_options": {"C06_noclaim.md": {"claim_id": ""}},
+  "eof_cases": {
+   "E01_trailing_blanks.md": "# Doc\n\nText.\n\n\n\n",
+   "E02_u2028.md": "# Doc\n\nOne two.\n",
+   "E03_nel.md": "# Heading\n\nText.\n",
+   "E04_u2029_heading.md": "# Doc\n\n## Sec tion\n\nText.\n",
+   "E05_only_blank.md": "\n\n  \n",
+   "E06_crlf_trailing.md": "# Doc\r\n\r\nText.\r\n\r\n\r\n",
+   "E07_no_final_newline.md": "# Doc\n\nText.  ",
+   "E08_crlf_clean.md": "# Doc\r\n\r\nText.\r\n"
+  },
+  "counts": {
+   "alias": 12,
+    "c0": 6,
+   "eof": 8
+  }
+ },
+ "verification": {
+  "matrix_rows": 44,
+  "sha_after_verified": 132,
+  "sha_after_mismatch": [],
+  "sha_after_missing": [],
+  "other": {
+   "rows": 26,
+   "before_verified": 13,
+   "mismatches": []
+  }
+ }
+}

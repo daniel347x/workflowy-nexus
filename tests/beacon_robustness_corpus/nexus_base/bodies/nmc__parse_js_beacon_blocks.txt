@@ -1,0 +1,207 @@
+def parse_js_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    """Parse @beacon[...] comment blocks from JS/TS source lines.
+
+    Supported forms (we control this schema):
+
+        // @beacon[
+        //   id=feature@1234,
+        //   role=glimpse:refresh,
+        //   slice_labels=glimpse-extension,
+        //   kind=ast|span,
+        //   start_snippet="function handleRefresh(",
+        //   end_snippet="}",
+        //   comment=One-line human note,
+        // ]
+
+        /* @beacon[
+           id=feature@1234,
+           slice_labels=glimpse-extension,
+           kind=ast,
+         ] */
+
+    Returns a list of dicts with keys:
+        id, role, slice_labels, kind, start_snippet, end_snippet,
+        comment, comment_line, kind_explicit.
+
+    ``diagnostics``, when a list, receives the parser's own decisions in
+    discovery order: one ``block`` record per opener (outcome ``kept`` or
+    ``skipped_unknown_kind``), one ``close`` record per close candidate the
+    second pass examines, one ``close_match`` per close it matches. The
+    return value is the same with or without it.
+    """
+    beacons: list[dict[str, Any]] = []
+    n = len(lines)
+    i = 0
+
+    # @beacon[
+    #   id=auto-beacon@parse_js_beacon_blocks._strip_js_comment_sugar-3cma,
+    #   role=parse_js_beacon_blocks._strip_js_comment_sugar,
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _strip_js_comment_sugar(text: str) -> str:
+        t = text.lstrip()
+        # Leading JS comment prefixes
+        if t.startswith("//"):
+            t = t[2:].lstrip()
+        if t.startswith("/*"):
+            t = t[2:].lstrip()
+        if t.startswith("*/"):
+            t = t[2:].lstrip()
+        if t.startswith("*"):
+            t = t[1:].lstrip()
+        # Trailing block-comment closer
+        if t.endswith("*/"):
+            t = t[:-2].rstrip()
+        return t
+
+    while i < n:
+        line = lines[i]
+        if "@beacon[" in line:
+            comment_line = i + 1  # 1-based
+            block_lines = [line]
+            i += 1
+            # Collect until the STRUCTURAL closing ']' line (inclusive).
+            # Close only when the comment-stripped delimiter line BEGINS with
+            # ']'. This avoids premature termination when a value contains a
+            # stray ']' -- e.g. a JS/TS role= carrying a type annotation like
+            # 'foo(x: Array<T>[])' or 'List[str]'. (Dan, June 2026 -- mirrors
+            # the Markdown/Python/SQL bracketed-value fix.)
+            block_end_line = None
+            while i < n:
+                block_lines.append(lines[i])
+                if _strip_js_comment_sugar(lines[i]).strip().startswith("]"):
+                    block_end_line = i + 1
+                    i += 1
+                    break
+                i += 1
+
+            # Parse block_lines into key/value pairs (skip first/last structural lines)
+            field_texts: list[str] = []
+            inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+            for raw in inner_lines:
+                text = raw.strip()
+                if not text:
+                    continue
+                text = _strip_js_comment_sugar(text)
+                if not text or text.startswith("@beacon"):
+                    continue
+                field_texts.append(text)
+            # THE ONE shared field parser (beacon_mutation_contract): a line
+            # starts a field only with a known key + '='; others continue it.
+            fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+            kind_raw = fields.get("kind")
+            kind = (kind_raw or "span").strip().lower() or "span"
+            if kind not in {"ast", "span"}:
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                    ))
+                continue
+
+            show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+            beacon = {
+                "id": fields.get("id"),
+                "role": fields.get("role"),
+                "slice_labels": fields.get("slice_labels"),
+                "kind": kind,
+                "start_snippet": fields.get("start_snippet"),
+                "end_snippet": fields.get("end_snippet"),
+                "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                "comment_line": comment_line,
+                "kind_explicit": bool(kind_raw),
+                "show_span": show_span,
+                "show_span_explicit": show_span_explicit,
+            }
+            beacons.append(beacon)
+            if diagnostics is not None:
+                diagnostics.append(_beacon_block_diagnostic(
+                    comment_line, block_end_line, "kept", fields, field_texts,
+                ))
+        else:
+            i += 1
+
+    # Second pass: compute span ranges for JS/TS span beacons using @beacon-close[...] by id.
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        # Only override when no span was previously set.
+        if beacon.get("span_lineno_start") is not None and beacon.get("span_lineno_end") is not None:
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        # Find end of opener's metadata block (first line containing ']')
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1]
+            body = _strip_js_comment_sugar(raw)
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        # Scan forward for matching @beacon-close[...] with same id
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1]
+            body = _strip_js_comment_sugar(raw)
+            if "@beacon-close[" in body:
+                close_lines = [body]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1]
+                    next_body = _strip_js_comment_sugar(next_raw)
+                    close_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    text = cl.strip()
+                    # Drop trailing ',' and ']'
+                    while text and text[-1] in ",]":
+                        text = text[:-1].rstrip()
+                    if text.startswith("id="):
+                        _, val = text.split("=", 1)
+                        close_id = val.strip()
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    # Line where @beacon-close[...] started
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons

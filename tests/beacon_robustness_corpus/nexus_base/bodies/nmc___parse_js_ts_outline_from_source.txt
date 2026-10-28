@@ -1,0 +1,67 @@
+def _parse_js_ts_outline_from_source(
+    *,
+    source_text: str,
+    file_path: str,
+    language_name: str,
+    line_offset0: int,
+    vue_qual_prefix: str,
+) -> List[Dict[str, Any]]:
+    """Parse JS/TS AST from a source string and rebase node line numbers.
+
+    Used by ``parse_vue_outline`` to outline each ``<script>`` block in a
+    Vue Single-File Component. The two arguments that make this distinct
+    from whole-file JS/TS parsing are both threaded through the shared
+    ``JsTsOutlineContext`` and applied automatically by ``_js_walk``:
+
+    - ``line_offset0``: 0-based file row where ``source_text`` line 1
+      lives. The context's ``abs_line(local)`` adds this to every
+      emitted ``orig_lineno_start_unused`` / ``orig_lineno_end_unused``
+      so the outline tree references .vue file coordinates, not the
+      extracted script block's local line space.
+
+    - ``vue_qual_prefix``: prefix to prepend to every emitted
+      AST_QUALNAME via the context's ``qualify(inner_qual)``. Allows
+      multiple ``<script>`` blocks (e.g. ``<script>`` +
+      ``<script setup>``) in the same .vue file to have non-colliding
+      qualnames in the outline tree.
+
+    Phase D (May 2026): both outline builders now share the same
+    ``_js_walk`` function via the ``JsTsOutlineContext`` abstraction.
+    See ``parse_js_ts_outline`` for the whole-file twin.
+    """
+    if not _HAVE_TREE_SITTER:
+        return [{
+            "name": _warn_name("⚠️ JS/TS parsing not available"),
+            "note": (
+                "Tree-sitter / tree_sitter_language_pack could not be imported. "
+                "Install 'tree_sitter' and 'tree_sitter-language-pack' "
+                "(plus language wheels like 'tree-sitter-javascript' and 'tree-sitter-typescript') "
+                "in the Windows Python environment to enable JS/TS Cartographer support."
+            ),
+            "children": [],
+        }]
+
+    try:
+        # Phase D (May 2026): build a Vue-configured context and delegate
+        # to the shared module-level _js_walk. The line_offset0 and
+        # vue_qual_prefix parameters become ctx.line_offset0 and
+        # ctx.qual_prefix respectively; the walker invokes ctx.abs_line()
+        # and ctx.qualify() at every emission point, so the Vue rebasing
+        # is transparent to the walker body. This is the architectural
+        # win of the JsTsOutlineContext abstraction: one walker, two
+        # configurations.
+        ctx = JsTsOutlineContext.from_source(
+            source_text=source_text,
+            file_path=file_path,
+            language_name=language_name,
+            line_offset0=line_offset0,
+            qual_prefix=vue_qual_prefix,
+        )
+        return _js_walk(ctx.root, ctx)
+
+    except Exception as e:  # pragma: no cover
+        return [{
+            "name": _warn_name("⚠️ Parse Error (VUE script JS/TS)"),
+            "note": str(e),
+            "children": [],
+        }]

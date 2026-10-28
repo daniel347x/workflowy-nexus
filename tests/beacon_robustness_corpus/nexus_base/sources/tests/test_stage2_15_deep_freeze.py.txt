@@ -1,0 +1,330 @@
+"""Stage2-15 (Waypoint A locked work order) — CF-A01 test-mode deep-freeze.
+
+Opt-in recursive read-only proxies for published ``CacheView`` payloads
+during test runs (the 🔴🧊 Axiom-5 hardening candidate, INV-2).  The
+permanent AST alias scanner covers STATIC alias shapes; cross-function
+aliasing — an alias passed across a call boundary and mutated at the
+second site — is structurally beyond sound static analysis in Python.
+This runtime detector closes that residual: under the opt-in flag, every
+published payload is recursively wrapped in read-only dict/list
+SUBCLASSES, so the mutation itself raises TypeError at the exact mutation
+site.  Production shape is untouched: the flag is off outside the test
+session and payloads stay plain JSON-shaped dicts/lists.
+
+Demonstrated here:
+- reads behave exactly like plain dicts/lists (isinstance, ==, json, iter);
+- EVERY mutation shape fails loudly at the mutation site with the CF-A01
+  TypeError — subscript, nested subscript, method mutators, in-place
+  operators, on nodes / the node list / the ID index / nested payloads;
+- the CROSS-FUNCTION alias case (the class the scanner cannot see): an
+  alias passed across a call boundary mutates at the second site and the
+  TypeError is raised THERE, not at the alias's origin;
+- aliasing between nodes_export and nodes_by_id is preserved (one memo);
+- deepcopy/copy of a frozen payload yields PLAIN MUTABLE containers, so
+  the COW transform/private-clone flows are unaffected;
+- with the flag off, production shape is plain dicts (no proxies).
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+
+import pytest
+
+from workflowy_mcp.coherence.cache_view import (
+    CacheView,
+    _FrozenDict,
+    _FrozenList,
+    is_test_deep_freeze_active,
+    set_test_deep_freeze,
+)
+
+CF_A01_MARK = "CF-A01 test deep-freeze"
+
+
+@pytest.fixture
+def freeze_on():
+    set_test_deep_freeze(True)
+    assert is_test_deep_freeze_active()
+    yield
+    set_test_deep_freeze(True)  # restore the session-wide default (conftest)
+
+
+@pytest.fixture
+def freeze_off():
+    set_test_deep_freeze(False)
+    yield
+    set_test_deep_freeze(True)  # restore the session-wide default (conftest)
+
+
+def _node(node_id: str, **fields) -> dict:
+    node = {
+        "id": node_id,
+        "name": fields.pop("name", node_id),
+        "note": "",
+        "parent_id": None,
+        "priority": 100,
+        "createdAt": 1,
+        "modifiedAt": 1,
+        "completed": None,
+        "data": None,
+    }
+    node.update(fields)
+    return node
+
+
+def _build_view(nodes: list[dict]) -> CacheView:
+    return CacheView.build(
+        epoch_number=1,
+        epoch_id="e" * 32,
+        adopted_sequence=0,
+        nodes_export={"nodes": nodes, "snapshot_timestamp": "2026-11-01T00:00:00+00:00"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Read behavior — the frozen payload reads EXACTLY like plain containers
+# ---------------------------------------------------------------------------
+
+
+def test_frozen_view_reads_behave_like_plain_containers(freeze_on):
+    view = _build_view([_node("a", data={"tags": ["x", "y"]})])
+    nodes = view.nodes_export["nodes"]
+    assert isinstance(nodes, list) and isinstance(nodes[0], dict)
+    assert isinstance(view.nodes_export, dict) and isinstance(view.nodes_by_id, dict)
+    assert nodes[0]["name"] == "a"
+    assert nodes[0]["data"]["tags"] == ["x", "y"]
+    assert len(nodes) == 1 and len(nodes[0]["data"]["tags"]) == 2
+    assert view.nodes_by_id["a"] is nodes[0]
+    # equality, iteration, membership, repr, JSON serialization all plain
+    assert view.nodes_by_id["a"] == _node("a", data={"tags": ["x", "y"]})
+    assert [n["id"] for n in nodes] == ["a"]
+    assert "a" in view.nodes_by_id
+    json.dumps(view.nodes_export)
+    assert json.loads(json.dumps(view.nodes_export)) == view.nodes_export
+    assert "name" in repr(nodes[0])
+
+
+def test_frozen_view_node_identity_preserved_across_export_and_index(freeze_on):
+    view = _build_view([_node("a"), _node("b")])
+    for node in view.nodes_export["nodes"]:
+        assert view.nodes_by_id[node["id"]] is node
+    # and the index row and the export row are the SAME proxy, so a
+    # mutation attempt through either route raises identically
+    with pytest.raises(TypeError, match="CF-A01"):
+        view.nodes_by_id["a"]["name"] = "mutated"
+    with pytest.raises(TypeError, match="CF-A01"):
+        view.nodes_export["nodes"][0]["name"] = "mutated"
+
+
+# ---------------------------------------------------------------------------
+# EVERY mutation shape fails loudly at the mutation site
+# ---------------------------------------------------------------------------
+
+
+def _all_mutation_shapes(view: CacheView):
+    node = view.nodes_export["nodes"][0]
+    nodes = view.nodes_export["nodes"]
+    index = view.nodes_by_id
+    return {
+        "node subscript": lambda: node.__setitem__("name", "x"),
+        "node del": lambda: node.__delitem__("note"),
+        "node update": lambda: node.update({"name": "x"}),
+        "node setdefault": lambda: node.setdefault("new", 1),
+        "node pop": lambda: node.pop("note"),
+        "node popitem": lambda: node.popitem(),
+        "node clear": lambda: node.clear(),
+        "node |=": lambda: node.__ior__({"name": "x"}),
+        "nested dict subscript": lambda: node["data"].__setitem__("k", 1),
+        "nested list append": lambda: node["data"]["tags"].append("z"),
+        "nested list sort": lambda: node["data"]["tags"].sort(),
+        "nested list iadd": lambda: node["data"]["tags"].__iadd__(["z"]),
+        "nested list remove": lambda: node["data"]["tags"].remove("x"),
+        "nodes list append": lambda: nodes.append(_node("b")),
+        "nodes list subscript": lambda: nodes.__setitem__(0, _node("b")),
+        "nodes list insert": lambda: nodes.insert(0, _node("b")),
+        "nodes list extend": lambda: nodes.extend([_node("b")]),
+        "nodes list pop": lambda: nodes.pop(),
+        "nodes list remove": lambda: nodes.remove(node),
+        "nodes list clear": lambda: nodes.clear(),
+        "nodes list reverse": lambda: nodes.reverse(),
+        "index subscript": lambda: index.__setitem__("b", _node("b")),
+        "index del": lambda: index.__delitem__("a"),
+        "index update": lambda: index.update({"b": _node("b")}),
+        "export top-level subscript": lambda: view.nodes_export.__setitem__("nodes", []),
+    }
+
+
+# @beacon[
+#   id=auto-beacon@test_every_mutation_shape_fails_loudly_at_the_site-6uj7,
+#   role=test_every_mutation_shape_fails_loudly_at_the_site,
+#   slice_labels=mci-harness-freeze,
+#   kind=ast,
+# ]
+def test_every_mutation_shape_fails_loudly_at_the_site(freeze_on):
+    view = _build_view([_node("a", data={"tags": ["x", "y"]})])
+    shapes = _all_mutation_shapes(view)
+    assert len(shapes) == 25  # the full mutation-surface census
+    for _label, mutate in shapes.items():
+        with pytest.raises(TypeError, match=CF_A01_MARK):
+            mutate()
+    # nothing mutated anywhere: the view is byte-identical after the storm
+    assert view.nodes_export == {
+        "nodes": [_node("a", data={"tags": ["x", "y"]})],
+        "snapshot_timestamp": "2026-11-01T00:00:00+00:00",
+    }
+
+
+# ---------------------------------------------------------------------------
+# The CROSS-FUNCTION alias case — the class the static scanner cannot see
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=auto-beacon@test_cross_function_alias_mutation_fails_at_the_mutation_site-810u,
+#   role=test_cross_function_alias_mutation_fails_at_the_mutation_site,
+#   slice_labels=mci-harness-freeze,
+#   kind=ast,
+# ]
+def test_cross_function_alias_mutation_fails_at_the_mutation_site(freeze_on):
+    """An alias extracted in one function and mutated in another raises at
+    the SECOND site — the traceback names the mutating frame, exactly the
+    detection the static alias scanner cannot perform."""
+    view = _build_view([_node("a")])
+
+    def _producer_alias_extract(v: CacheView) -> dict:
+        # A consumer reaching into the published view and holding an alias.
+        return v.nodes_export["nodes"][0]
+
+    def _faraway_mutator(alias: dict) -> None:
+        alias["name"] = "cross-function-write"  # the prohibited mutation
+
+    alias = _producer_alias_extract(view)
+    with pytest.raises(TypeError, match=CF_A01_MARK) as excinfo:
+        _faraway_mutator(alias)
+    tb_text = "\n".join(str(entry) for entry in excinfo.traceback)
+    assert "_faraway_mutator" in tb_text
+    assert "cross-function-write" in tb_text  # the exact mutation line is named
+    assert alias["name"] == "a"  # never mutated
+
+    # The same cross-function shape through the ID index and a nested list.
+    def _index_alias(v: CacheView) -> list:
+        return v.nodes_by_id["a"]["data"]["tags"]
+
+    def _list_mutator(tags: list) -> None:
+        tags.append("injected")
+
+    view2 = _build_view([_node("a", data={"tags": ["x"]})])
+    tags_alias = _index_alias(view2)
+    with pytest.raises(TypeError, match=CF_A01_MARK):
+        _list_mutator(tags_alias)
+    assert tags_alias == ["x"]
+
+
+# ---------------------------------------------------------------------------
+# COW flows are unaffected: copies of a frozen payload are PLAIN + MUTABLE
+# ---------------------------------------------------------------------------
+
+
+def test_deepcopy_and_copy_yield_plain_mutable_containers(freeze_on):
+    view = _build_view([_node("a", data={"tags": ["x"]})])
+    node = view.nodes_export["nodes"][0]
+
+    cloned = copy.deepcopy(node)
+    assert type(cloned) is dict and not isinstance(cloned, _FrozenDict)
+    assert type(cloned["data"]) is dict and not isinstance(cloned["data"], _FrozenDict)
+    assert type(cloned["data"]["tags"]) is list and not isinstance(
+        cloned["data"]["tags"], _FrozenList
+    )
+    cloned["name"] = "mutated-freely"
+    cloned["data"]["tags"].append("z")
+    assert cloned["name"] == "mutated-freely"
+    assert cloned["data"]["tags"] == ["x", "z"]
+    # the source view is untouched
+    assert node["name"] == "a" and node["data"]["tags"] == ["x"]
+
+    shallow = copy.copy(node)
+    assert type(shallow) is dict
+    shallow["name"] = "shallow-write"  # top-level write on the owned copy
+    assert node["name"] == "a"
+
+    method_copy = node.copy()
+    assert type(method_copy) is dict
+    method_copy["name"] = "method-write"
+    assert node["name"] == "a"
+
+    list_clone = copy.deepcopy(node["data"]["tags"])
+    assert type(list_clone) is list
+    list_clone.sort()
+    assert node["data"]["tags"] == ["x"]
+
+
+def test_cow_build_from_frozen_payload_refreezes_and_owns(freeze_on):
+    """The real COW shape: deep-copy the frozen payload, mutate the private
+    clone, build+publish the new view — works, is owned, and refreezes."""
+    view_a = _build_view([_node("a")])
+    private = copy.deepcopy(view_a.nodes_export)
+    private["nodes"][0]["name"] = "a2"
+    private["nodes"].append(_node("b"))
+    view_b = _build_view(private["nodes"])
+
+    assert view_b.nodes_export["nodes"][0]["name"] == "a2"
+    assert view_a.nodes_export["nodes"][0]["name"] == "a"  # prior view stable
+    # owned: not the same proxies as view_a
+    assert view_b.nodes_export["nodes"][0] is not view_a.nodes_export["nodes"][0]
+    # and the new view is itself frozen
+    with pytest.raises(TypeError, match=CF_A01_MARK):
+        view_b.nodes_export["nodes"][1]["name"] = "mutate-b"
+
+
+def test_shared_predecessor_successor_aliases_remain_deeply_frozen(freeze_on):
+    from workflowy_mcp.coherence.cache_view import _deep_freeze, prepare_cow_payload
+    before = _build_view([_node("a", data={"tags": ["x", {"nested": [1]}]}), _node("b")])
+    candidate = dict(before.nodes_export)
+    candidate["nodes"] = [before.nodes_by_id["a"], dict(before.nodes_by_id["b"], name="changed")]
+    after = CacheView.build(
+        epoch_number=1, epoch_id=before.epoch_id, adopted_sequence=0,
+        nodes_export=prepare_cow_payload(before, candidate), ownership="transferred")
+    aliases = [before.nodes_by_id["a"], before.nodes_export["nodes"][0],
+               after.nodes_by_id["a"], after.nodes_export["nodes"][0]]
+    assert all(node is aliases[0] for node in aliases)
+    for node in aliases:
+        assert _deep_freeze(node, {}) is node
+        with pytest.raises(TypeError, match=CF_A01_MARK):
+            node["name"] = "forbidden shared write"
+        with pytest.raises(TypeError, match=CF_A01_MARK):
+            node["data"]["tags"].append("forbidden nested list write")
+        with pytest.raises(TypeError, match=CF_A01_MARK):
+            node["data"]["tags"][1]["nested"][0] = 2
+
+
+# ---------------------------------------------------------------------------
+# Flag off — production shape is plain JSON, unwrapped
+# ---------------------------------------------------------------------------
+
+
+def test_flag_off_keeps_production_shape_plain(freeze_off):
+    assert not is_test_deep_freeze_active()
+    view = _build_view([_node("a")])
+    node = view.nodes_export["nodes"][0]
+    assert type(node) is dict and not isinstance(node, _FrozenDict)
+    assert type(view.nodes_export["nodes"]) is list and not isinstance(
+        view.nodes_export["nodes"], _FrozenList
+    )
+    node["name"] = "mutable-when-flag-off"  # production bytes are untouched
+    assert node["name"] == "mutable-when-flag-off"
+
+
+def test_flag_on_wraps_and_flag_roundtrip_is_idempotent(freeze_on):
+    view = _build_view([_node("a", data={"tags": ["x"]})])
+    node = view.nodes_export["nodes"][0]
+    assert isinstance(node, _FrozenDict)
+    assert isinstance(node["data"], _FrozenDict)
+    assert isinstance(node["data"]["tags"], _FrozenList)
+    # re-freezing an already-frozen structure passes through unchanged
+    from workflowy_mcp.coherence.cache_view import _deep_freeze
+
+    memo: dict[int, object] = {}
+    assert _deep_freeze(node, memo) is node
+    assert _deep_freeze(view.nodes_export, memo) is view.nodes_export

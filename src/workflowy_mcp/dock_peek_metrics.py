@@ -1,0 +1,380 @@
+"""Read-only source metrics for Dock peek (not rendering policy).
+
+Input is the caller's already-pinned canonical map. Output contains only
+owned ID lists and scalar metrics, never mutable source-node references.
+"""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any
+
+from .cache_metrics import view_metrics_for
+from .node_child_counts import build_direct_child_counts
+
+
+# @beacon[
+#   id=dock-peek@source-index,
+#   slice_labels=nexus--mcp-api,nexus--anchors,
+#   kind=ast,
+#   comment=Dock-peek source index: exact-view immutable topology counts and bottom-up UTF-8 totals are reused across operations; topology-only consumers share the same ordered-children owner without sizing. Only the requested subtree is byte-counted and returned as owned ID/scalar copies. Completed suppressed and behind-Dock content stable priorities and loud reachable cycles stay unchanged; no publication or live reads.,
+# ]
+def build_dock_peek_index(
+    nodes_by_id: Mapping[str, Mapping[str, Any]], root_id: str,
+) -> tuple[dict[str, tuple[str, ...]], dict[str, dict[str, int]]]:
+    """Reuse exact-view topology and sizes; return owned results without recursion.
+
+    Source sizes include complete semantic name and note fields, including
+    tags and mapped metadata. No separator, JSON framing or generated markup
+    is added. A malformed reachable cycle fails loudly, never hangs or emits
+    plausible but false counts. Unrelated roots are not byte-counted. The
+    topology owner also serves callers that consume no size metrics.
+    """
+    if root_id not in nodes_by_id:
+        raise ValueError(f"Dock peek metrics root {root_id!r} is absent from the snapshot")
+    memo = view_metrics_for(nodes_by_id)
+    direct = build_direct_child_counts(nodes_by_id)
+    if memo is not None and "ordered_children" in memo.indexes:
+        ordered = memo.indexes["ordered_children"]
+    else:
+        ordered = _build_ordered_children(nodes_by_id)
+    known = memo.source_metrics if memo is not None else {}
+    metrics = _aggregate_source_metrics(nodes_by_id, root_id, direct, ordered, known)
+    if memo is not None:
+        added = {key: MappingProxyType(dict(value)) for key, value in metrics.items() if key not in known}
+        if added:
+            # Build privately, publish once. A racing duplicate build may lose
+            # reuse, never correctness; readers retain their complete old map.
+            memo.source_metrics = MappingProxyType({**known, **added})
+    return ordered.copy(), metrics
+
+
+def _build_ordered_children(nodes_by_id):
+    """Reuse exact-view topology alone; priority ties retain source insertion order."""
+    memo = view_metrics_for(nodes_by_id)
+    if memo is not None and "ordered_children" in memo.indexes:
+        return memo.indexes["ordered_children"]
+    children: dict[str, list[str]] = {}
+    for node_id, node in nodes_by_id.items():
+        parent = node.get("parent_id") if "parent_id" in node else node.get("parentId")
+        if parent is not None and str(parent) in nodes_by_id:
+            children.setdefault(str(parent), []).append(str(node_id))
+
+    def priority(node_id: str) -> tuple[int, float]:
+        value = nodes_by_id[node_id].get("priority")
+        return (0, float(value)) if isinstance(value, (int, float)) else (1, 0.0)
+
+    ordered = {parent: tuple(sorted(ids, key=priority)) for parent, ids in children.items()}
+    if memo is not None:
+        return memo.indexes.setdefault("ordered_children", MappingProxyType(ordered))
+    return ordered
+
+
+def _aggregate_source_metrics(nodes_by_id, root_id, direct, ordered, known):
+    """Postorder scoped output; reuse prior scalar facts, never source aliases."""
+    metrics: dict[str, dict[str, int]] = {}
+    active: set[str] = set()
+    stack = [(root_id, False)]
+    while stack:
+        node_id, finishing = stack.pop()
+        if finishing:
+            if node_id in known:
+                metrics[node_id] = known[node_id].copy()
+                active.remove(node_id)
+                continue
+            node = nodes_by_id[node_id]
+            name = str(node.get("name") or node.get("nm") or "")
+            note = str(node.get("note") or node.get("no") or "")
+            self_bytes = len(name.encode("utf-8")) + len(note.encode("utf-8"))
+            child_ids = ordered.get(node_id, ())
+            metrics[node_id] = {
+                "child_count": direct[node_id],
+                "descendant_count": sum(1 + metrics[child]["descendant_count"] for child in child_ids),
+                "self_bytes": self_bytes,
+                "subtree_bytes": self_bytes + sum(metrics[child]["subtree_bytes"] for child in child_ids),
+            }
+            active.remove(node_id)
+            continue
+        if node_id in active:
+            raise ValueError(f"Cycle in Dock peek source topology at {node_id!r}")
+        if node_id in metrics:
+            continue
+        active.add(node_id)
+        stack.append((node_id, True))
+        stack.extend((child, False) for child in reversed(ordered.get(node_id, ())))
+    return metrics
+
+
+# @beacon[
+#   id=dock-peek@render-source-metrics,
+#   role=ƒ build_render_source_metrics(nodes_by_id, root_ids),
+#   slice_labels=glimpse-render,nexus--mcp-api,nexus--anchors,
+#   kind=ast,
+#   comment=THE render-side source-metrics index ([ap:UH0UOU]): the SAME
+#   build_dock_peek_index bottom-up aggregator, merged over every top-level
+#   root of one render, so rendered headings carry dock.peek's four-field
+#   vocabulary (▸children · desc · self · tree) from the ONE metrics engine
+#   -- counts and byte totals cover the FULL pinned-cache subtree
+#   (completed/suppressed descendants included), never the filtered render
+#   forest, exactly dock.peek's semantics. Roots absent from the map are
+#   skipped (DOM-capture fail-soft); ids missing from the result stay
+#   unknown (the composer prints explicit '?' fields, never silent zeros).
+#   Exact-view topology and per-node scalar facts are reused across calls;
+#   other maps keep their uncached calculation.
+#   Consumed via RenderPolicy.source_metrics at the composer's ONE
+#   heading-metadata emitter. Pure; no I/O.,
+# ]
+def build_render_source_metrics(
+    nodes_by_id: Mapping[str, Mapping[str, Any]] | None,
+    root_ids: Any,
+) -> dict[str, dict[str, int]]:
+    """Merge :func:`build_dock_peek_index` metrics over a render's top roots.
+
+    Exact-view indexes are shared with peek and ancestors, including across
+    top roots; other maps retain their original computation. Absent roots
+    are skipped and reachable cycles still fail loudly.
+    """
+    metrics: dict[str, dict[str, int]] = {}
+    if not nodes_by_id:
+        return metrics
+    for root_id in root_ids or ():
+        root_key = str(root_id or "")
+        if not root_key or root_key in metrics or root_key not in nodes_by_id:
+            continue
+        _ordered, root_metrics = build_dock_peek_index(nodes_by_id, root_key)
+        metrics.update(root_metrics)
+    return metrics
+
+
+DOCK_PEEK_RECENCY_BASES = ("created", "modified")
+DOCK_PEEK_SORT_KEYS = ("none",) + DOCK_PEEK_RECENCY_BASES
+DOCK_PEEK_SORT_DIRECTIONS = ("asc", "desc")
+
+
+# @beacon[
+#   id=auto-beacon@node_timestamp-12vz,
+#   role=node_timestamp,
+#   slice_labels=nexus--anchors,
+#   kind=ast,
+# ]
+def node_timestamp(node: Mapping[str, Any], basis: str) -> int | None:
+    """Return the node's OWN ``createdAt`` / ``modifiedAt`` as int seconds, else None.
+
+    The peek recency basis is the ITEM's own timestamp (a task was created /
+    a task was touched), deliberately NOT GLIMPSE's branch-max ``modified``
+    rule: peek is a flat inventory of items, and ``anchor.point.touch`` (a
+    later unit) advances exactly this field. Cache aliases (``created`` /
+    ``modified``) are honoured; a missing or non-integer value is None so the
+    caller can sink it last exactly like ``branch_timestamp_key`` does.
+    """
+    if basis == "created":
+        keys = ("createdAt", "created")
+    elif basis == "modified":
+        keys = ("modifiedAt", "modified")
+    else:
+        raise ValueError(f"unknown timestamp basis {basis!r}")
+    for key in keys:
+        value = node.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+    return None
+
+
+# @beacon[
+#   id=dock-peek@recency-selection,
+#   slice_labels=nexus--mcp-api,nexus--anchors,
+#   kind=ast,
+#   comment=Pure Dock-peek recency policy shared by compact AND detail='full' so both select identical items: recent=N keeps the N newest walked rows on the ITEM's own created_at/modified_at (recent_by, default modified; ancestors are never injected or counted), then the whole result is ordered by sort_by/sort_direction (recent implies sort_by=recent_by unless overridden; ascending is the default direction EVERYWHERE -- desc is an explicit sort_direction opt-in, SSVIC9; 'none' keeps document order). THE completed filter for dock.peek lives HERE and nowhere else: rows already flagged completed are excluded from the candidate pool by default on EVERY path -- recency views (recent=N or a timestamp sort_by) AND the plain document-order inventory -- unless include_completed=true opts back in (U6/J11: the inventory no longer lists ✓ rows by default). Peek's walk marks completed via the shared _node_is_completed predicate; this policy only consumes the row flag. Missing timestamps sink last under either direction; ties keep document order. Returns owned row copies plus a selection/sort description (selection carries completed_excluded) for the header and JSON.,
+# ]
+def apply_dock_peek_recency(
+    rows: list[dict[str, Any]],
+    *,
+    recent: int | None,
+    recent_by: str | None,
+    sort_by: str | None,
+    sort_direction: str | None,
+    include_completed: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    """Select the most-recent N rows and/or order the inventory by timestamp.
+
+    ``rows`` are the walked peek rows in document order, each carrying
+    ``created_at`` / ``modified_at`` (int seconds or None) and the walk's
+    ``completed`` flag. Completed rows leave the candidate pool by default
+    on EVERY path -- the plain document-order inventory as well as recency
+    views (they never consume ``recent`` slots, never appear in a timestamp
+    sort, and no longer appear in the inventory) -- unless
+    ``include_completed`` lists them again with their ✓ marker. Rationale:
+    completing a to-do modifies it, so a cleanup pass would otherwise
+    dominate the current-attention view with ✓ rows, and an inventory that
+    lists them hides what is actually left to do. Validation of the raw
+    knobs is the caller's; this helper trusts already-normalized values.
+
+    Returns ``(rows, selection, sort)`` where ``selection`` is
+    ``{recent, recent_by, candidates, selected, completed_excluded}``
+    (``candidates`` = the eligible pool the selection was taken from) and
+    ``sort`` is ``{by, direction}`` (``by='none'`` = document order).
+    """
+    basis = recent_by or "modified"
+    effective_sort = sort_by
+    effective_direction = sort_direction
+    if recent is not None and effective_sort is None:
+        effective_sort = basis
+    if effective_sort is None:
+        effective_sort = "none"
+    if effective_direction is None:
+        # SSVIC9: ascending is the default EVERYWHERE. recent=N still
+        # SELECTS the N newest but never flips the presentation; a bare
+        # sort_by and document order ('none') report asc too. Descending
+        # stays an explicit sort_direction='desc' opt-in.
+        effective_direction = "asc"
+
+    # CF-MST-016 + U6/J11: the ONE completed filter for dock.peek, every
+    # view. Completed rows leave the candidate pool by default on the
+    # recency selection, a timestamp sort, AND the plain document-order
+    # inventory alike; include_completed=true is the escape hatch.
+    if not include_completed:
+        pool = [row for row in rows if not row.get("completed")]
+        completed_excluded = len(rows) - len(pool)
+    else:
+        pool = rows
+        completed_excluded = 0
+    candidates = len(pool)
+
+    def _key(field: str, direction: str):
+        def key(item: tuple[int, dict[str, Any]]) -> tuple[int, int, int]:
+            index, row = item
+            value = row.get(field)
+            if not isinstance(value, int):
+                # Unknown timestamps are never 'newest' or 'oldest': sink last.
+                return (1, 0, index)
+            return (0, -value if direction == "desc" else value, index)
+        return key
+
+    indexed = list(enumerate(pool))
+    if recent is not None:
+        newest_first = sorted(indexed, key=_key(f"{basis}_at", "desc"))
+        keep = {index for index, _row in newest_first[: int(recent)]}
+        indexed = [item for item in indexed if item[0] in keep]
+    if effective_sort in DOCK_PEEK_RECENCY_BASES:
+        indexed = sorted(indexed, key=_key(f"{effective_sort}_at", effective_direction))
+    selected = [dict(row) for _index, row in indexed]
+    selection = {
+        "recent": int(recent) if recent is not None else None,
+        "recent_by": basis if recent is not None else None,
+        "candidates": candidates,
+        "selected": len(selected),
+        "completed_excluded": completed_excluded,
+    }
+    sort = {"by": effective_sort, "direction": effective_direction}
+    return selected, selection, sort
+
+
+# @beacon[
+#   id=auto-beacon@describe_dock_peek_selection-mxt4,
+#   role=describe_dock_peek_selection,
+#   slice_labels=nexus--anchors,
+#   kind=ast,
+# ]
+def describe_dock_peek_selection(
+    selection: Mapping[str, Any], sort: Mapping[str, Any], *, recursive: bool,
+) -> str:
+    """One header phrase naming the selection and order (compact text).
+
+    The plain document-order path has no selection/order to name: the
+    phrase is empty unless completed rows were excluded, in which case it
+    is exactly `` · N completed hidden`` so the inventory is never
+    silently shorter.
+    """
+    direction_word = "newest first" if sort.get("direction") == "desc" else "oldest first"
+    hidden = int(selection.get("completed_excluded") or 0)
+    hidden_note = f" · {hidden} completed hidden" if hidden > 0 else ""
+    if selection.get("recent") is not None:
+        pool = "descendants" if recursive else "children"
+        phrase = (
+            f"{selection.get('selected')} most recent by {selection.get('recent_by')} "
+            f"of {selection.get('candidates')} {pool}"
+        )
+        if sort.get("by") == "none":
+            phrase += ", in document order"
+        elif sort.get("by") != selection.get("recent_by"):
+            phrase += f", sorted by {sort.get('by')} ({direction_word})"
+        else:
+            phrase += f" ({direction_word})"
+        return phrase + hidden_note
+    if sort.get("by") in DOCK_PEEK_RECENCY_BASES:
+        return f"sorted by {sort.get('by')} ({direction_word})" + hidden_note
+    # Document order: no selection/order phrase, but the hidden-completed
+    # count still surfaces ("" when nothing was excluded).
+    return hidden_note
+
+
+# @beacon[
+#   id=auto-beacon@describe_dock_peek_recency_rule-4e,
+#   role=describe_dock_peek_recency_rule,
+#   slice_labels=nexus--anchors,
+#   kind=ast,
+#   comment=[ap:TVIIBN] 4e the ONE peek-side recency-rule line: under recent=N the
+#   compact peek renders this explicit sentence on its own line right below the
+#   header (beside describe_dock_peek_selection's selection phrase, same
+#   vocabulary) naming what was selected and teaching the 4d(a) rule --
+#   sort_direction only orders these rows, it never changes which rows were
+#   chosen. The RENDER-verb twin (since_applied/render_scope wording) is
+#   server.py's _recency_header_sentence inside _shape_glimpse_family_return;
+#   two data shapes, one rule, each surface one composer. Pure.
+# ]
+def describe_dock_peek_recency_rule(
+    selection: Mapping[str, Any], sort: Mapping[str, Any],
+) -> str:
+    """One explicit rule line under the peek header when ``recent=N`` is active.
+
+    Dan's ask ([ap:TVIIBN] item 4): beside the existing selection phrase, say
+    plainly that ``sort_direction`` only orders the selected rows (asc = oldest
+    first) and never changes which rows were chosen. Reads the policy's
+    ``selection`` dict (``selected`` / ``recent_by``) and ``sort`` dict only.
+    """
+    selected = selection.get("selected")
+    basis = selection.get("recent_by")
+    direction_word = (
+        "desc = newest first" if sort.get("direction") == "desc" else "asc = oldest first"
+    )
+    return (
+        f"Recency selection: the {selected} newest by {basis}; "
+        f"sort_direction only orders these {selected} ({direction_word}); "
+        "it never changes which rows were chosen."
+    )
+
+
+def _content_size(value: int | None) -> str:
+    if value is None:
+        return "?"
+    if value < 1024:
+        return f"{value}B"
+    size = float(value)
+    for unit in ("KiB", "MiB", "GiB", "TiB"):
+        size /= 1024
+        if size < 1024 or unit == "TiB":
+            return f"{size:.1f}{unit}"
+    raise AssertionError("unreachable size unit")
+
+
+# @beacon[
+#   id=auto-beacon@format_dock_peek_metrics-ci81,
+#   role=format_dock_peek_metrics,
+#   slice_labels=nexus--anchors,
+#   kind=ast,
+# ]
+def format_dock_peek_metrics(metrics: Mapping[str, int] | None) -> str:
+    """The same four-field suffix for peek rows and the Dock header."""
+    values = metrics or {}
+    children = values.get("child_count")
+    descendants = values.get("descendant_count")
+    return (
+        f" ▸{children if children is not None else '?'}"
+        f" · desc:{descendants if descendants is not None else '?'}"
+        f" · self:{_content_size(values.get('self_bytes'))}"
+        f" · tree:{_content_size(values.get('subtree_bytes'))}"
+    )

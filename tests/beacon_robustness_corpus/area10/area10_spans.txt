@@ -1,0 +1,5 @@
+{"file": "beacon_obtain_code_snippet.py", "id": "bocsv1@file-core", "cl": 66, "P": [null, null], "B": [73, 3543], "W": [3544, 3546], "Wopen": [66, 72], "R": [62, 3543], "key": ["P!=B", "B=W", "P!=W"]}
+{"file": "nexus_map_codebase.py", "id": "nmcv1@file-core", "cl": 56, "P": [null, null], "B": [63, 14638], "W": [14639, 14641], "Wopen": [56, 62], "R": [52, 14638], "key": ["P!=B", "B=W", "P!=W"]}
+{"file": "src/workflowy_mcp/client/api_client_nexus.py", "id": "ncv1@file-boundary", "cl": 2138, "P": [null, null], "B": [2145, 18913], "W": [18914, 18916], "Wopen": [2138, 2144], "R": [2134, 18913], "key": ["P!=B", "B=W", "P!=W"]}
+{"file": "src/workflowy_mcp/server.py", "id": "svcv1@file-boundary", "cl": 552, "P": [null, null], "B": [559, 45558], "W": [45559, 45561], "Wopen": [552, 558], "R": [548, 45558], "key": ["P!=B", "B=W", "P!=W"]}
+{"file": "src/workflowy_mcp/weave_worker.py", "id": "wkv1@carto-refresh-core", "cl": 632, "P": [null, null], "B": [639, 1173], "W": [1174, 1176], "Wopen": [632, 638], "R": [622, 1173], "key": ["P!=B", "B=W", "P!=W"]}

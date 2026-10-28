@@ -1,0 +1,97 @@
+/* Render-region rules moved from the dock's injected stylesheet.
+   Host geometry stays with each host. Box sizing also applies outside the dock. */
+.glimpse-md-render, .glimpse-md-render * { box-sizing: border-box; }
+.glimpse-md-render, .glimpse-md-render * { user-select: text; -webkit-user-select: text; }
+.glimpse-md-render h1 { font-size: 1.5em; }
+.glimpse-md-render h2 { font-size: 1.35em; }
+.glimpse-md-render h3 { font-size: 1.2em; }
+.glimpse-md-render h4 { font-size: 1.08em; }
+.glimpse-md-render h1,.glimpse-md-render h2,.glimpse-md-render h3,
+.glimpse-md-render h4,.glimpse-md-render h5,.glimpse-md-render h6 {
+  margin: 1.1em 0 0.5em 0; font-weight: 600; line-height: 1.25; color: #f5f6f8;
+}
+.glimpse-md-render > *:first-child { margin-top: 0; }
+.glimpse-md-render p { margin: 0 0 0.9em 0; }
+.glimpse-md-render pre { margin: 0 0 0.9em 0; padding: 0.7em 0.9em;
+  background: rgba(0,0,0,0.35); border-radius: 4px; overflow-x: auto;
+  font-size: 0.92em; line-height: 1.4; }
+.glimpse-md-render :not(pre) > code { background: rgba(255,255,255,0.08);
+  padding: 0.05em 0.35em; border-radius: 3px; color: #f0d2a0; }
+.glimpse-md-render code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.92em; }
+.glimpse-md-render pre > code { background: transparent; padding: 0; color: inherit; }
+.glimpse-md-render blockquote { margin: 0 0 0.9em 0; padding: 0.2em 0.9em;
+  border-left: 3px solid rgba(158,203,255,0.4); color: #c9ccd1;
+  background: rgba(255,255,255,0.03); border-radius: 0 3px 3px 0; }
+.glimpse-md-render table { margin: 0 0 0.9em 0; border-collapse: collapse; font-size: 0.95em;
+  table-layout: fixed; width: 100%; }
+.glimpse-md-render th,.glimpse-md-render td { padding: 0.3em 0.7em; border: 1px solid rgba(255,255,255,0.15);
+  overflow-wrap: break-word; }
+/* Resizable columns: table-layout:fixed makes a th's width own its column. */
+.glimpse-md-render th { background: rgba(255,255,255,0.05); font-weight: 600;
+  resize: horizontal; overflow: auto; }
+.glimpse-md-render ul,.glimpse-md-render ol { margin: 0 0 0.9em 0; padding-left: 1.5em; }
+/* Restore list markers reset by Workflowy's app CSS; nested gaps stay tight. */
+.glimpse-md-render ul { list-style: disc outside; }
+.glimpse-md-render ul ul { list-style: circle; }
+.glimpse-md-render ul ul ul { list-style: square; }
+.glimpse-md-render ol { list-style: decimal outside; }
+.glimpse-md-render li { margin: 0.25em 0; }
+.glimpse-md-render li > ul,.glimpse-md-render li > ol { margin: 0.25em 0; }
+.glimpse-md-render a { color: #9ecbff; text-decoration: underline; }
+.glimpse-md-render img { max-width: 100%; height: auto; }
+.glimpse-md-render hr { margin: 1.2em 0; border: 0; border-top: 1px solid rgba(255,255,255,0.12); }
+.glimpse-md-render mark.glimpse-dock-src-hit { background: rgba(255,213,79,0.40);
+  color: inherit; border-radius: 2px; padding: 0 1px; }
+.glimpse-md-render mark.glimpse-dock-src-hit--current { background: #ffb300;
+  color: #1a1a1a; outline: 1px solid #ffd54f; }
+
+/* Row rules moved from the dock's emitted style builder, in the same order.
+   Host owns scrolling/geometry; box sizing also applies outside the dock. */
+.glimpse-md-row-list, .glimpse-md-row-list * { box-sizing: border-box; }
+/* No wrap: long labels scroll horizontally in the host list region. */
+.glimpse-md-row-list .glimpse-md-dock-row {
+  display: block; white-space: pre; cursor: pointer; font-size: 12.5px;
+  padding: 1px 8px 1px 0;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: #cdd2d8; border-left: 3px solid transparent;
+  position: relative;
+}
+/* Continuous per-depth rainbow guides. The painter's INDENT_PX must stay
+   14 to match the gradient periods; left:10px skips the marker column.
+   The neutral 56px cadence stays on top of the six 84px hue layers.
+   Purely presentational: zero child/identity/event/layout changes. */
+.glimpse-md-row-list .glimpse-md-dock-row::before {
+  content: ""; position: absolute; top: 0; bottom: 0; pointer-events: none;
+  left: 10px; width: calc(var(--glimpseDockDepth, 0) * 14px);
+  background-image:
+    repeating-linear-gradient(to right, transparent 0, transparent 55px, rgba(205,216,232,0.20) 55px, rgba(205,216,232,0.20) 56px),
+    repeating-linear-gradient(to right, transparent 0, transparent 13px, hsla(205,48%,66%,0.20) 13px, hsla(205,48%,66%,0.20) 14px, transparent 14px, transparent 84px),
+    repeating-linear-gradient(to right, transparent 0, transparent 27px, hsla(150,40%,60%,0.20) 27px, hsla(150,40%,60%,0.20) 28px, transparent 28px, transparent 84px),
+    repeating-linear-gradient(to right, transparent 0, transparent 41px, hsla(45,45%,62%,0.20) 41px, hsla(45,45%,62%,0.20) 42px, transparent 42px, transparent 84px),
+    repeating-linear-gradient(to right, transparent 0, transparent 55px, hsla(15,50%,66%,0.20) 55px, hsla(15,50%,66%,0.20) 56px, transparent 56px, transparent 84px),
+    repeating-linear-gradient(to right, transparent 0, transparent 69px, hsla(275,40%,70%,0.20) 69px, hsla(275,40%,70%,0.20) 70px, transparent 70px, transparent 84px),
+    repeating-linear-gradient(to right, transparent 0, transparent 83px, hsla(185,40%,58%,0.20) 83px, hsla(185,40%,58%,0.20) 84px);
+}
+/* Heading bullet; file emoji stays full-size. */
+.glimpse-md-row-list .glimpse-md-dock-bullet {
+  font-size: 0.8em; color: #8a9099;
+}
+/* Halo indicates hidden descendants across all live-DOM node kinds. */
+.glimpse-md-row-list .glimpse-md-dock-bullet--halo {
+  color: #cfe6ff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(102,179,255,0.35), 0 0 4px 2px rgba(102,179,255,0.45);
+}
+.glimpse-md-row-list .glimpse-md-dock-icon {
+  display: inline-block; margin-right: 5px;
+}
+.glimpse-md-row-list .glimpse-md-dock-label { }
+.glimpse-md-row-list .glimpse-md-dock-row:hover { background: rgba(255,255,255,0.05); }
+.glimpse-md-row-list .glimpse-md-dock-row.selected {
+  background: rgba(102,179,255,0.16); color: #f5f6f8;
+  border-left: 3px solid #66b3ff;
+}
+/* Column-zero selection marker, independent of indentation. */
+.glimpse-md-row-list .glimpse-md-dock-marker {
+  display: inline-block; width: 10px; color: #66b3ff;
+}

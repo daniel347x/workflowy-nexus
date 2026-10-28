@@ -1,0 +1,82 @@
+# Quick Installation Guide
+
+## 60-Second Setup
+
+### Prerequisite: MCP server running
+
+The Python MCP server (`workflowy-nexus-mcp-tools`) must be running and must have the `websockets` library available, because that server hosts the `ws://localhost:8765` endpoint this extension connects to.
+
+If you installed the MCP server via the standard `uvx --from git+https://github.com/daniel347x/workflowy-nexus-mcp-tools.git workflowy-mcp` invocation, `websockets` is already pulled in as a dependency. No extra step.
+
+If your MCP host (TypingMind / Claude Desktop / Claude Code) was already running before you installed the extension, restart its MCP connector so the WebSocket server gets a chance to bind to port 8765.
+
+You can confirm the server side is alive by looking for these lines in the MCP host's logs:
+
+```
+Starting WebSocket server on ws://localhost:8765
+✅ WebSocket server listening on port 8765
+```
+
+### Step 1: Load the extension unpacked (30 seconds)
+
+1. Open `chrome://extensions/` in Chrome.
+2. Toggle **Developer mode** on (top-right).
+3. Click **Load unpacked**.
+4. Select the `workflowy-glimpse-cache/` folder inside your local clone of the `workflowy-nexus-mcp-tools` repo.
+5. Done — the extension appears in the list with version `3.15.1`.
+
+### Step 2: Open Workflowy in Chrome (5 seconds)
+
+Open https://workflowy.com in a Chrome tab and sign in.
+
+The extension auto-loads on any `workflowy.com` page. You can confirm it loaded by opening DevTools (F12) on the Workflowy tab and looking in the console for:
+
+```
+[GLIMPSE Cache v3.15.1] Standalone client initializing...
+[GLIMPSE Cache v3.15.1] ✅ Standalone client loaded
+```
+
+### Step 3: Smoke test (15 seconds)
+
+From your MCP host (TypingMind / Claude Desktop / Claude Code), call:
+
+```
+workflowy_glimpse()
+```
+
+The response should include `"_source": "websocket"`. If it says `"_source": "api"` instead, the WebSocket bridge isn't live — see DEPLOYMENT.md troubleshooting.
+
+You can also verify the in-page hotkeys are working:
+
+- Hover any Workflowy bullet, press **F3** — the full markdown path (ending with the bullet's UUID) is copied to your clipboard.
+- Hover any bullet, hold **Ctrl** for ~5 seconds — full UUID chain copied to the clipboard.
+
+If both work, you're done.
+
+## What You Get
+
+✅ **`workflowy_glimpse()` reads from the DOM, not the API** — orders of magnitude less data transferred.
+
+✅ **F2 / F3 / F8 / F9 / F12 hotkeys** — UUID copying, `#nexus--*` expansion, Windsurf jump, Cartographer refresh popups.
+
+✅ **UUID Navigator widget** — paste a UUID, see its full path.
+
+✅ **CARTO jobs widget** — live status of background refresh and bulk-apply jobs.
+
+✅ **Graceful fallback** — if the extension isn't loaded or the MCP server isn't running, `workflowy_glimpse()` falls back to the API path automatically.
+
+## Multiple Workflowy Accounts
+
+Chrome's same-origin policy means only one Workflowy account can be signed in at a time per browser profile. If you have a personal and a work Workflowy account and want both active simultaneously, the simplest path is:
+
+- Chrome (with this extension) → the account you use GLIMPSE against.
+- Firefox or a separate Chrome profile → the other account.
+
+The extension only activates on the tab where you're signed in; the other browser is unaffected.
+
+## Next Steps
+
+After installation works:
+
+- Read `DEPLOYMENT.md` for full troubleshooting if anything misbehaves.
+- The trampoline path (`glimpse_deploy_trampoline.py` at the repo root) is still available if you specifically want GLIMPSE inside Workflowy Desktop (Electron) — see that script's header comment.

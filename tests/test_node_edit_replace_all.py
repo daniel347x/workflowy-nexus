@@ -1,0 +1,237 @@
+"""Replace-all stays a pure per-entry transform on the existing one-read/write rail."""
+from __future__ import annotations
+
+import asyncio
+import copy
+import html
+import json
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+from coherence_harness import make_boundary_capable, make_coherence_root, s04_raise_barrier
+from n05_region_harness import isolate_claim_scope
+from workflowy_mcp import server
+from workflowy_mcp.client import api_client_nexus as nx
+from workflowy_mcp.coherence.operation_cache import current_operation_cache
+from workflowy_mcp.mcp_api_registry import dispatch_operation, validate_params
+from workflowy_mcp.models.node import WorkFlowyNode
+
+ROOT = "11111111-1111-4111-8111-111111111111"
+NAME = "[ap:REPLACE] Existing #keep"
+
+
+def setup(monkeypatch, tmp_path, note):
+    paths = make_coherence_root(tmp_path)
+    monkeypatch.setattr(server, "_admission_coherence_paths", lambda: paths)
+    client = make_boundary_capable(object.__new__(server.WorkFlowyClient), nodes=[
+        {"id": ROOT, "name": NAME, "note": "STALE CACHE NOTE", "parent_id": None},
+    ])
+    isolate_claim_scope(client, tmp_path)
+    current = WorkFlowyNode(id=ROOT, name=NAME, note=html.escape(note))
+    client.get_node = AsyncMock(return_value=current)
+    client.update_node = AsyncMock(return_value=WorkFlowyNode(id=ROOT, name=NAME, note="updated"))
+    client.create_node = AsyncMock(side_effect=AssertionError("no create"))
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    return client, paths, current
+
+
+def dispatch(**params):
+    return asyncio.run(dispatch_operation(
+        server.build_node_registry(), "edit", {"node_handle": ROOT, **params},
+        operation_boundary=server._mcp_operation_boundary,
+        mutation_admission=server._mcp_mutation_admission,
+        exception_mapper=server._mcp_exception_mapper,
+        result_finalizer=server._mcp_operation_result_finalizer,
+    ))
+
+
+def metadata(report):
+    assert isinstance(report, str), report
+    return json.JSONDecoder().raw_decode(report)[0]
+
+
+@pytest.mark.parametrize("note,search,replacement,expected,count", [
+    ("a a a", "a", "b", "b b b", 3),
+    ("aaaaa", "aa", "X", "XXa", 2),
+    ("aa", "a", "aa", "aaaa", 2),
+    ("aaaa", "a", "", "", 4),
+    ("a a", "a", "a", "a a", 2),
+    ("a.b|axb|a.b", "a.b", r"\1", r"\1|axb|\1", 2),
+    ("a\nb|a\nb", "a\r\nb", "c\rd", "c\nd|c\nd", 2),
+    ("π📊 π📊", "π📊", "λ", "λ λ", 2),
+])
+def test_pure_all_nonoverlap_no_reprocessing_and_literal_semantics(note, search, replacement, expected, count):
+    actual, first, info = server._apply_note_search_replace(note, search, replacement, replace_all=True)
+    assert actual == expected
+    assert first == 0
+    assert info == {"replace_all": True, "replacement_count": count}
+
+
+def test_exact_tier_is_chosen_once_and_does_not_mix_folded_candidates():
+    note = "\u00a0x| x|\u2009x| x"
+    actual, first, info = server._apply_note_search_replace(note, " x", " y", replace_all=True)
+    assert actual == "\u00a0x| y|\u2009x| y"
+    assert first == 3
+    assert info == {"replace_all": True, "replacement_count": 2}
+
+
+def test_all_folded_matches_preserve_each_original_context():
+    note = "\u00a0 old\u2009|\u2009 old\u00a0"
+    actual, first, info = server._apply_note_search_replace(note, "  old ", "  new ", replace_all=True)
+    assert actual == "\u00a0 new\u2009|\u2009 new\u00a0"
+    assert first == 0
+    assert info == {"replace_all": True, "replacement_count": 2, "tier": "space_fold"}
+
+
+def test_all_miss_reports_zero_and_never_fuzzy_replaces():
+    note = "alpha\u200bbeta"
+    actual, first, info = server._apply_note_search_replace(note, "alphabeta", "gamma", replace_all=True)
+    assert actual == note and first == -1
+    assert info["replacement_count"] == 0 and info["replace_all"] is True
+    assert "near_miss" in info
+
+
+def test_large_match_count_is_not_a_cap_or_repeated_whole_note_splice():
+    result, first, info = server._apply_note_search_replace("a" * 10000, "a", "aa", replace_all=True)
+    assert result == "a" * 20000 and first == 0
+    assert info["replacement_count"] == 10000
+
+
+@pytest.mark.parametrize("replace_all", [False, True])
+def test_empty_search_is_loud_even_at_pure_helper(replace_all):
+    with pytest.raises(ValueError, match="must not be empty"):
+        server._apply_note_search_replace("x", "", "y", replace_all=replace_all)
+
+
+@pytest.mark.parametrize("handle", [ROOT, ROOT[:8], "[ap:REPLACE]"])
+def test_global_single_replace_all_one_live_read_one_update(monkeypatch, tmp_path, handle):
+    client, _, current = setup(monkeypatch, tmp_path, "old &lt;\nold &lt;")
+    view = client._cache_view_publisher.capture()
+    before = copy.deepcopy(view.nodes_export)
+    result = dispatch(node_handle=handle, note_search="old", note_replace="new", replace_all=True)
+    meta = metadata(result)
+    assert meta["edits_applied"] == 1  # entry count, NOT occurrence count
+    assert meta["edit_results"] == [{"ordinal": 0, "matched": True, "index": 0, "replace_all": True, "replacement_count": 2}]
+    assert "---" in result and "+++" in result
+    client.get_node.assert_awaited_once_with(ROOT)
+    client.update_node.assert_awaited_once()
+    assert client.update_node.await_args.args[1].note == "new &lt;\nnew &lt;"
+    assert current.note == html.escape("old &lt;\nold &lt;")
+    client.create_node.assert_not_awaited()
+    assert view.nodes_export == before and client._cache_view_publisher.capture() is view
+    assert current_operation_cache(required=False) is None
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_per_entry_overrides_include_false_and_inputs_stay_unchanged(monkeypatch, tmp_path, as_json):
+    client, _, _ = setup(monkeypatch, tmp_path, "a a|b b|c c")
+    edits = [{"search": "a", "replace": "A"}, {"search": "b", "replace": "B", "replace_all": False}, {"search": "c", "replace": "C", "replace_all": True}]
+    before = copy.deepcopy(edits)
+    result = dispatch(replace_all=True, note_edits=json.dumps(edits) if as_json else edits)
+    meta = metadata(result)
+    assert client.update_node.await_args.args[1].note == "A A|B b|C C"
+    assert meta["edits_applied"] == 3
+    assert meta["edit_results"][0]["replacement_count"] == 2
+    assert meta["edit_results"][1] == {"ordinal": 1, "matched": True, "index": 4}
+    assert meta["edit_results"][2]["replacement_count"] == 2
+    assert edits == before
+    client.get_node.assert_awaited_once()
+    client.update_node.assert_awaited_once()
+
+
+def test_local_opt_in_and_later_entries_see_prior_insertions(monkeypatch, tmp_path):
+    client, _, _ = setup(monkeypatch, tmp_path, "x x")
+    result = dispatch(note_edits=[
+        {"search": "x", "replace": "xx", "replace_all": True},
+        {"search": "xx", "replace": "Y"},
+    ])
+    assert client.update_node.await_args.args[1].note == "Y xx"
+    assert metadata(result)["edit_results"][0]["replacement_count"] == 2
+    assert "replace_all" not in metadata(result)["edit_results"][1]
+
+
+def test_deletion_and_rename_still_share_one_read_and_write(monkeypatch, tmp_path):
+    client, _, _ = setup(monkeypatch, tmp_path, "x x")
+    result = dispatch(name="Renamed", replace_all=True, note_edits=[{"search": "x"}])
+    request = client.update_node.await_args.args[1]
+    assert request.note == " " and request.name == "[ap:REPLACE] Renamed #keep"
+    assert metadata(result)["edit_results"][0]["replacement_count"] == 2
+    client.get_node.assert_awaited_once()
+    client.update_node.assert_awaited_once()
+
+
+def test_default_and_explicit_false_keep_old_first_match_report(monkeypatch, tmp_path):
+    client, _, _ = setup(monkeypatch, tmp_path, "x x")
+    ordinary = dispatch(note_search="x", note_replace="y")
+    explicit = dispatch(note_search="x", note_replace="y", replace_all=False)
+    assert ordinary == explicit
+    assert metadata(ordinary)["edit_results"] == [{"ordinal": 0, "matched": True, "index": 0}]
+    assert client.update_node.await_args.args[1].note == "y x"
+
+
+@pytest.mark.parametrize("same_text", [False, True])
+def test_misses_and_identical_replacement_keep_existing_noop_semantics(monkeypatch, tmp_path, same_text):
+    client, _, _ = setup(monkeypatch, tmp_path, "x x")
+    result = dispatch(note_search="x" if same_text else "absent", note_replace="x", replace_all=True)
+    meta = metadata(result)
+    assert meta["note_changed"] is False
+    assert meta["no_op"] is (not same_text)
+    assert meta["edit_results"][0]["replacement_count"] == (2 if same_text else 0)
+    assert client.update_node.await_count == (1 if same_text else 0)
+
+
+@pytest.mark.parametrize("bad", [None, 0, 1, "true", [], {}])
+def test_bad_entry_boolean_rejects_whole_batch_before_live_get(monkeypatch, tmp_path, bad):
+    client, _, _ = setup(monkeypatch, tmp_path, "x x")
+    result = dispatch(note_edits=[{"search": "x", "replace": "y"}, {"search": "y", "replace": "z", "replace_all": bad}])
+    assert result["success"] is False
+    assert "note_edits[1].replace_all must be a boolean" in result["error"]["message"]
+    assert "operation_doc" in result
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+
+
+@pytest.mark.parametrize("bad", [None, 0, 1, "true"])
+def test_bad_global_boolean_rejected_before_boundary(monkeypatch, tmp_path, bad):
+    client, _, _ = setup(monkeypatch, tmp_path, "x")
+    result = dispatch(note_search="x", replace_all=bad)
+    assert result["error"]["code"] == "invalid_parameter_type"
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+
+
+@pytest.mark.parametrize("extra", [{}, {"name": "New"}, {"note": "whole"}, {"note_file": "missing.md"}])
+def test_replace_all_without_search_mode_cannot_replace_note_or_read_file(monkeypatch, tmp_path, extra):
+    client, _, _ = setup(monkeypatch, tmp_path, "x")
+    reader = Mock(side_effect=AssertionError("no file read"))
+    monkeypatch.setattr(nx, "_read_note_file_text", reader)
+    result = dispatch(replace_all=True, **extra)
+    assert result["success"] is False and "replace_all" in result["error"]["message"]
+    reader.assert_not_called()
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+
+
+def test_hard_barrier_still_precedes_transform_and_live_read(monkeypatch, tmp_path):
+    client, paths, _ = setup(monkeypatch, tmp_path, "x x")
+    s04_raise_barrier(paths)
+    transform = Mock(side_effect=AssertionError("no transform while refused"))
+    monkeypatch.setattr(server, "_apply_note_search_replace", transform)
+    result = dispatch(note_search="x", note_replace="y", replace_all=True)
+    assert result["error"]["code"] == "coherence_barrier_active"
+    transform.assert_not_called()
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+
+
+def test_registry_discloses_both_levels_and_reports():
+    registry = server.build_node_registry()
+    full = registry.describe_full("edit")
+    assert full["params_schema"]["properties"]["replace_all"]["default"] is False
+    assert "replace_all?" in full["params_schema"]["properties"]["note_edits"]["description"]
+    assert "replacement_count" in full["returns"]["description"]
+    for example in full["examples"]:
+        validate_params(registry.resolve("edit"), example["call"]["params"])
+    tool = next(t for t in asyncio.run(server.mcp.list_tools()) if t.name == "node")
+    assert "replace_all globally or per entry" in tool.description

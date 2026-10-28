@@ -1,0 +1,941 @@
+"""S02 §16.3 — epoch publication semantics tests."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    InjectedFault,
+    RecordedSleep,
+    make_coherence_root,
+    s02_append,
+    s02_fault_ops,
+    s02_fetch,
+    s02_make_export,
+    s02_node,
+)
+
+from workflowy_mcp.coherence import (
+    JournalProducer,
+    SemanticEffect,
+    append_journal_transaction,
+    inspect_journal,
+    journal_record_filename,
+    publish_epoch,
+    read_manifest,
+    read_refresh_claim,
+    run_full_refresh,
+)
+from workflowy_mcp.coherence.durable_io import atomic_write_json_durable
+from workflowy_mcp.coherence.epoch_publisher import PUBLISHABLE_KINDS
+from workflowy_mcp.coherence.errors import (
+    CoherenceSchemaError,
+    JournalPublicationError,
+    ManifestConflictError,
+)
+from workflowy_mcp.coherence.journal_store import _read_record_file
+from workflowy_mcp.coherence.refresh_authority import run_compat_patch
+from workflowy_mcp.coherence.schema import JournalTransaction
+from workflowy_mcp.coherence.snapshot_store import (
+    materialize_current_payload,
+    new_snapshot_candidate_path,
+    read_snapshot_envelope,
+    write_snapshot_candidate,
+)
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+def _snapshot_dir(tmp_path: Path) -> Path:
+    target = tmp_path / "snapshots"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+async def _refresh(paths, tmp_path, payload=None, **overrides):
+    kwargs = {
+        "paths": paths,
+        "fetch": s02_fetch(payload or s02_make_export([s02_node("a")])),
+        "settle_seconds": 0,
+        "snapshot_dir": _snapshot_dir(tmp_path),
+        "sleep": RecordedSleep(),
+        "poll_seconds": 0.02,
+    }
+    kwargs.update(overrides)
+    return await run_full_refresh(**kwargs)
+
+
+def _create_effect(node_id: str, **fields) -> SemanticEffect:
+    return SemanticEffect.node_create(s02_node(node_id, **fields))
+
+
+# ---------------------------------------------------------------------------
+# Epoch cut semantics
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_epoch_advances_and_sequences_are_globally_monotonic(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    s02_append(paths)
+    s02_append(paths)
+    outcome = await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 1
+    assert outcome.epoch_number == 1
+    # Monotonic: the head never resets across the epoch cut.
+    assert manifest.journal_head_seq == 2
+    # Incorporated through the captured head: floor == head + 1 (empty tail).
+    assert manifest.base_incorporated_through_seq == 2
+    assert manifest.journal_floor_seq == 3
+    assert manifest.previous_epoch_id is not None
+    assert manifest.epoch_id != manifest.previous_epoch_id
+    assert manifest.coherence_mode == "transition"
+
+
+@async_test
+async def test_download_is_materialized_through_captured_journal_head(tmp_path):
+    """A journal record missing from the export is folded into the new base."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    append_journal_transaction(
+        paths,
+        operation_kind="create",
+        effects=[_create_effect("ghost-node", name="created-by-journal")],
+        producer=JournalProducer(
+            pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+        ),
+    )
+    # The export does NOT contain the journaled node.
+    outcome = await _refresh(paths, tmp_path, payload=s02_make_export([s02_node("a")]))
+    ids = {n["id"] for n in outcome.nodes_export["nodes"]}
+    assert ids == {"a", "ghost-node"}
+    manifest = read_manifest(paths, required=True)
+    assert manifest.base_incorporated_through_seq == 1
+    # The published base itself carries the folded node.
+    envelope = read_snapshot_envelope(manifest.base_snapshot_path)
+    base_ids = {n["id"] for n in envelope.nodes_export["nodes"]}
+    assert ids == base_ids
+
+
+@async_test
+async def test_append_before_incorporation_capture_is_folded_into_base(tmp_path):
+    """A record committed after the cut but before the incorporation capture
+    is included in the new base's watermark."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+
+    async def fetch_then_append():
+        # Lands BEFORE the incorporation capture (which happens post-fetch).
+        append_journal_transaction(
+            paths,
+            operation_kind="create",
+            effects=[_create_effect("late-create")],
+            producer=JournalProducer(
+                pid=os.getpid(), pid_create_time=1.0,
+                owner_kind="process", ownership_kind="none",
+            ),
+        )
+        return s02_make_export([s02_node("a")])
+
+    outcome = await _refresh(paths, tmp_path, fetch=fetch_then_append)
+    manifest = read_manifest(paths, required=True)
+    assert manifest.base_incorporated_through_seq == 1
+    assert manifest.journal_head_seq == 1
+    assert manifest.journal_floor_seq == 2
+    ids = {n["id"] for n in outcome.nodes_export["nodes"]}
+    assert ids == {"a", "late-create"}
+
+
+@async_test
+async def test_append_after_incorporation_capture_survives_as_tail(tmp_path):
+    """A record committed after the incorporation capture is preserved as the
+    new epoch's active journal tail and replays onto the adopted view."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    from workflowy_mcp.carto_job_governance import (
+        _default_mkdir,
+        _default_replace,
+        _default_tmp_name,
+        _default_unlink,
+        _default_write_fsync,
+    )
+    from workflowy_mcp.coherence import DurableFileOps
+
+    def write_fsync(path: Path, text: str) -> None:
+        _default_write_fsync(path, text)
+        # The candidate temp write happens AFTER the incorporation capture:
+        # append a journal record here (post-cut, post-capture).
+        if "_nodes_export_snapshot.json" in path.name:
+            append_journal_transaction(
+                paths,
+                operation_kind="create",
+                effects=[_create_effect("tail-create")],
+                producer=JournalProducer(
+                    pid=os.getpid(), pid_create_time=1.0,
+                    owner_kind="process", ownership_kind="none",
+                ),
+            )
+
+    fs_ops = DurableFileOps(
+        write_fsync=write_fsync,
+        replace=_default_replace,
+        mkdir=_default_mkdir,
+        unlink=_default_unlink,
+        tmp_name=_default_tmp_name,
+    )
+    outcome = await _refresh(paths, tmp_path, fs_ops=fs_ops)
+    manifest = read_manifest(paths, required=True)
+    # The base incorporated nothing; the appended record is the live tail.
+    assert manifest.base_incorporated_through_seq == 0
+    assert manifest.journal_floor_seq == 1
+    assert manifest.journal_head_seq == 1
+    # The tail record remains on disk and is lineage-valid via previous_epoch.
+    record_path = paths.journal_dir / journal_record_filename(1)
+    assert record_path.exists()
+    record = _read_record_file(record_path, paths)
+    assert record.published_epoch_id == manifest.previous_epoch_id
+    # The adopted view reflects the tail record (idempotent replay).
+    ids = {n["id"] for n in outcome.nodes_export["nodes"]}
+    assert ids == {"a", "tail-create"}
+    report = inspect_journal(paths, manifest)
+    assert report["active_range_records"] == [1]
+    assert report["contiguous_active_range"]
+
+
+@async_test
+async def test_orphan_recovered_before_epoch_crossing(tmp_path):
+    """A durable above-head record is adopted under the OLD epoch before the
+    cut, so no committed record is stranded by the epoch change."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    record1, manifest1 = s02_append(paths)
+    # Plant a valid orphan at seq 2 (durable record, head NOT advanced).
+    orphan = JournalTransaction(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        sequence=2,
+        previous_sequence=1,
+        transaction_id="orphan" + "0" * 26,
+        published_epoch_id=manifest1.epoch_id,
+        operation_kind="create",
+        committed_at="2026-11-01T00:00:00+00:00",
+        producer=JournalProducer(
+            pid=os.getpid(), pid_create_time=1.0,
+            owner_kind="process", ownership_kind="none",
+        ),
+        verification=(),
+        effects=(_create_effect("orphan-node"),),
+    )
+    atomic_write_json_durable(paths.journal_dir / journal_record_filename(2), orphan.to_dict())
+
+    outcome = await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    # The orphan was adopted pre-crossing and folded into the new base.
+    assert manifest.base_incorporated_through_seq == 2
+    assert manifest.journal_head_seq == 2
+    ids = {n["id"] for n in outcome.nodes_export["nodes"]}
+    assert "orphan-node" in ids
+
+
+@async_test
+async def test_stale_basis_epoch_cannot_publish(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    assert claim is not None and claim.status == "completed"
+    # Reopen the claim as if still active and publish against a stale basis.
+    from workflowy_mcp.coherence.schema import claim_with_updates, write_refresh_claim
+
+    reopened = claim_with_updates(
+        claim,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+    )
+    write_refresh_claim(paths, reopened, expected_claim_id=claim.claim_id)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(reopened.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    with pytest.raises(ManifestConflictError):
+        await publish_epoch(
+            paths=paths,
+            claim_id=reopened.claim_id,
+            basis_epoch_id="0" * 32,  # stale basis
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+            refresh_cut=reopened.cut_token,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+    # The manifest is untouched.
+    after = read_manifest(paths, required=True)
+    assert after.epoch_id == manifest.epoch_id
+    assert after.epoch_number == manifest.epoch_number
+
+
+@async_test
+async def test_publish_rejects_job_basis_and_foreign_claim_tokens(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    from workflowy_mcp.coherence.schema import claim_with_updates, write_refresh_claim
+
+    reopened = claim_with_updates(claim, status="publishing", result=None)
+    write_refresh_claim(paths, reopened, expected_claim_id=claim.claim_id)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(reopened.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="job_basis",
+    )
+    # job_basis is never publishable.
+    assert "job_basis" not in PUBLISHABLE_KINDS
+    with pytest.raises(CoherenceSchemaError):
+        await publish_epoch(
+            paths=paths,
+            claim_id=reopened.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="job_basis",
+            refresh_cut=None,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+    # Foreign claim token.
+    with pytest.raises(ManifestConflictError):
+        await publish_epoch(
+            paths=paths,
+            claim_id="someone-else",
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+            refresh_cut=None,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+
+
+@async_test
+async def test_publish_rejects_incorporation_beyond_head(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    from workflowy_mcp.coherence.schema import claim_with_updates, write_refresh_claim
+
+    reopened = claim_with_updates(
+        claim,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+        cut_token=_current_cut_dict(claim, manifest),
+    )
+    write_refresh_claim(paths, reopened, expected_claim_id=claim.claim_id)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(reopened.target_epoch_id),
+        incorporated_through_seq=5,
+        publication_kind="full_refresh",
+    )
+    with pytest.raises(JournalPublicationError):
+        await publish_epoch(
+            paths=paths,
+            claim_id=reopened.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=5,
+            publication_kind="full_refresh",
+            refresh_cut=reopened.cut_token,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Crash/fault points inside publication (§14.3, in-process raise variants)
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_fault_before_manifest_replace_preserves_old_epoch(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    before = read_manifest(paths, required=True)
+    with pytest.raises(InjectedFault):
+        await _refresh(paths, tmp_path, fs_ops=s02_fault_ops("manifest_replace"))
+    after = read_manifest(paths, required=True)
+    assert after.epoch_id == before.epoch_id
+    assert after.epoch_number == before.epoch_number
+    # The durable candidate exists but is unreferenced residue (harmless).
+    leftovers = list(_snapshot_dir(tmp_path).iterdir())
+    assert len(leftovers) == 1
+    # The next refresh recovers cleanly and publishes a new epoch.
+    outcome = await _refresh(paths, tmp_path)
+    assert outcome.epoch_number == before.epoch_number + 1
+
+
+@async_test
+async def test_fault_on_external_dirt_clear_is_advisory_not_rollback(tmp_path):
+    from coherence_harness import s02_set_external_dirt
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    s02_set_external_dirt(paths, 1, active=True)
+    outcome = await _refresh(paths, tmp_path, fs_ops=s02_fault_ops("dirt_replace"))
+    manifest = read_manifest(paths, required=True)
+    # The epoch published despite the clearing failure.
+    assert manifest.epoch_number == 1
+    assert outcome.external_dirt_cleared is False
+    assert outcome.external_dirt_clear_failed is True
+    # Dirt retained (conservative): the next refresh may clear it.
+    dirt = read_manifest(paths, required=True)  # manifest unaffected
+    assert dirt.dirty_status.active is False
+    from workflowy_mcp.coherence import read_external_dirt
+
+    state = read_external_dirt(paths)
+    assert state is not None and state.active is True
+    # A clean follow-up refresh clears the retained dirt.
+    outcome2 = await _refresh(paths, tmp_path)
+    assert outcome2.external_dirt_cleared is True
+
+
+@async_test
+async def test_fault_before_candidate_write_leaves_no_trace(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    before = read_manifest(paths, required=True)
+    with pytest.raises(InjectedFault):
+        await _refresh(paths, tmp_path, fs_ops=s02_fault_ops("candidate_temp_write"))
+    after = read_manifest(paths, required=True)
+    assert after.epoch_id == before.epoch_id
+    assert list(_snapshot_dir(tmp_path).iterdir()) == []
+
+
+@async_test
+async def test_refresh_failure_after_completed_publication_is_still_coherent(tmp_path):
+    """A failure AFTER the manifest publish (here: the terminal claim write)
+    leaves a fully valid new epoch; dead-owner recovery classifies by target
+    epoch identity."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    # claim_replace fires on EVERY claim write: acquisition(#1),
+    # settling(#2), downloading(#3), materializing(#4), publishing(#5),
+    # completed(#6) — the terminal write is the 6th.
+    with pytest.raises(InjectedFault):
+        await _refresh(paths, tmp_path, fs_ops=s02_fault_ops("claim_replace", times=6))
+    manifest = read_manifest(paths, required=True)
+    # The epoch WAS published (manifest replace is a different artifact).
+    assert manifest.epoch_number == 1
+    claim = read_refresh_claim(paths)
+    # The terminal 'completed' write faulted; the best-effort terminal
+    # failure write then succeeded — the claim is terminal-failed while the
+    # manifest names a fully valid new epoch (the follow-up refresh proceeds
+    # normally; the crash-window variant is covered by the subprocess matrix).
+    assert claim is not None and claim.status == "failed"
+    assert claim.target_epoch_id == manifest.epoch_id
+    outcome = await _refresh(paths, tmp_path)
+    assert outcome.epoch_number == 2
+
+
+# ---------------------------------------------------------------------------
+# A2 — publish_epoch self-defense: cut and kind bound to the persisted claim
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_forged_cut_cannot_clear_post_cut_barrier(tmp_path):
+    """A2: a caller holding a valid claim cannot pass a fabricated cut to
+    clear a barrier raised AFTER the persisted cut."""
+    from coherence_harness import s02_set_barrier
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)  # publishes epoch 1, claim completed
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    from workflowy_mcp.coherence.schema import (
+        REFRESH_CUT_SCHEMA_VERSION,
+        RefreshCutToken,
+        claim_with_updates,
+        write_refresh_claim,
+    )
+
+    # Reopen the claim as active with a fresh target and cut gen 0.
+    reopened = claim_with_updates(
+        claim,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+    )
+    write_refresh_claim(paths, reopened, expected_claim_id=claim.claim_id)
+    assert reopened.cut_token is not None
+    assert reopened.cut_token.hard_barrier_generation == 0
+    # A post-cut barrier at generation 1.
+    s02_set_barrier(paths, 1, active=True)
+    # The caller FORGES a cut that claims generation 1 coverage.
+    forged_cut = RefreshCutToken(
+        schema_version=REFRESH_CUT_SCHEMA_VERSION,
+        account_scope_id=ACCOUNT_A,
+        epoch_number=reopened.cut_token.epoch_number,
+        epoch_id=reopened.cut_token.epoch_id,
+        journal_head_seq=reopened.cut_token.journal_head_seq,
+        hard_barrier_generation=1,
+        external_dirt_generation=0,
+        captured_at=reopened.cut_token.captured_at,
+    )
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": [s02_node("a")]},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(reopened.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    with pytest.raises(ManifestConflictError):
+        await publish_epoch(
+            paths=paths,
+            claim_id=reopened.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+            refresh_cut=forged_cut,
+            clear_hard_through_generation=1,
+            clear_external_through_generation=0,
+        )
+    # The barrier was NOT cleared and no epoch was published.
+    after = read_manifest(paths, required=True)
+    assert after.dirty_status.active is True
+    assert after.dirty_status.generation == 1
+    assert after.epoch_number == manifest.epoch_number
+
+
+@async_test
+async def test_publish_kind_must_match_claim_kind(tmp_path):
+    """A2: full_refresh publication requires a full-refresh claim; compat
+    publication requires a compat_patch claim."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    from workflowy_mcp.coherence.schema import claim_with_updates, write_refresh_claim
+
+    # A full-refresh claim, reopened...
+    reopened = claim_with_updates(
+        claim,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+    )
+    write_refresh_claim(paths, reopened, expected_claim_id=claim.claim_id)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(reopened.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="compat_patch",
+    )
+    # ...cannot drive a compat_patch publication.
+    with pytest.raises(CoherenceSchemaError):
+        await publish_epoch(
+            paths=paths,
+            claim_id=reopened.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="compat_patch",
+            refresh_cut=None,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+    # A compat_patch claim cannot drive a full_refresh publication either.
+    from workflowy_mcp.coherence import COMPAT_PATCH_KIND
+
+    compat_claim = claim_with_updates(
+        reopened,
+        refresh_kind=COMPAT_PATCH_KIND,
+        status="publishing",
+        cut_token=None,
+    )
+    write_refresh_claim(paths, compat_claim, expected_claim_id=reopened.claim_id)
+    candidate2 = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(compat_claim.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    with pytest.raises(CoherenceSchemaError):
+        await publish_epoch(
+            paths=paths,
+            claim_id=compat_claim.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate2,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+            refresh_cut=None,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# A5 — final authority bindings: checkpoint claim kind + cut↔basis lineage
+# ---------------------------------------------------------------------------
+
+
+def _reopened(paths, manifest, claim, *, status="publishing"):
+    from workflowy_mcp.coherence.schema import (
+        claim_with_updates,
+        new_epoch_id,
+        write_refresh_claim,
+    )
+
+    reopened = claim_with_updates(
+        claim,
+        status=status,
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+        # T1: mint a FRESH target epoch id — reusing the stale one (equal to
+        # the current manifest epoch) makes later failure modes collide with
+        # the broad CoherenceSchemaError these guards are tested against,
+        # masking the intended guard (false-positive risk).
+        target_epoch_id=new_epoch_id(),
+    )
+    write_refresh_claim(paths, reopened, expected_claim_id=claim.claim_id)
+    return reopened
+
+
+def _current_cut_dict(claim, manifest) -> dict:
+    """A cut minted from the CURRENT manifest (as a real successor
+    acquisition would persist), carrying the claim cut's generations."""
+
+    return {
+        **claim.cut_token.to_dict(),
+        "epoch_number": manifest.epoch_number,
+        "epoch_id": manifest.epoch_id,
+        "journal_head_seq": manifest.journal_head_seq,
+    }
+
+
+@async_test
+async def test_system_claim_cannot_publish_checkpoint(tmp_path):
+    """A5.1: a full-refresh claim can never be borrowed for a checkpoint
+    publication (checkpoint claim kind is activated by S04)."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    reopened = _reopened(paths, manifest, claim)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(reopened.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="checkpoint",
+    )
+    with pytest.raises(CoherenceSchemaError, match="checkpoint publication requires a checkpoint"):
+        await publish_epoch(
+            paths=paths,
+            claim_id=reopened.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="checkpoint",
+            refresh_cut=None,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+    after = read_manifest(paths, required=True)
+    assert after.epoch_number == manifest.epoch_number
+    assert after.epoch_id == manifest.epoch_id
+
+
+@async_test
+async def test_compat_claim_cannot_publish_checkpoint(tmp_path):
+    """A5.1: a compat_patch claim cannot publish a checkpoint either."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    from workflowy_mcp.coherence import COMPAT_PATCH_KIND
+    from workflowy_mcp.coherence.schema import (
+        claim_with_updates,
+        new_epoch_id,
+        write_refresh_claim,
+    )
+
+    compat_claim = claim_with_updates(
+        claim,
+        refresh_kind=COMPAT_PATCH_KIND,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+        target_epoch_id=new_epoch_id(),
+        cut_token=None,
+    )
+    write_refresh_claim(paths, compat_claim, expected_claim_id=claim.claim_id)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(compat_claim.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="checkpoint",
+    )
+    with pytest.raises(CoherenceSchemaError, match="checkpoint publication requires a checkpoint"):
+        await publish_epoch(
+            paths=paths,
+            claim_id=compat_claim.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="checkpoint",
+            refresh_cut=None,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+    after = read_manifest(paths, required=True)
+    assert after.epoch_number == manifest.epoch_number
+    assert after.epoch_id == manifest.epoch_id
+
+
+@async_test
+async def test_persisted_cut_wrong_epoch_id_cannot_publish_or_clear(tmp_path):
+    """A5.2: a persisted cut naming a different epoch_id than the current
+    basis fails closed — it cannot publish and cannot clear the barrier."""
+    from coherence_harness import s02_set_barrier
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    # Persist a claim whose cut names a FOREIGN epoch id (argument == persisted
+    # cut, so the A2 binding passes; the basis binding must catch it).
+    foreign_cut = {
+        **_current_cut_dict(claim, manifest),
+        "epoch_id": "f" * 32,
+        "hard_barrier_generation": 1,
+    }
+    from workflowy_mcp.coherence.schema import (
+        claim_with_updates,
+        new_epoch_id,
+        write_refresh_claim,
+    )
+
+    tampered = claim_with_updates(
+        claim,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+        target_epoch_id=new_epoch_id(),
+        cut_token=foreign_cut,
+    )
+    write_refresh_claim(paths, tampered, expected_claim_id=claim.claim_id)
+    s02_set_barrier(paths, 1, active=True)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": [s02_node("a")]},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(tampered.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    with pytest.raises(ManifestConflictError, match="persisted cut names a different epoch"):
+        await publish_epoch(
+            paths=paths,
+            claim_id=tampered.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+            refresh_cut=tampered.cut_token,
+            clear_hard_through_generation=1,
+            clear_external_through_generation=0,
+        )
+    after = read_manifest(paths, required=True)
+    assert after.dirty_status.active is True
+    assert after.epoch_number == manifest.epoch_number
+    assert after.epoch_id == manifest.epoch_id
+
+
+@async_test
+async def test_persisted_cut_wrong_epoch_number_cannot_publish(tmp_path):
+    """A5.2: a persisted cut with a different epoch_number fails closed."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    wrong_number_cut = {
+        **_current_cut_dict(claim, manifest),
+        "epoch_number": manifest.epoch_number + 7,
+    }
+    from workflowy_mcp.coherence.schema import (
+        claim_with_updates,
+        new_epoch_id,
+        write_refresh_claim,
+    )
+
+    tampered = claim_with_updates(
+        claim,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+        target_epoch_id=new_epoch_id(),
+        cut_token=wrong_number_cut,
+    )
+    write_refresh_claim(paths, tampered, expected_claim_id=claim.claim_id)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(tampered.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    with pytest.raises(ManifestConflictError, match="persisted cut names a different epoch"):
+        await publish_epoch(
+            paths=paths,
+            claim_id=tampered.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+            refresh_cut=tampered.cut_token,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+    after = read_manifest(paths, required=True)
+    assert after.epoch_number == manifest.epoch_number
+    assert after.epoch_id == manifest.epoch_id
+
+
+@async_test
+async def test_persisted_cut_ahead_of_manifest_head_cannot_publish(tmp_path):
+    """A5.2: a persisted cut whose journal head is AHEAD of the current
+    manifest head fails closed."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    await _refresh(paths, tmp_path)
+    manifest = read_manifest(paths, required=True)
+    claim = read_refresh_claim(paths)
+    ahead_cut = {
+        **_current_cut_dict(claim, manifest),
+        "journal_head_seq": manifest.journal_head_seq + 5,
+    }
+    from workflowy_mcp.coherence.schema import (
+        claim_with_updates,
+        new_epoch_id,
+        write_refresh_claim,
+    )
+
+    tampered = claim_with_updates(
+        claim,
+        status="publishing",
+        result=None,
+        target_epoch_number=manifest.epoch_number + 1,
+        target_epoch_id=new_epoch_id(),
+        cut_token=ahead_cut,
+    )
+    write_refresh_claim(paths, tampered, expected_claim_id=claim.claim_id)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": []},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=str(tampered.target_epoch_id),
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    with pytest.raises(ManifestConflictError, match="persisted cut journal head is ahead"):
+        await publish_epoch(
+            paths=paths,
+            claim_id=tampered.claim_id,
+            basis_epoch_id=manifest.epoch_id,
+            candidate_snapshot_path=candidate,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+            refresh_cut=tampered.cut_token,
+            clear_hard_through_generation=None,
+            clear_external_through_generation=None,
+        )
+    after = read_manifest(paths, required=True)
+    assert after.epoch_number == manifest.epoch_number
+    assert after.epoch_id == manifest.epoch_id
+
+
+@async_test
+async def test_well_formed_full_refresh_publishes_and_clears_after_a5_guards(tmp_path):
+    """A5 positive: a well-formed full refresh still publishes and clears
+    covered generations after the new guards."""
+    from coherence_harness import s02_set_barrier, s02_set_external_dirt
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    s02_set_barrier(paths, 1, active=True)
+    s02_set_external_dirt(paths, 1, active=True)
+    outcome = await _refresh(paths, tmp_path)
+    assert outcome.status == "published"
+    assert outcome.hard_barrier_cleared is True
+    assert outcome.external_dirt_cleared is True
+    manifest = read_manifest(paths, required=True)
+    assert manifest.dirty_status.active is False
+
+
+# ---------------------------------------------------------------------------
+# Compat-patch vs full-refresh non-overlap (claim exclusion)
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_compat_patch_cannot_publish_without_base_and_never_clears(tmp_path):
+    from coherence_harness import s02_set_barrier
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    # Publish a real base via refresh, then raise a barrier.
+    await _refresh(paths, tmp_path, payload=s02_make_export([s02_node("x", note="old")]))
+    s02_set_barrier(paths, 1, active=True)
+    outcome = await run_compat_patch(
+        paths=paths,
+        patches=[{"id": "x", "note": "new"}],
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=RecordedSleep(),
+        poll_seconds=0.02,
+    )
+    manifest = read_manifest(paths, required=True)
+    # The patch published a new epoch but cleared NOTHING.
+    assert outcome.epoch_number == 2
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.generation == 1
+    # The patch content landed.
+    view = materialize_current_payload(paths, manifest)
+    by_id = {n["id"]: n for n in view.payload["nodes"]}
+    assert by_id["x"]["note"] == "new"

@@ -1,0 +1,947 @@
+"""S03-A §14.1 — journal adoption engine tests (adopt_manifest_head)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    NOW,
+    make_coherence_root,
+    s02_node,
+    write_malformed,
+)
+
+from workflowy_mcp.coherence import (
+    CacheView,
+    CacheViewPublisher,
+    JournalProducer,
+    SemanticEffect,
+    adopt_manifest_head,
+    append_journal_transaction,
+    is_unpopulated_view,
+    journal_record_filename,
+    manifest_with_updates,
+    read_manifest,
+    unpopulated_cache_view,
+    write_manifest,
+)
+from workflowy_mcp.coherence import adoption as adoption_module
+from workflowy_mcp.coherence.durable_io import atomic_write_json_durable
+from workflowy_mcp.coherence.errors import (
+    CacheAdoptionError,
+    CoherenceAccountMismatchError,
+    CoherenceSchemaError,
+    CoherenceStateMissingError,
+    EffectApplicationError,
+    JournalIntegrityError,
+)
+from workflowy_mcp.coherence.journal_store import _read_record_file
+from workflowy_mcp.coherence.schema import JournalTransaction, new_epoch_id
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+# ---------------------------------------------------------------------------
+# Fixtures / helpers
+# ---------------------------------------------------------------------------
+
+
+def _producer() -> JournalProducer:
+    return JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+    )
+
+
+def _append(paths, effects, *, kind: str = "test"):
+    return append_journal_transaction(
+        paths,
+        operation_kind=kind,
+        effects=effects,
+        producer=_producer(),
+    )
+
+
+def _setup_base(paths, tmp_path: Path, nodes, *, watermark: int = 0):
+    """Write a base snapshot for the CURRENT manifest epoch and point the
+    manifest at it (transition mode).  Returns the updated manifest."""
+
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    manifest = read_manifest(paths, required=True)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": nodes},
+        account_scope_id=paths.account_root.name,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=watermark,
+        publication_kind="full_refresh",
+    )
+    updated = manifest_with_updates(
+        manifest,
+        base_snapshot_path=candidate,
+        coherence_mode="transition",
+        base_incorporated_through_seq=watermark,
+        journal_floor_seq=watermark + 1,
+    )
+    write_manifest(
+        paths,
+        updated,
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=manifest.journal_head_seq,
+    )
+    return read_manifest(paths, required=True)
+
+
+def _view_for(paths, payload, *, seq: int | None = None) -> CacheView:
+    manifest = read_manifest(paths, required=True)
+    return CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=manifest.journal_head_seq if seq is None else seq,
+        nodes_export=payload,
+        account_scope_id=manifest.account_scope_id,
+    )
+
+
+def _publisher(paths, payload=None, *, seq: int | None = None) -> CacheViewPublisher:
+    if payload is None:
+        return CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+    return CacheViewPublisher(_view_for(paths, payload, seq=seq))
+
+
+def _adopt(paths, publisher, tmp_path):
+    return adopt_manifest_head(
+        paths=paths, publisher=publisher, snapshot_dir=tmp_path / "snapshots"
+    )
+
+
+def _write_raw_record(paths, sequence: int, effects, *, account: str = ACCOUNT_A, epoch_id: str | None = None):
+    manifest = read_manifest(paths, required=True)
+    record = JournalTransaction(
+        schema_version=1,
+        account_scope_id=account,
+        sequence=sequence,
+        previous_sequence=sequence - 1,
+        transaction_id=f"raw{sequence:027d}",
+        published_epoch_id=epoch_id or manifest.epoch_id,
+        operation_kind="test",
+        committed_at=NOW,
+        producer=_producer(),
+        verification=(),
+        effects=tuple(effects),
+    )
+    atomic_write_json_durable(
+        paths.journal_dir / journal_record_filename(sequence), record.to_dict()
+    )
+    return record
+
+
+BASE_NODES = [s02_node("A", name="alpha"), s02_node("B", name="beta")]
+
+
+# ---------------------------------------------------------------------------
+# §14.1 — adoption semantics
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_already_current_returns_identical_view_and_zero_replay(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "already_current"
+    assert result.records_applied == 0
+    assert result.view is publisher.capture()  # the SAME view object
+    assert result.to_epoch_id == manifest.epoch_id
+    assert result.to_sequence == 0
+
+
+@async_test
+async def test_fast_path_acquires_no_coherence_mutex(tmp_path, monkeypatch):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("fast path must not acquire the coherence mutex")
+
+    monkeypatch.setattr(adoption_module, "coherence_lock_async", _forbidden)
+    result = await _adopt(paths, publisher, tmp_path)
+    assert result.disposition == "already_current"
+
+
+@async_test
+async def test_same_epoch_tail_applies_exactly_once_in_order(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma", parent_id="A"))])
+    _append(paths, [SemanticEffect.node_fields("A", ["name"], {"name": "alpha-2"})])
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "tail_replayed"
+    assert result.records_applied == 2
+    view = result.view
+    assert view.adopted_sequence == 2
+    assert view.epoch_id == manifest.epoch_id
+    assert view.nodes_by_id["C"]["name"] == "gamma"
+    assert view.nodes_by_id["C"]["parent_id"] == "A"
+    assert view.nodes_by_id["A"]["name"] == "alpha-2"
+    # Order matters: rename must not precede the create that it follows.
+    assert publisher.capture() is view
+
+
+@async_test
+async def test_adoption_is_idempotent_second_call_already_current(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+
+    first = await _adopt(paths, publisher, tmp_path)
+    second = await _adopt(paths, publisher, tmp_path)
+
+    assert first.disposition == "tail_replayed"
+    assert second.disposition == "already_current"
+    assert second.view is first.view  # duplicate adoption is a no-op
+
+
+@async_test
+async def test_local_sequence_ahead_of_manifest_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    _append(paths, [SemanticEffect.node_create(s02_node("D"))])
+    payload = {
+        "nodes": BASE_NODES + [s02_node("C"), s02_node("D")]
+    }
+    publisher = _publisher(paths, payload, seq=2)
+
+    # Tamper: rewind the manifest head beneath the local adopted sequence,
+    # and remove the would-be orphan so recovery cannot re-adopt it.
+    manifest = read_manifest(paths, required=True)
+    write_manifest(
+        paths,
+        manifest_with_updates(manifest, journal_head_seq=1),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=2,
+    )
+    os.remove(paths.journal_dir / journal_record_filename(2))
+
+    with pytest.raises(JournalIntegrityError):
+        await _adopt(paths, publisher, tmp_path)
+
+
+@async_test
+async def test_gap_above_head_quarantines_and_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    # Raw orphan at seq 3 with a GAP at seq 2.
+    _write_raw_record(paths, 3, [SemanticEffect.node_create(s02_node("E"))])
+
+    with pytest.raises(JournalIntegrityError):
+        await _adopt(paths, publisher, tmp_path)
+    # The gapped orphan was quarantined, never adopted.
+    assert not (paths.journal_dir / journal_record_filename(3)).exists()
+    quarantined = [p.name for p in paths.quarantine_dir.iterdir()]
+    assert any(journal_record_filename(3) in name for name in quarantined)
+
+
+@async_test
+async def test_malformed_committed_record_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    write_malformed(paths.journal_dir / journal_record_filename(1))
+
+    with pytest.raises(JournalIntegrityError):
+        await _adopt(paths, publisher, tmp_path)
+
+
+@async_test
+async def test_wrong_account_orphan_quarantines_and_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    _write_raw_record(
+        paths, 2, [SemanticEffect.node_create(s02_node("X"))], account="b" * 32
+    )
+
+    with pytest.raises(CoherenceAccountMismatchError):
+        await _adopt(paths, publisher, tmp_path)
+    quarantined = [p.name for p in paths.quarantine_dir.iterdir()]
+    assert any(journal_record_filename(2) in name for name in quarantined)
+
+
+@async_test
+async def test_replay_divergence_yields_diagnostics_not_failure(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    # A record targeting a node absent from the local cache: replay
+    # authority treats it as a diagnostic, never a hard failure.
+    _append(paths, [SemanticEffect.node_fields("ZZ-absent", ["name"], {"name": "ghost"})])
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "tail_replayed"
+    assert result.view.adopted_sequence == 1
+    kinds = {d["kind"] for d in result.diagnostics}
+    assert "absent_target" in kinds
+
+
+@async_test
+async def test_incremental_failure_triggers_one_clean_base_recovery(tmp_path, monkeypatch):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+
+    real_apply = adoption_module.apply_journal_transaction
+    calls = {"count": 0}
+
+    def _fail_once(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise EffectApplicationError("injected local divergence")
+        return real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(adoption_module, "apply_journal_transaction", _fail_once)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "recovered_from_base"
+    assert result.view.adopted_sequence == 1
+    assert result.view.nodes_by_id["C"]["name"] == "gamma"
+    assert publisher.capture() is result.view
+    # Seal item 6: the recovery diagnostics name the incremental failure,
+    # its exception class, and the successful clean-base recovery.
+    recovery_diags = [d for d in result.diagnostics if d["kind"] == "incremental_replay_failed"]
+    assert len(recovery_diags) == 1
+    assert recovery_diags[0]["exception"] == "EffectApplicationError"
+    assert recovery_diags[0]["recovery"] == "clean_base_succeeded"
+
+
+@async_test
+async def test_failed_recovery_leaves_last_good_view_and_markers(tmp_path, monkeypatch):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    last_good = publisher.capture()
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+
+    def _always_fail(*_args, **_kwargs):
+        raise EffectApplicationError("injected permanent divergence")
+
+    # Both the incremental path (adoption) AND the clean-base recovery path
+    # (snapshot_store materialization) must fail for recovery to exhaust.
+    monkeypatch.setattr(adoption_module, "apply_journal_transaction", _always_fail)
+    from workflowy_mcp.coherence import snapshot_store as snapshot_store_module
+
+    monkeypatch.setattr(snapshot_store_module, "apply_journal_transaction", _always_fail)
+
+    with pytest.raises(CacheAdoptionError):
+        await _adopt(paths, publisher, tmp_path)
+
+    # No partial view, no marker advance, last good view intact (§5.7/§12.5).
+    assert publisher.capture() is last_good
+    assert publisher.capture().adopted_sequence == 0
+
+
+@async_test
+async def test_unpopulated_with_baseless_manifest_is_already_current(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)  # bootstrap: no base
+    publisher = _publisher(paths)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "already_current"
+    assert is_unpopulated_view(result.view)
+    assert result.records_applied == 0
+
+
+@async_test
+async def test_populated_local_with_baseless_manifest_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)  # bootstrap: no base
+    # A populated view from a FOREIGN lineage (its markers can never match a
+    # baseless manifest) — adoption must fail closed, never guess.
+    foreign = CacheView.build(
+        epoch_number=3,
+        epoch_id="e" * 32,
+        adopted_sequence=7,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id=ACCOUNT_A,
+    )
+    publisher = CacheViewPublisher(foreign)
+
+    # Seal item 1 rule 5: the locked manifest confirms the local view is
+    # newer than the shared lineage — a typed journal-integrity failure.
+    with pytest.raises(JournalIntegrityError, match="newer than the locked manifest epoch"):
+        await _adopt(paths, publisher, tmp_path)
+    # The publisher view and markers are unchanged by the refusal.
+    assert publisher.capture() is foreign
+
+
+@async_test
+async def test_missing_manifest_bootstrap_adopts_legacy_snapshot(tmp_path):
+    jobs_root = tmp_path / "cartographer_jobs"
+    jobs_root.mkdir(parents=True)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True)
+    legacy = snapshot_dir / "20260101-000000-000000_pid1_nodes_export_snapshot.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "snapshot_timestamp": NOW,
+                "nodes_export": {"nodes": [{"id": "L", "name": "legacy"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    from workflowy_mcp.coherence import coherence_paths
+
+    paths = coherence_paths(ACCOUNT_A, jobs_root=jobs_root)
+    publisher = _publisher(paths)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "epoch_reloaded"
+    assert result.view.nodes_by_id["L"]["name"] == "legacy"
+    assert result.view.adopted_sequence == 0
+    # The manifest now exists with the wrapped base.
+    manifest = read_manifest(paths, required=True)
+    assert manifest.base_snapshot_path is not None
+
+
+@async_test
+async def test_schema_corruption_in_manifest_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    write_malformed(paths.manifest_path)
+
+    with pytest.raises(CoherenceSchemaError):
+        await _adopt(paths, publisher, tmp_path)
+
+
+@async_test
+async def test_cow_patch_racing_adoption_is_rebased_never_discarded(tmp_path):
+    """§5.3/§12.4: a transition COW patch at the SAME markers must survive a
+    racing journal adoption — the tail rebases onto the patched view."""
+
+    from workflowy_mcp.coherence.operation_cache import publish_local_cache_view
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+
+    # Local legacy patch lands FIRST (same markers, new object).
+    def _rename(working):
+        for index, node in enumerate(working["nodes"]):
+            if node["id"] == "A":
+                patched = dict(node)
+                patched["name"] = "alpha-local"
+                working["nodes"][index] = patched
+                return
+
+    publish_local_cache_view(publisher, _rename, reason="test-patch")
+    assert publisher.capture().adopted_sequence == 0  # markers unchanged
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    # The tail replay rebased onto the patched view: BOTH effects present.
+    assert result.disposition == "tail_replayed"
+    assert result.view.adopted_sequence == 1
+    assert result.view.nodes_by_id["A"]["name"] == "alpha-local"
+    assert result.view.nodes_by_id["C"]["name"] == "gamma"
+
+
+@async_test
+async def test_new_epoch_id_distinct_for_reload(tmp_path):
+    # Sanity guard for the fixtures: epoch ids are collision-free hex.
+    assert new_epoch_id() != new_epoch_id()
+
+
+# ---------------------------------------------------------------------------
+# Seal-2 item 1 — populated views must be account-BOUND (never null)
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_same_head_unbound_account_view_fails(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    unbound = CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id=None,  # unbound populated view
+    )
+    publisher = CacheViewPublisher(unbound)
+
+    with pytest.raises(CoherenceAccountMismatchError, match="no account binding"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is unbound
+    assert read_manifest(paths, required=True).journal_head_seq == 0
+
+
+@async_test
+async def test_behind_head_unbound_account_view_fails(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    unbound = CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id=None,
+    )
+    publisher = CacheViewPublisher(unbound)
+
+    with pytest.raises(CoherenceAccountMismatchError, match="no account binding"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is unbound
+    assert read_manifest(paths, required=True).journal_head_seq == 1
+
+
+# ---------------------------------------------------------------------------
+# Seal-2 item 5 — the REAL N-vs-N+1 out-of-order adopter race
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_older_captured_target_never_regresses_newer_adoption(tmp_path, monkeypatch):
+    """A captures head N; the shared head advances to N+1; B publishes N+1
+    locally; A's older completion must return the N+1 view without
+    publishing, with to_* describing the N+1 view."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+
+    real_replay = adoption_module._replay_tail_onto
+    fired = {"done": False}
+
+    def _advance_head_and_publish_n_plus_1(payload, records, **kwargs):
+        if not fired["done"]:
+            fired["done"] = True
+            # Head moves to N+1 AFTER A captured N...
+            _append(paths, [SemanticEffect.node_create(s02_node("D", name="delta"))])
+            # ...and adopter B completes the full N+1 adoption locally.
+            manifest = read_manifest(paths, required=True)
+            all_records = [
+                _read_record_file(
+                    paths.journal_dir / journal_record_filename(seq), paths
+                )
+                for seq in (1, 2)
+            ]
+            full = real_replay(payload, all_records, **kwargs)
+            competitor = CacheView.build(
+                epoch_number=manifest.epoch_number,
+                epoch_id=manifest.epoch_id,
+                adopted_sequence=2,
+                nodes_export=full,
+                account_scope_id=ACCOUNT_A,
+            )
+            publisher.publish(competitor, expected_current=publisher.capture())
+        return real_replay(payload, records, **kwargs)
+
+    monkeypatch.setattr(
+        adoption_module, "_replay_tail_onto", _advance_head_and_publish_n_plus_1
+    )
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    # A's older N=1 attempt never published; the N+1 view stands.
+    assert publisher.capture().adopted_sequence == 2
+    assert result.view.adopted_sequence == 2
+    assert result.to_sequence == 2
+    assert result.to_epoch_id == result.view.epoch_id
+    assert result.disposition == "already_current"
+    assert result.view.nodes_by_id["D"]["name"] == "delta"  # N+1's effect present
+
+
+# ---------------------------------------------------------------------------
+# Seal-2 item 7 — above-head detection on the sentinel fast path
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_sentinel_fast_path_diverts_on_valid_orphan_then_fails_closed(tmp_path):
+    """Sentinel + baseless/head-0 manifest + a VALID seq-1 orphan: the fast
+    path must divert, locked recovery adopts the orphan (head -> 1), and
+    adoption then fails loud (no base can materialize) — never an
+    authoritative empty-vault snapshot."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)  # bootstrap: no base, head 0
+    publisher = _publisher(paths)
+    sentinel_view = publisher.capture()
+    manifest = read_manifest(paths, required=True)
+    _write_raw_record(
+        paths, 1, [SemanticEffect.node_create(s02_node("C"))], epoch_id=manifest.epoch_id
+    )
+
+    with pytest.raises(CoherenceStateMissingError, match="no base snapshot"):
+        await _adopt(paths, publisher, tmp_path)
+    # Locked recovery DID run: the head advanced exactly once.
+    assert read_manifest(paths, required=True).journal_head_seq == 1
+    # The EXACT publisher object is preserved (not merely "a sentinel").
+    assert publisher.capture() is sentinel_view
+
+
+@async_test
+async def test_sentinel_fast_path_diverts_on_gapped_orphan(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    publisher = _publisher(paths)
+    sentinel_view = publisher.capture()
+    manifest = read_manifest(paths, required=True)
+    _write_raw_record(
+        paths, 2, [SemanticEffect.node_create(s02_node("E"))], epoch_id=manifest.epoch_id
+    )
+
+    with pytest.raises(JournalIntegrityError, match="gap above head"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is sentinel_view
+    assert read_manifest(paths, required=True).journal_head_seq == 0
+
+
+@async_test
+async def test_sentinel_fast_path_diverts_on_wrong_account_orphan(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    publisher = _publisher(paths)
+    sentinel_view = publisher.capture()
+    manifest = read_manifest(paths, required=True)
+    _write_raw_record(
+        paths,
+        1,
+        [SemanticEffect.node_create(s02_node("X"))],
+        account="b" * 32,
+        epoch_id=manifest.epoch_id,
+    )
+
+    with pytest.raises(CoherenceAccountMismatchError, match="another account scope"):
+        await _adopt(paths, publisher, tmp_path)
+    # Exact original publisher object retained.
+    assert publisher.capture() is sentinel_view
+    # Manifest head remains 0 (no adoption of the foreign record).
+    assert read_manifest(paths, required=True).journal_head_seq == 0
+    # The invalid orphan was moved to quarantine.
+    quarantined = [p.name for p in paths.quarantine_dir.iterdir()]
+    assert any(journal_record_filename(1) in name for name in quarantined)
+    # No operation snapshot/ContextVar was created by the failure.
+    from workflowy_mcp.coherence.operation_cache import current_operation_cache
+
+    assert current_operation_cache(required=False) is None
+
+
+@async_test
+async def test_sentinel_fast_path_clean_when_no_artifacts(tmp_path, monkeypatch):
+    """The no-artifact sentinel fast path still acquires NO coherence mutex."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    publisher = _publisher(paths)
+
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("sentinel fast path must not acquire the coherence mutex")
+
+    monkeypatch.setattr(adoption_module, "coherence_lock_async", _forbidden)
+    result = await _adopt(paths, publisher, tmp_path)
+    assert result.disposition == "already_current"
+    assert is_unpopulated_view(result.view)
+
+
+@async_test
+async def test_same_head_foreign_account_view_fails(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    foreign = CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id="b" * 32,
+    )
+    publisher = CacheViewPublisher(foreign)
+
+    with pytest.raises(CoherenceAccountMismatchError, match="different account scope"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is foreign  # refusal never mutates published state
+
+
+@async_test
+async def test_behind_head_foreign_account_view_fails(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    foreign = CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id="b" * 32,
+    )
+    publisher = CacheViewPublisher(foreign)
+
+    with pytest.raises(CoherenceAccountMismatchError, match="different account scope"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is foreign
+    assert read_manifest(paths, required=True).journal_head_seq == 1
+
+
+@async_test
+async def test_same_epoch_id_wrong_epoch_number_fails(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    wrong_number = CacheView.build(
+        epoch_number=manifest.epoch_number + 1,  # same id, wrong number
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id=ACCOUNT_A,
+    )
+    publisher = CacheViewPublisher(wrong_number)
+
+    with pytest.raises(JournalIntegrityError, match="epoch numbers differ"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is wrong_number
+
+
+@async_test
+async def test_same_epoch_number_different_id_fails(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    colliding = CacheView.build(
+        epoch_number=manifest.epoch_number,  # same number, different id
+        epoch_id="d" * 32,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id=ACCOUNT_A,
+    )
+    publisher = CacheViewPublisher(colliding)
+
+    with pytest.raises(JournalIntegrityError, match="collides with a different manifest epoch"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is colliding
+
+
+@async_test
+async def test_apparent_local_ahead_resolves_after_locked_reread(tmp_path, monkeypatch):
+    """Seal item 1 rule 5: a stale lock-free manifest read that makes the
+    local view look newer must NOT fail — the locked re-read resolves it."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    manifest = read_manifest(paths, required=True)
+    stale = manifest_with_updates(manifest, journal_head_seq=0)  # the "old complete artifact"
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES) + [s02_node("C")]}, seq=1)
+
+    real_read = adoption_module.read_manifest
+    calls = {"count": 0}
+
+    def _stale_first_read(paths_arg, *, required=True):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return stale  # lock-free read observes the PRIOR artifact
+        return real_read(paths_arg, required=required)
+
+    monkeypatch.setattr(adoption_module, "read_manifest", _stale_first_read)
+    lock_entries = {"count": 0}
+    real_lock = adoption_module.coherence_lock_async
+
+    def _counting_lock(*args, **kwargs):
+        lock_entries["count"] += 1
+        return real_lock(*args, **kwargs)
+
+    monkeypatch.setattr(adoption_module, "coherence_lock_async", _counting_lock)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    # The locked re-read saw the real head (1): current, no error, no fail.
+    assert result.disposition == "already_current"
+    assert result.view.adopted_sequence == 1
+    assert lock_entries["count"] == 1  # the slow path DID re-read under the mutex
+
+
+# ---------------------------------------------------------------------------
+# Seal item 7 — above-head artifact detection before the fast path
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_fast_path_diverts_on_valid_orphan_and_adopts(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES) + [s02_node("C")]}, seq=1)
+    # Crash-orphaned record at head+1 (durable record, head never advanced).
+    _write_raw_record(paths, 2, [SemanticEffect.node_create(s02_node("D", name="delta"))], epoch_id=manifest.epoch_id)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "tail_replayed"
+    assert result.view.adopted_sequence == 2
+    assert result.view.nodes_by_id["D"]["name"] == "delta"
+    assert read_manifest(paths, required=True).journal_head_seq == 2  # head advanced once
+
+
+@async_test
+async def test_fast_path_diverts_on_contiguous_orphan_tail(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES) + [s02_node("C")]}, seq=1)
+    _write_raw_record(paths, 2, [SemanticEffect.node_create(s02_node("D"))], epoch_id=manifest.epoch_id)
+    _write_raw_record(paths, 3, [SemanticEffect.node_create(s02_node("E"))], epoch_id=manifest.epoch_id)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.view.adopted_sequence == 3
+    assert result.view.nodes_by_id["D"]["name"] == "node-D"
+    assert result.view.nodes_by_id["E"]["name"] == "node-E"
+
+
+@async_test
+async def test_fast_path_diverts_on_gapped_orphan_and_fails(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES) + [s02_node("C")]}, seq=1)
+    current_view = publisher.capture()
+    # Only head+2 present (head+1 missing): detected despite the gap.
+    _write_raw_record(paths, 3, [SemanticEffect.node_create(s02_node("E"))], epoch_id=manifest.epoch_id)
+
+    with pytest.raises(JournalIntegrityError, match="gap above head"):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is current_view
+    assert read_manifest(paths, required=True).journal_head_seq == 1  # unchanged
+
+
+@async_test
+async def test_fast_path_diverts_on_wrong_account_orphan(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C"))])
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES) + [s02_node("C")]}, seq=1)
+    current_view = publisher.capture()
+    _write_raw_record(
+        paths, 2, [SemanticEffect.node_create(s02_node("X"))],
+        account="b" * 32, epoch_id=manifest.epoch_id,
+    )
+
+    with pytest.raises(CoherenceAccountMismatchError):
+        await _adopt(paths, publisher, tmp_path)
+    assert publisher.capture() is current_view
+
+
+# ---------------------------------------------------------------------------
+# Seal items 9 + 11 — result/view consistency under lost races
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_result_targets_describe_returned_view_after_lost_cas(tmp_path, monkeypatch):
+    """Another local adopter publishes the head-N view while this adopter
+    builds an older candidate: the returned result must describe the NEWER
+    view actually returned (to_* == view markers)."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = _publisher(paths, {"nodes": list(BASE_NODES)}, seq=0)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    _append(paths, [SemanticEffect.node_create(s02_node("D", name="delta"))])
+
+    real_replay = adoption_module._replay_tail_onto
+    fired = {"done": False}
+
+    def _competing_adoption(payload, records, **kwargs):
+        if not fired["done"]:
+            fired["done"] = True
+            # A competing local adopter completes the FULL tail first.
+            full = real_replay(payload, records, **kwargs)
+            manifest = read_manifest(paths, required=True)
+            competitor = CacheView.build(
+                epoch_number=manifest.epoch_number,
+                epoch_id=manifest.epoch_id,
+                adopted_sequence=2,
+                nodes_export=full,
+                account_scope_id=ACCOUNT_A,
+            )
+            publisher.publish(competitor, expected_current=publisher.capture())
+        return real_replay(payload, records, **kwargs)
+
+    monkeypatch.setattr(adoption_module, "_replay_tail_onto", _competing_adoption)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.view.adopted_sequence == 2
+    assert result.to_sequence == 2  # describes the RETURNED view, never the stale target
+    assert result.to_epoch_id == result.view.epoch_id
+    assert result.disposition in ("already_current", "tail_replayed")
+    assert result.view.nodes_by_id["D"]["name"] == "delta"
+
+
+@async_test
+async def test_epoch_reload_never_overwrites_newer_published_epoch(tmp_path, monkeypatch):
+    """An epoch-E reload completing after E+1 was already published locally
+    must return the E+1 view untouched (no regression, consistent result)."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+
+    real_materialize = adoption_module._materialize_reload
+    fired = {"done": False}
+
+    def _competing_epoch_publish(paths_arg, manifest_arg, **kwargs):
+        if not fired["done"]:
+            fired["done"] = True
+            newer = CacheView.build(
+                epoch_number=manifest.epoch_number + 1,
+                epoch_id="f" * 32,
+                adopted_sequence=0,
+                nodes_export={"nodes": [s02_node("NEW", name="newer")]},
+                account_scope_id=ACCOUNT_A,
+            )
+            publisher.publish(newer, expected_current=publisher.capture())
+        return real_materialize(paths_arg, manifest_arg, **kwargs)
+
+    monkeypatch.setattr(adoption_module, "_materialize_reload", _competing_epoch_publish)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.view.epoch_id == "f" * 32
+    assert result.to_epoch_id == "f" * 32
+    assert result.view.nodes_by_id["NEW"]["name"] == "newer"
+    assert publisher.capture().epoch_id == "f" * 32

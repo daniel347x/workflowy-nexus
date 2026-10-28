@@ -1,0 +1,442 @@
+"""lightning_rod_mutation_spec.py -- the frozen mutation request spec.
+
+SIBLING pattern to cache_render_spec.RenderProjectionSpec -- deliberately NOT
+reusing it (SPEC v5 §1 invariant 1: RENDER/MUTATION SEPARATION). Render specs
+flow through Stage 1/2, the modal, and the client wire; mutation never may.
+
+All mutation ingress (the ``lightning_rod`` MCP tool boundary today; a future
+client trigger per §9) funnels through the ONE normalizer
+:meth:`LightningRodMutationSpec.normalize_from_tool_args`, producing ONE
+frozen spec. PURE module (like lightning_rod_search.py): imports ONLY
+beacon_mutation_contract + stdlib. It must NEVER import nexus_map_codebase
+(the dependence-graph invariant, §2).
+
+Also homed here: :class:`BeaconWritePlan`, the executable per-item commit
+operand produced by the plan seam (§5) and consumed by the commit seam (§6)
+via duck-typed field access.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Literal, Optional
+
+from beacon_mutation_contract import (
+    COMMENT_MUTATION_MODES,
+    BeaconCommentIntent,
+    BeaconWriteIntent,
+    validate_beacon_comment_text,
+)
+
+MUTATION_MODES = ("ensure_beacons", "remove_beacon_tags")
+
+
+def _coerce_tag_list(value: Any) -> list[str]:
+    """Normalize a tag/list input to '#'-less tokens; raises ValueError."""
+    if value is None:
+        return []
+    raw_items = [value] if isinstance(value, str) else value
+    if not isinstance(raw_items, list):
+        raise ValueError("tags must be a string or list of strings")
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_items:
+        s = str(raw or "").strip()
+        if not s:
+            continue
+        s = s.lstrip("#").strip()
+        if not s:
+            continue
+        if any(ch.isspace() for ch in s) or "#" in s:
+            raise ValueError(f"invalid tag token {raw!r}; pass one tag per token")
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@BeaconMutationOperation-pnha,
+#   role=BeaconMutationOperation,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+# ]
+class BeaconMutationOperation:
+    """ONE normalized mutation operation (frozen).
+
+    ``handle`` is the raw input item (a symbol / UUID / UUID prefix / AP-ID
+    -- resolution happens LATER, in the shared resolver core, never here).
+    ``tags`` are '#'-less tokens. ``comment`` is the typed intent
+    (``preserve`` when no comment was requested).
+    """
+
+    input_index: int
+    handle: str
+    tags: tuple
+    comment: BeaconCommentIntent
+
+    def to_dict(self) -> dict:
+        return {
+            "input_index": self.input_index,
+            "handle": self.handle,
+            "tags": list(self.tags),
+            "comment": self.comment.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@LightningRodMutationSpec-mulk,
+#   role=LightningRodMutationSpec,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+# ]
+class LightningRodMutationSpec:
+    """ONE normalized, immutable beacon-mutation request (frozen).
+
+    Produced ONLY by :meth:`normalize_from_tool_args` (invariant 2: ONE
+    NORMALIZER PER REQUEST KIND). Fields are JSON-serializable;
+    :meth:`to_dict` is provided for logs/tests. A strict ``from_wire()`` +
+    versioned wire shape is DEFERRED (§9) until a real client mutation
+    action exists -- do not freeze a speculative wire contract now.
+    """
+
+    mode: Literal["ensure_beacons", "remove_beacon_tags"]
+    root_handles: tuple
+    favor: Literal["uuid", "symbol"]
+    operations: tuple
+    # [ap:LPC157] residue: the all-or-nothing opt-in. False (the default)
+    # keeps per-item partial success; True restores the strict preflight
+    # veto -- any item failure leaves every other row not_run with zero
+    # writes and no lease. Interpreted by the batch orchestrator only.
+    atomic: bool = False
+
+    @classmethod
+    def normalize_from_tool_args(
+        cls,
+        *,
+        mode: Any,
+        symbols: Any,
+        tags: Any,
+        operations: Any,
+        comment: Any,
+        comment_mode: Any = None,
+        atomic: Any = False,
+        root_uuids: Any,
+        root_uuid: Any,
+        favor: Any,
+    ) -> "tuple[LightningRodMutationSpec | None, str | None]":
+        """THE ONE mutation normalizer -- every mutation ingress funnels here.
+
+        Absorbs the legacy ``_normalize_lightning_rod_mutation_operations``
+        semantics (granular/shorthand mutual exclusion, unknown-field
+        rejection, blank-symbol rejection, textual-duplicate rejection,
+        non-empty tags, comment forbidden in remove mode) PLUS:
+
+          * root-handle coercion (bare string -> 1-tuple);
+          * favor validation ('uuid' | 'symbol');
+          * root-handle mutual exclusion: passing BOTH root_uuid AND
+            root_uuids (after coercion, non-empty) is a loud normalization
+            error -- no silent precedence;
+          * roots REQUIRED (mutation resolution must be scoped);
+          * comment_mode (2R4E1P, ensure only): 'fill' (default) |
+            'replace' | 'append' -- how `comment` meets an existing beacon
+            comment. Accepted top-level (shorthand) or per-operation
+            (granular); never with remove mode; an explicit comment_mode
+            without a comment is a loud error; per-operation wins.
+          * atomic ([ap:LPC157] residue): batch-level all-or-nothing opt-in.
+            Default False (per-item partial success). True restores the
+            strict preflight veto at the orchestrator: any item failure
+            leaves every other row not_run with zero writes and no lease.
+            A boolean; None/absent is False; anything else is a loud
+            normalization error.
+
+        Returns ``(spec, None)`` on success, ``(None, error)`` on any
+        rejection -- errors are returned as strings, never raised, so the
+        MCP tool boundary can produce structured failures.
+        """
+        try:
+            _mode = str(mode or "").strip().lower()
+            if _mode not in MUTATION_MODES:
+                return None, f"internal error: unexpected mutation mode {mode!r}"
+
+            _favor = str(favor or "uuid").strip().lower()
+            if _favor not in ("uuid", "symbol"):
+                return None, f"Unknown favor {favor!r}; use 'uuid' or 'symbol'."
+
+            _atomic = False if atomic is None else atomic
+            if not isinstance(_atomic, bool):
+                return None, f"atomic must be a boolean, got {atomic!r}."
+
+            def _coerce_roots(value: Any) -> list[str]:
+                if value is None:
+                    return []
+                if isinstance(value, str):
+                    s = value.strip()
+                    return [s] if s else []
+                if not isinstance(value, (list, tuple)):
+                    return []
+                out: list[str] = []
+                for r in value:
+                    s = str(r or "").strip()
+                    if s:
+                        out.append(s)
+                return out
+
+            roots_multi = _coerce_roots(root_uuids)
+            roots_single = _coerce_roots(root_uuid)
+            if roots_multi and roots_single:
+                return None, (
+                    "pass root_uuid or root_uuids -- one or the other, not both."
+                )
+            root_handles = tuple(roots_multi or roots_single)
+            if not root_handles:
+                return None, (
+                    f"{_mode} requires root_uuids (or root_uuid) to scope "
+                    "symbol resolution."
+                )
+
+            top_comment = validate_beacon_comment_text(comment)
+            if _mode == "remove_beacon_tags" and top_comment is not None:
+                return None, "remove_beacon_tags does not accept a top-level comment."
+
+            def _validate_comment_mode(raw: Any, label: str) -> "str | None":
+                """Shared comment_mode validation (2R4E1P). None -> default."""
+                if raw is None or str(raw).strip() == "":
+                    return None
+                word = str(raw).strip().lower()
+                if word not in COMMENT_MUTATION_MODES:
+                    return f"unknown comment_mode {raw!r} on {label}; use 'fill', 'replace', or 'append'."
+                if _mode == "remove_beacon_tags":
+                    return f"{label} is not accepted in remove_beacon_tags."
+                return None
+
+            top_comment_mode = _validate_comment_mode(comment_mode, "comment_mode")
+            if top_comment_mode:
+                return None, top_comment_mode
+            top_mode_word = (
+                str(comment_mode).strip().lower()
+                if comment_mode is not None and str(comment_mode).strip()
+                else "fill"
+            )
+
+            def _intent_for(comment_value: Optional[str], mode_word: str) -> BeaconCommentIntent:
+                if mode_word == "replace":
+                    return BeaconCommentIntent.replace(comment_value)
+                if mode_word == "append":
+                    return BeaconCommentIntent.append(comment_value)
+                return BeaconCommentIntent.fill_if_empty(comment_value)
+
+            top_intent = (
+                _intent_for(top_comment, top_mode_word)
+                if top_comment is not None
+                else BeaconCommentIntent.preserve()
+            )
+            if top_comment is None and comment_mode is not None and str(comment_mode).strip():
+                return None, (
+                    "comment_mode requires comment (there is no comment to "
+                    "apply it to)."
+                )
+
+            has_operations = operations is not None
+            has_symbols = bool([s for s in (symbols or []) if str(s).strip()])
+            top_tags = _coerce_tag_list(tags)
+            has_top_tags = bool(top_tags)
+
+            if has_operations:
+                if has_symbols or has_top_tags or top_comment is not None:
+                    return None, (
+                        "Use either granular `operations=[{symbol,tags,comment?,comment_mode?}, ...]` "
+                        "OR shorthand `symbols=[...], tags=[...]`; do not mix operations "
+                        "with top-level symbols/tags/comment/comment_mode."
+                    )
+                if not isinstance(operations, list) or not operations:
+                    return None, "operations must be a non-empty list of {symbol, tags, comment?} objects."
+                ops: list[BeaconMutationOperation] = []
+                seen_symbols: set[str] = set()
+                for idx, op in enumerate(operations):
+                    if not isinstance(op, dict):
+                        return None, f"operations[{idx}] must be an object."
+                    extra = set(op.keys()) - {"symbol", "tags", "comment", "comment_mode"}
+                    if extra:
+                        return None, f"operations[{idx}] has unknown field(s): {sorted(extra)}."
+                    sym = str(op.get("symbol") or "").strip()
+                    if not sym:
+                        return None, f"operations[{idx}].symbol is required."
+                    if sym in seen_symbols:
+                        return None, f"duplicate operation for symbol {sym!r}; pass each symbol once."
+                    seen_symbols.add(sym)
+                    op_tags = _coerce_tag_list(op.get("tags"))
+                    if not op_tags:
+                        return None, f"operations[{idx}].tags must be a non-empty list."
+                    op_comment = validate_beacon_comment_text(op.get("comment"))
+                    op_comment_mode = _validate_comment_mode(
+                        op.get("comment_mode"), f"operations[{idx}].comment_mode"
+                    )
+                    if op_comment_mode:
+                        return None, op_comment_mode
+                    if _mode == "remove_beacon_tags" and op_comment is not None:
+                        return None, f"operations[{idx}].comment is not accepted in remove_beacon_tags."
+                    if (
+                        op_comment is None
+                        and op.get("comment_mode") is not None
+                        and str(op.get("comment_mode")).strip()
+                    ):
+                        return None, (
+                            f"operations[{idx}].comment_mode requires comment "
+                            "(there is no comment to apply it to)."
+                        )
+                    op_intent = (
+                        _intent_for(op_comment, str(op.get("comment_mode") or "fill").strip().lower())
+                        if op_comment is not None
+                        else BeaconCommentIntent.preserve()
+                    )
+                    ops.append(
+                        BeaconMutationOperation(
+                            input_index=idx,
+                            handle=sym,
+                            tags=tuple(op_tags),
+                            comment=op_intent,
+                        )
+                    )
+                return cls(
+                    mode=_mode,  # type: ignore[arg-type]
+                    root_handles=root_handles,
+                    favor=_favor,  # type: ignore[arg-type]
+                    operations=tuple(ops),
+                    atomic=_atomic,
+                ), None
+
+            # Shorthand mode.
+            if not has_symbols:
+                return None, f"{_mode} requires either operations=[...] or a non-empty symbols=[...] list."
+            if not has_top_tags:
+                return None, f"{_mode} shorthand requires a non-empty tags=[...] list."
+            ops = []
+            seen_symbols = set()
+            for idx, raw in enumerate(symbols or []):
+                if not isinstance(raw, str):
+                    return None, (
+                        f"symbols[{idx}] must be a STRING in mutation modes; "
+                        "object elements ({'uuid'|'symbol', 'expand'?}) are "
+                        "the render_symbols-only grammar."
+                    )
+                sym = raw.strip()
+                if not sym:
+                    return None, f"symbols[{idx}] must be a non-empty string."
+                if sym in seen_symbols:
+                    return None, f"duplicate symbol {sym!r}; pass each symbol once."
+                seen_symbols.add(sym)
+                ops.append(
+                    BeaconMutationOperation(
+                        input_index=idx,
+                        handle=sym,
+                        tags=tuple(top_tags),
+                        comment=top_intent,
+                    )
+                )
+            return cls(
+                mode=_mode,  # type: ignore[arg-type]
+                root_handles=root_handles,
+                favor=_favor,  # type: ignore[arg-type]
+                operations=tuple(ops),
+                atomic=_atomic,
+            ), None
+        except ValueError as e:
+            return None, str(e)
+
+    def to_dict(self) -> dict:
+        """JSON-serializable form for logs/tests (§9)."""
+        return {
+            "mode": self.mode,
+            "root_handles": list(self.root_handles),
+            "favor": self.favor,
+            "operations": [op.to_dict() for op in self.operations],
+            "atomic": self.atomic,
+        }
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@BeaconWritePlan-mrug,
+#   role=BeaconWritePlan,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+# ]
+class BeaconWritePlan:
+    """The executable per-item commit operand (§5 step 11).
+
+    Produced JUST-IN-TIME by ``plan_beacon_write_from_node`` against the
+    CURRENT file state (which includes every prior successful same-batch
+    write) and passed INTO the commit seam as an operand -- no synthetic note
+    text anywhere, no rediscovery at write time.
+
+    ``write_intent`` is the AUTHORITATIVE intent, populated at plan
+    construction (commit never reverse-engineers intent from outcomes).
+    ``occurrence`` is the Markdown same-name-sibling ordinal (from
+    ``_compute_same_name_sibling_ordinal``; None for non-Markdown or unique
+    headings), computed from the cache at plan time. ``target_key`` is
+    ``(canonical source_path, resolved beacon_id)`` for an existing-beacon
+    plan or ``(canonical source_path, occurrence-resolved anchor identity)``
+    for a create plan; canonical = os.path.realpath + platform
+    case-normalization (so aliases/symlinks cannot defeat uniqueness).
+    ``source_sha256`` is the fingerprint of the CURRENT RAW BYTES at plan
+    time (§7's CAS domain). Any conflict/unsupported/unresolvable target ->
+    ``success=False`` with ``error``/``error_kind``; nothing is written.
+    """
+
+    success: bool
+    planned_operation: Optional[str]  # 'create' | 'update' | 'delete' | 'noop' | 'unsupported'
+    node_id: str
+    target_key: Optional[tuple]
+    cached_name: str
+    intended_name: str
+    write_intent: Optional[BeaconWriteIntent]
+    occurrence: Optional[int]
+    file_node_id: Optional[str]
+    source_path: Optional[str]
+    language: Optional[str]
+    beacon_id: Optional[str]
+    note_comment: Optional[str]
+    disk_comment: Optional[str]
+    comment_outcome: Optional[str]
+    resolved_comment: Optional[str]
+    intended_slice_labels: tuple
+    source_sha256: Optional[str]
+    error: Optional[str] = None
+    error_kind: Optional[str] = None
+    # Why a ``noop`` plan writes nothing (None for every other outcome):
+    # 'virtual_group' | 'labels_already_absent' | 'already_satisfied' |
+    # 'no_beacon_at_target'. Surfaced on the batch result row so a skipped
+    # write is never silent (Manager-Session-088).
+    noop_reason: Optional[str] = None
+    # 2R4E1P: the agent-facing kept-conflict message (both texts) when
+    # comment_outcome == 'kept_existing_conflict' -- a fill-mode comment
+    # conflict is a WARNING (labels still ensured), never a plan failure.
+    comment_warning: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "success": self.success,
+            "planned_operation": self.planned_operation,
+            "node_id": self.node_id,
+            "target_key": list(self.target_key) if self.target_key else None,
+            "cached_name": self.cached_name,
+            "intended_name": self.intended_name,
+            "write_intent": self.write_intent.to_dict() if self.write_intent else None,
+            "occurrence": self.occurrence,
+            "file_node_id": self.file_node_id,
+            "source_path": self.source_path,
+            "language": self.language,
+            "beacon_id": self.beacon_id,
+            "note_comment": self.note_comment,
+            "disk_comment": self.disk_comment,
+            "comment_outcome": self.comment_outcome,
+            "resolved_comment": self.resolved_comment,
+            "intended_slice_labels": list(self.intended_slice_labels),
+            "source_sha256": self.source_sha256,
+            "error": self.error,
+            "error_kind": self.error_kind,
+            "comment_warning": self.comment_warning,
+        }

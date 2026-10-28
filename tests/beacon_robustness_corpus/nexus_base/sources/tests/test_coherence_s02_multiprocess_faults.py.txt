@@ -1,0 +1,304 @@
+"""S02 §16.1/§14.3 — real multi-process and crash/fault-injection tests."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import subprocess
+import sys
+import time
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    RecordedSleep,
+    make_coherence_root,
+    run_subprocess,
+    s02_fetch,
+    s02_make_export,
+    s02_node,
+    s02_set_barrier,
+    s02_set_external_dirt,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp.coherence import (
+    inspect_journal,
+    read_external_dirt,
+    read_manifest,
+    run_full_refresh,
+)
+
+TESTS_DIR = Path(__file__).resolve().parent
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+def _snapshot_dir(tmp_path: Path) -> Path:
+    target = tmp_path / "snapshots"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _jobs_root(paths) -> str:
+    return str(paths.account_root.parent.parent)
+
+
+# ---------------------------------------------------------------------------
+# Two real processes, same account, covered generations → ONE fetch
+# ---------------------------------------------------------------------------
+
+
+def test_two_processes_concurrent_refresh_one_fetch(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    jobs_root = _jobs_root(paths)
+    snapshot_dir = _snapshot_dir(tmp_path)
+    go_file = tmp_path / "go"
+    marker = tmp_path / "fetch-count.txt"
+    claim_path = paths.refresh_publication_path
+
+    code_template = """
+import asyncio, sys, time
+from pathlib import Path
+sys.path.insert(0, {tests_dir!r})
+from workflowy_mcp.coherence import coherence_paths, run_full_refresh
+
+account, jobs_root, snapshot_dir, go_file, marker, result_file, mode = sys.argv[1:8]
+paths = coherence_paths(account, jobs_root=jobs_root)
+
+async def fetch():
+    with open(marker, "a", encoding="utf-8") as handle:
+        handle.write("x")
+    if mode == "owner":
+        deadline = time.monotonic() + 20
+        while not Path(go_file).exists():
+            if time.monotonic() > deadline:
+                raise RuntimeError("timeout waiting for go")
+            await asyncio.sleep(0.05)
+    if mode == "joiner":
+        raise AssertionError("joiner must never fetch")
+    return {"nodes": [{"id": "n1", "name": "one"}]}
+
+async def main():
+    outcome = await run_full_refresh(
+        paths=paths, fetch=fetch, settle_seconds=0,
+        snapshot_dir=snapshot_dir, poll_seconds=0.05,
+    )
+    Path(result_file).write_text(outcome.status, encoding="utf-8")
+
+asyncio.run(main())
+""".replace("{tests_dir!r}", repr(str(TESTS_DIR)))
+
+    owner = subprocess.Popen(
+        [sys.executable, "-c", code_template, ACCOUNT_A, jobs_root, str(snapshot_dir),
+         str(go_file), str(marker), str(tmp_path / "owner.out"), "owner"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        # Wait until the owner holds the claim and is inside its fetch.
+        assert wait_for_file(claim_path, timeout=10)
+        assert wait_for_file(marker, timeout=10)
+        joiner = subprocess.Popen(
+            [sys.executable, "-c", code_template, ACCOUNT_A, jobs_root, str(snapshot_dir),
+             str(go_file), str(marker), str(tmp_path / "joiner.out"), "joiner"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            time.sleep(1.0)  # let the joiner join and start polling
+            touch(go_file)
+            o_out, o_err = owner.communicate(timeout=30)
+            j_out, j_err = joiner.communicate(timeout=30)
+        except BaseException:
+            joiner.kill()
+            joiner.communicate(timeout=10)
+            raise
+    except BaseException:
+        owner.kill()
+        owner.communicate(timeout=10)
+        raise
+
+    assert owner.returncode == 0, o_err
+    assert joiner.returncode == 0, j_err
+    assert (tmp_path / "owner.out").read_text() == "published"
+    assert (tmp_path / "joiner.out").read_text() == "joined"
+    # Exactly ONE download across both processes.
+    assert marker.read_text(encoding="utf-8") == "x"
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 1
+
+
+# ---------------------------------------------------------------------------
+# Subprocess crash matrix (§14.3) — dead-owner recovery + lineage integrity
+# ---------------------------------------------------------------------------
+
+
+def _crash_code(fault_point: str, times: int) -> str:
+    return """
+import asyncio, sys
+from pathlib import Path
+sys.path.insert(0, {tests_dir!r})
+from coherence_harness import s02_exit_ops
+from workflowy_mcp.coherence import coherence_paths, run_full_refresh
+
+account, jobs_root, snapshot_dir = sys.argv[1:4]
+paths = coherence_paths(account, jobs_root=jobs_root)
+
+async def fetch():
+    return {"nodes": [{"id": "n1", "name": "x"}]}
+
+asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, settle_seconds=0, snapshot_dir=snapshot_dir,
+    poll_seconds=0.05, fs_ops=s02_exit_ops({fault!r}, times={times}),
+))
+""".replace("{tests_dir!r}", repr(str(TESTS_DIR))).replace("{fault!r}", repr(fault_point)).replace("{times}", str(times))
+
+
+@pytest.mark.parametrize(
+    ("fault_point", "times", "expect_published"),
+    [
+        ("candidate_temp_write", 1, False),  # before candidate durability
+        ("manifest_temp_write", 1, False),  # candidate durable, manifest not published
+        ("manifest_replace", 1, False),  # manifest publication interrupted
+        ("claim_replace", 6, True),  # published; terminal claim write never landed
+    ],
+    ids=["before_candidate", "before_manifest_write", "at_manifest_replace", "before_claim_terminal"],
+)
+def test_dead_owner_crash_recovers_and_succeeds(tmp_path, fault_point, times, expect_published):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    result = run_subprocess(
+        _crash_code(fault_point, times),
+        ACCOUNT_A,
+        _jobs_root(paths),
+        str(_snapshot_dir(tmp_path)),
+        timeout=60,
+    )
+    assert result.returncode == 42, result.stderr
+    # The owner is dead; its claim is recoverable.  A fresh refresh succeeds.
+    outcome = asyncio.run(
+        run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([s02_node("fresh")])),
+            settle_seconds=0,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+        )
+    )
+    assert outcome.status == "published"
+    manifest = read_manifest(paths, required=True)
+    if expect_published:
+        # The crashed owner DID publish its epoch before dying; the successor
+        # recovery classified that, and our new refresh advanced past it.
+        assert manifest.epoch_number == 2
+    else:
+        # The crashed owner never published; our refresh is the first epoch.
+        assert manifest.epoch_number == 1
+    report = inspect_journal(paths, manifest)
+    assert report["contiguous_active_range"]
+
+
+def test_crash_after_manifest_publish_before_dirt_clear_keeps_dirt(tmp_path):
+    """Owner dies after manifest publish but before the external-dirt clear:
+    the new epoch is valid and the post-cut-eligible dirt survives."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    s02_set_external_dirt(paths, 1, active=True)
+    result = run_subprocess(
+        _crash_code("dirt_replace", 1),
+        ACCOUNT_A,
+        _jobs_root(paths),
+        str(_snapshot_dir(tmp_path)),
+        timeout=60,
+    )
+    assert result.returncode == 42, result.stderr
+    manifest = read_manifest(paths, required=True)
+    # The epoch published.
+    assert manifest.epoch_number == 1
+    # The dirt was NOT cleared (the clearing write was the crash point).
+    dirt = read_external_dirt(paths)
+    assert dirt is not None and dirt.active is True
+    # A follow-up refresh (cut covers gen 1) clears it.
+    outcome = asyncio.run(
+        run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([s02_node("fresh")])),
+            settle_seconds=0,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+        )
+    )
+    assert outcome.external_dirt_cleared is True
+    assert read_external_dirt(paths).active is False
+
+
+# ---------------------------------------------------------------------------
+# The mandatory epoch-race scenario (Waypoint A): in-flight work spanning a
+# refresh epoch cut must replay cleanly or trip a NEWER surviving barrier.
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_inflight_append_and_barrier_spanning_epoch_cut(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    from workflowy_mcp.coherence import (
+        JournalProducer,
+        SemanticEffect,
+        append_journal_transaction,
+    )
+
+    async def fetch():
+        # Post-cut, pre-incorporation: a journal append and a NEWER barrier.
+        append_journal_transaction(
+            paths,
+            operation_kind="create",
+            effects=[SemanticEffect.node_create(s02_node("inflight"))],
+            producer=JournalProducer(
+                pid=os.getpid(), pid_create_time=1.0,
+                owner_kind="process", ownership_kind="none",
+            ),
+        )
+        s02_set_barrier(paths, 1, active=True)
+        return s02_make_export([s02_node("a")])
+
+    outcome = await run_full_refresh(
+        paths=paths,
+        fetch=fetch,
+        settle_seconds=0,
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=RecordedSleep(),
+        poll_seconds=0.02,
+    )
+    manifest = read_manifest(paths, required=True)
+    # The in-flight record was folded into the new base (never lost).
+    ids = {n["id"] for n in outcome.nodes_export["nodes"]}
+    assert "inflight" in ids
+    # The post-cut barrier SURVIVES the publication (never silently cleared).
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.generation == 1
+    # A recovery refresh clears the covered barrier; lineage stays coherent.
+    # (The mock export below is vault-faithful: a journaled create IS
+    # committed server-side, so a real /nodes-export contains the node.)
+    outcome2 = await run_full_refresh(
+        paths=paths,
+        fetch=s02_fetch(s02_make_export([s02_node("a"), s02_node("inflight")])),
+        refresh_kind="recovery",
+        settle_seconds=0,
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=RecordedSleep(),
+        poll_seconds=0.02,
+    )
+    assert outcome2.hard_barrier_cleared is True
+    manifest2 = read_manifest(paths, required=True)
+    assert manifest2.dirty_status.active is False
+    # The folded record persists across the second cut as well.
+    ids2 = {n["id"] for n in outcome2.nodes_export["nodes"]}
+    assert "inflight" in ids2

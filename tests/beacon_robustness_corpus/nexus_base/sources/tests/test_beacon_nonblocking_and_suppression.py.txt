@@ -1,0 +1,901 @@
+"""Non-Blocking Beacon Writes (NBBW) + global #wfy-suppress for beacon symbol resolution.
+
+Regression locks for program [ap:3ACUQS]:
+
+(i)   a beacon.tags.ensure batch runs its file parsing/writing OFF the event
+      loop: a heartbeat coroutine keeps ticking while every parse is slow;
+(iii) an outside write between the JIT plan and the commit writes ZERO bytes;
+      cancelling a batch mid-commit releases the Q3 lease only AFTER the
+      in-flight write has finished;
+(iv)  Dan's ruling [ap:7ORCPL]: a symbol present both under a #wfy-suppress'd
+      ancestor and elsewhere resolves to the unsuppressed one only (no
+      ambiguity) for beacon.resolve, beacon.snippet and a batch write; a
+      suppressed-only item is never written; no tab -> loud failure.
+
+These run the REAL client seams (WorkFlowyClientNexus preflight/plan/commit and
+the real symbol resolver) over a synthetic cache and real temp files; only the
+cache accessor, the suppress-config read and the lease governor are stubbed.
+"""
+
+import asyncio
+import os
+import sys
+import threading
+import time
+from types import SimpleNamespace
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from workflowy_mcp import server as srv  # noqa: E402
+from workflowy_mcp.client import api_client_nexus as acn  # noqa: E402
+from workflowy_mcp.lightning_rod_mutation_spec import LightningRodMutationSpec  # noqa: E402
+from workflowy_mcp.mcp_api_registry import dispatch_operation  # noqa: E402
+import nexus_map_codebase as nmc  # noqa: E402
+
+# The module's real suppress-list reader, captured before any monkeypatch.
+_REAL_SUPPRESS_READER = srv._beacon_symbol_suppress_tags
+
+_ROOT = "aaaaaaaa-0000-0000-0000-000000000001"
+_FILE_A = "aaaaaaaa-0000-0000-0000-00000000000a"
+_HIDE = "aaaaaaaa-0000-0000-0000-0000000000f0"
+_FILE_B = "aaaaaaaa-0000-0000-0000-00000000000b"
+
+
+def _fn_ids(prefix, names):
+    return {name: f"{prefix}-0000-0000-0000-{i:012d}" for i, name in enumerate(names, start=1)}
+
+
+class _RealSeamClient(acn.WorkFlowyClientNexus):
+    """The REAL beacon seams over an in-memory cache (no network, no __init__)."""
+
+    def __init__(self, nodes):  # noqa: D401 - deliberately skips the real ctor
+        self.nodes = nodes
+
+    def _get_nodes_export_cache_nodes(self):
+        return list(self.nodes)
+
+
+def _install(monkeypatch, nodes, *, suppress=()):
+    client = _RealSeamClient(nodes)
+
+    async def _export(_client, node_id=None, use_cache=True, force_refresh=False, **_kw):
+        return {"nodes": list(nodes)}
+
+    async def _suppress():
+        return list(suppress)
+
+    monkeypatch.setattr(acn, "export_nodes_impl", _export)
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    monkeypatch.setattr(srv, "_rate_limiter", None)
+    monkeypatch.setattr(srv, "_beacon_symbol_suppress_tags", _suppress)
+    return client
+
+
+def _observe_leases(monkeypatch, events=None):
+    state = SimpleNamespace(acquisitions=[], releases=[], held=False)
+
+    async def acquire(targets, **_kw):
+        state.acquisitions.append(list(targets))
+        state.held = True
+        return [{"lease_id": "nbbw-test"}]
+
+    async def release(leases, *, primary_error=None):
+        if events is not None:
+            events.append("release")
+        state.releases.append(primary_error)
+        state.held = False
+
+    monkeypatch.setattr(srv, "acquire_q3_leases_async", acquire)
+    monkeypatch.setattr(srv, "_release_q3_leases_preserving_primary", release)
+    return state
+
+
+def _spec(symbols, tags=("nbbw",), roots=(_ROOT,), mode="ensure_beacons"):
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode=mode,
+        symbols=list(symbols),
+        tags=list(tags),
+        operations=None,
+        comment=None,
+        root_uuids=list(roots),
+        root_uuid=None,
+        favor="symbol",
+    )
+    assert err is None, err
+    return spec
+
+
+def _one_file_fixture(tmp_path, names=("alpha", "beta", "gamma")):
+    path = tmp_path / "big_module.py"
+    path.write_text(
+        "\n".join(
+            f"# @beacon[\n#   id=b-{n},\n#   slice_labels=old,\n#   kind=ast,\n# ]\n"
+            f"def {n}():\n    return {i}\n\n"
+            for i, n in enumerate(names)
+        ),
+        encoding="utf-8",
+    )
+    ids = _fn_ids("bbbbbbbb", names)
+    nodes = [
+        {"id": _ROOT, "name": "Root", "note": "", "parent_id": None},
+        {"id": _FILE_A, "name": path.name, "note": f"Path: {path}", "parent_id": _ROOT},
+    ]
+    for n, uid in ids.items():
+        nodes.append({"id": uid, "name": n, "note": f"AST_QUALNAME: {n}\n", "parent_id": _FILE_A})
+    return path, ids, nodes
+
+
+# ---------------------------------------------------------------------------
+# (i) the event loop keeps running while every parse is slow
+# ---------------------------------------------------------------------------
+
+
+def test_batch_parsing_runs_off_the_event_loop(tmp_path, monkeypatch):
+    path, ids, nodes = _one_file_fixture(tmp_path)
+    _install(monkeypatch, nodes)
+    leases = _observe_leases(monkeypatch)
+    real_parse = nmc._parse_disk_beacons_for_language
+    parse_threads = []
+
+    def slow_parse(language, source_path):
+        # Stand-in for a multi-MB file: every whole-file parse takes 0.35 s.
+        parse_threads.append(threading.current_thread() is threading.main_thread())
+        time.sleep(0.35)
+        return real_parse(language, source_path)
+
+    monkeypatch.setattr(nmc, "_parse_disk_beacons_for_language", slow_parse)
+
+    async def main():
+        gaps = []
+        done = asyncio.Event()
+
+        async def heartbeat():
+            last = time.perf_counter()
+            while not done.is_set():
+                await asyncio.sleep(0.01)
+                now = time.perf_counter()
+                gaps.append(now - last)
+                last = now
+
+        hb = asyncio.create_task(heartbeat())
+        await asyncio.sleep(0.03)
+        res = await srv._lightning_rod_mutate_beacons(spec=_spec(list(ids)))
+        done.set()
+        await hb
+        return res, gaps
+
+    res, gaps = asyncio.run(main())
+    assert res["success"] is True, res
+    assert [r["status"] for r in res["results"]] == ["committed"] * 3
+    # preflight + plan + commit parse per item, all in worker threads.
+    assert len(parse_threads) >= 9 and not any(parse_threads)
+    # 9+ blocking parses of 0.35 s each; the loop never stalled for one.
+    assert max(gaps) < 0.3, f"event loop stalled for {max(gaps):.3f}s"
+    assert leases.releases == [None]
+    text = path.read_text(encoding="utf-8")
+    assert text.count("slice_labels=old,nbbw,") == 3
+
+
+# ---------------------------------------------------------------------------
+# (iii) CAS: an outside write between plan and commit writes nothing
+# ---------------------------------------------------------------------------
+
+
+def test_outside_change_between_plan_and_commit_writes_zero_bytes(tmp_path, monkeypatch):
+    path, ids, nodes = _one_file_fixture(tmp_path, names=("alpha",))
+    client = _install(monkeypatch, nodes)
+    _observe_leases(monkeypatch)
+    real_commit = acn.WorkFlowyClientNexus.commit_beacon_write_plan
+
+    async def commit_after_outside_edit(self, *, plan, note):
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("# an editor saved the file meanwhile\n")
+        return await real_commit(self, plan=plan, note=note)
+
+    monkeypatch.setattr(type(client), "commit_beacon_write_plan", commit_after_outside_edit)
+    res = asyncio.run(srv._lightning_rod_mutate_beacons(spec=_spec(["alpha"])))
+    row = res["results"][0]
+    assert row["status"] == "error"
+    assert row["error_kind"] == "source_changed_since_plan"
+    assert res["files_changed"] == []
+    text = path.read_text(encoding="utf-8")
+    assert text.endswith("# an editor saved the file meanwhile\n")
+    assert "nbbw" not in text
+
+
+# ---------------------------------------------------------------------------
+# cancellation mid-commit: the lease outlives the in-flight write
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_mid_commit_releases_lease_only_after_the_write(tmp_path, monkeypatch):
+    path, ids, nodes = _one_file_fixture(tmp_path, names=("alpha", "beta"))
+    _install(monkeypatch, nodes)
+    events = []
+    leases = _observe_leases(monkeypatch, events)
+    real_helper = nmc.update_beacon_from_node_python
+    entered = threading.Event()
+    proceed = threading.Event()
+
+    def gated_helper(*args, **kwargs):
+        entered.set()
+        assert proceed.wait(10), "test never released the gated writer"
+        result = real_helper(*args, **kwargs)
+        events.append("write_done")
+        return result
+
+    monkeypatch.setattr(nmc, "update_beacon_from_node_python", gated_helper)
+
+    async def main():
+        task = asyncio.create_task(srv._lightning_rod_mutate_beacons(spec=_spec(["alpha", "beta"])))
+        while not entered.is_set():
+            await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.sleep(0.2)
+        # Cancelled, but the write is still in flight: the lease is NOT released.
+        assert events == [] and leases.held
+        proceed.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(main())
+    assert events == ["write_done", "release"]
+    assert len(leases.releases) == 1 and isinstance(leases.releases[0], asyncio.CancelledError)
+    text = path.read_text(encoding="utf-8")
+    # alpha's write completed atomically; beta never started.
+    assert text.count("slice_labels=old,nbbw,") == 1
+
+
+# ---------------------------------------------------------------------------
+# (iv) global suppression for every beacon symbol resolution
+# ---------------------------------------------------------------------------
+
+
+def _suppression_fixture(tmp_path):
+    """Root -> real.py (shared + only_real) and a #wfy-suppress'd copy.py (shared + only_copy)."""
+    real = tmp_path / "real.py"
+    copy = tmp_path / "copy.py"
+    real.write_text("def shared():\n    return 'real'\n\n\ndef only_real():\n    return 1\n", encoding="utf-8")
+    copy.write_text("def shared():\n    return 'copy'\n\n\ndef only_copy():\n    return 2\n", encoding="utf-8")
+    ids = {
+        "real.shared": "cccccccc-0000-0000-0000-000000000001",
+        "real.only_real": "cccccccc-0000-0000-0000-000000000002",
+        "copy.shared": "cccccccc-0000-0000-0000-000000000003",
+        "copy.only_copy": "cccccccc-0000-0000-0000-000000000004",
+    }
+    nodes = [
+        {"id": _ROOT, "name": "Root", "note": "", "parent_id": None},
+        {"id": _FILE_A, "name": "real.py", "note": f"Path: {real}", "parent_id": _ROOT},
+        {"id": ids["real.shared"], "name": "shared", "note": "AST_QUALNAME: shared\n", "parent_id": _FILE_A},
+        {"id": ids["real.only_real"], "name": "only_real", "note": "AST_QUALNAME: only_real\n", "parent_id": _FILE_A},
+        {"id": _HIDE, "name": "Old copy #<u>wfy-suppress</u>", "note": "", "parent_id": _ROOT},
+        {"id": _FILE_B, "name": "copy.py", "note": f"Path: {copy}", "parent_id": _HIDE},
+        {"id": ids["copy.shared"], "name": "shared", "note": "AST_QUALNAME: shared\n", "parent_id": _FILE_B},
+        {"id": ids["copy.only_copy"], "name": "only_copy", "note": "AST_QUALNAME: only_copy\n", "parent_id": _FILE_B},
+    ]
+    return real, copy, ids, nodes
+
+
+def test_client_resolver_drops_suppressed_candidates_before_counting(tmp_path, monkeypatch):
+    _real, _copy, ids, nodes = _suppression_fixture(tmp_path)
+    client = _install(monkeypatch, nodes)
+    unfiltered = asyncio.run(client.read_uuid_from_symbol(None, "shared"))
+    assert unfiltered["match_count"] == 2
+    filtered = asyncio.run(client.read_uuid_from_symbol(None, "shared", suppress_tags=["wfy-suppress"]))
+    assert filtered["match_count"] == 1
+    assert [c["uuid"] for c in filtered["candidates"]] == [ids["real.shared"]]
+    gone = asyncio.run(client.read_uuid_from_symbol(None, "only_copy", suppress_tags=["#wfy-suppress"]))
+    assert gone["match_count"] == 0
+
+
+def test_beacon_resolve_ignores_suppressed_subtree(tmp_path, monkeypatch):
+    _real, _copy, ids, nodes = _suppression_fixture(tmp_path)
+    _install(monkeypatch, nodes, suppress=["wfy-suppress"])
+    res = asyncio.run(dispatch_operation(srv.build_beacon_registry(), "resolve", {"source_handle": "shared"}))
+    assert res["match_count"] == 1
+    assert [c["uuid"] for c in res["candidates"]] == [ids["real.shared"]]
+
+
+def test_beacon_resolve_fails_loudly_without_a_tab(tmp_path, monkeypatch):
+    _real, _copy, _ids, nodes = _suppression_fixture(tmp_path)
+    _install(monkeypatch, nodes)
+
+    async def no_tab(_target_tab):
+        raise RuntimeError("No live Workflowy tab is connected to the GLIMPSE broker")
+
+    monkeypatch.setattr(srv, "_beacon_symbol_suppress_tags", _REAL_SUPPRESS_READER)
+    monkeypatch.setattr(srv, "_resolve_slice_group_config", no_tab)
+    res = asyncio.run(dispatch_operation(srv.build_beacon_registry(), "resolve", {"source_handle": "shared"}))
+    assert res["success"] is False
+    assert "No live Workflowy tab" in str(res)
+
+
+
+
+def test_suppress_reader_returns_the_global_never_list(monkeypatch):
+    async def cfg(_target_tab):
+        return ([], None, {}, ["wfy-suppress", " "], {})
+
+    monkeypatch.setattr(srv, "_resolve_slice_group_config", cfg)
+    assert asyncio.run(_REAL_SUPPRESS_READER()) == ["wfy-suppress"]
+
+
+def test_beacon_snippet_reads_the_unsuppressed_symbol(tmp_path, monkeypatch):
+    _real, _copy, _ids, nodes = _suppression_fixture(tmp_path)
+    _install(monkeypatch, nodes, suppress=["wfy-suppress"])
+    out = asyncio.run(dispatch_operation(srv.build_beacon_registry(), "snippet", {"source_handle": "shared"}))
+    assert isinstance(out, str), out
+    assert "return 'real'" in out and "return 'copy'" not in out
+
+
+def test_batch_write_targets_only_the_unsuppressed_symbol(tmp_path, monkeypatch):
+    real, copy, ids, nodes = _suppression_fixture(tmp_path)
+    _install(monkeypatch, nodes, suppress=["wfy-suppress"])
+    leases = _observe_leases(monkeypatch)
+    copy_before = copy.read_bytes()
+    res = asyncio.run(srv._lightning_rod_mutate_beacons(spec=_spec(["shared", "only_copy"])))
+    rows = {r["symbol"]: r for r in res["results"]}
+    assert rows["shared"]["status"] == "committed"
+    assert rows["shared"]["uuid"] == ids["real.shared"]
+    assert rows["only_copy"]["status"] == "all_suppressed"
+    assert res["partial_success"] is True
+    assert "@beacon[" in real.read_text(encoding="utf-8")
+    assert copy.read_bytes() == copy_before
+    assert len(leases.acquisitions) == 1 and len(leases.acquisitions[0]) == 1
+
+
+def test_batch_refuses_with_zero_writes_when_suppress_list_is_unreadable(tmp_path, monkeypatch):
+    real, copy, _ids, nodes = _suppression_fixture(tmp_path)
+    _install(monkeypatch, nodes)
+    leases = _observe_leases(monkeypatch)
+
+    async def no_tab():
+        raise RuntimeError("No live Workflowy tab is connected")
+
+    monkeypatch.setattr(srv, "_beacon_symbol_suppress_tags", no_tab)
+    before = (real.read_bytes(), copy.read_bytes())
+    res = asyncio.run(srv._lightning_rod_mutate_beacons(spec=_spec(["shared"])))
+    assert res["success"] is False and res["partial_success"] is False
+    assert "suppression" in res["error"]
+    assert [r["status"] for r in res["results"]] == ["not_run_due_to_batch_preflight_failure"]
+    assert leases.acquisitions == []
+    assert (real.read_bytes(), copy.read_bytes()) == before
+
+
+def test_phase_b_resolver_thread_sees_the_callers_operation_cache_snapshot(tmp_path, monkeypatch):
+    """The Phase-B worker thread (private loop) must read the SAME pinned
+    operation snapshot as the calling task, or every symbol would silently
+    resolve against no cache (the resolver swallows cache errors as 'unresolved')."""
+    from workflowy_mcp.coherence import operation_cache as oc
+
+    _path, ids, nodes = _one_file_fixture(tmp_path, names=("alpha",))
+    _install(monkeypatch, nodes)
+    _observe_leases(monkeypatch)
+    seen = {}
+
+    async def recording_resolver(**kwargs):
+        seen["snapshot"] = oc.current_operation_cache(required=False)
+        seen["main_thread"] = threading.current_thread() is threading.main_thread()
+        seen["suppress_tags"] = kwargs.get("suppress_tags")
+        return {"ok": True, "records": [{"item": "alpha", "status": "unresolved", "candidates": []}],
+                "resolution_report": {}}
+
+    monkeypatch.setattr(srv, "_resolve_lightning_rod_symbol_items_from_cache", recording_resolver)
+    sentinel = object()
+
+    async def main():
+        token = oc._OPERATION_CACHE_SNAPSHOT.set(sentinel)
+        try:
+            return await srv._lightning_rod_mutate_beacons(spec=_spec(["alpha"]))
+        finally:
+            oc._OPERATION_CACHE_SNAPSHOT.reset(token)
+
+    res = asyncio.run(main())
+    assert seen["snapshot"] is sentinel
+    assert seen["main_thread"] is False
+    assert seen["suppress_tags"] == []
+    assert [r["status"] for r in res["results"]] == ["unresolved"]
+
+
+# ---------------------------------------------------------------------------
+# follow-up: render_symbols resolution, snippet extraction, sync_node writer
+# all run off the event loop
+# ---------------------------------------------------------------------------
+
+
+def test_render_symbols_resolution_runs_off_the_event_loop(tmp_path, monkeypatch):
+    _path, ids, nodes = _one_file_fixture(tmp_path)
+    _install(monkeypatch, nodes)
+    cache_by_id = {n["id"]: n for n in nodes}
+    seen = []
+    real = srv._resolve_lightning_rod_symbol_items_from_cache
+
+    async def recording(**kwargs):
+        seen.append(threading.current_thread() is threading.main_thread())
+        return await real(**kwargs)
+
+    monkeypatch.setattr(srv, "_resolve_lightning_rod_symbol_items_from_cache", recording)
+    proj = asyncio.run(srv._project_render_symbols_from_cache(
+        cache_by_id=cache_by_id, symbols=list(ids), resolved_roots=[_ROOT],
+        suppress_tags=[], favor="symbol", expand_handles=()))
+    assert seen == [False]
+    assert proj["ok"] is True and set(proj["resolved_ids"]) == set(ids.values())
+
+
+def test_snippet_extraction_runs_off_the_event_loop(tmp_path, monkeypatch):
+    _path, _ids, nodes = _one_file_fixture(tmp_path, names=("alpha",))
+    client = _install(monkeypatch, nodes)
+    seen = []
+    real = acn.WorkFlowyClientNexus.get_code_snippet_for_resolved_node
+
+    async def recording(self, *args, **kwargs):
+        seen.append(threading.current_thread() is threading.main_thread())
+        return await real(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(client), "get_code_snippet_for_resolved_node", recording)
+    out = asyncio.run(dispatch_operation(srv.build_beacon_registry(), "snippet", {"source_handle": "alpha"}))
+    assert isinstance(out, str) and "def alpha" in out
+    assert seen == [False]
+
+
+def test_sync_node_writer_runs_off_the_loop_inside_the_lease(tmp_path, monkeypatch):
+    events = []
+
+    class Client:
+        async def update_beacon_from_node(self, *, node_id, name, note):
+            events.append(("write", threading.current_thread() is threading.main_thread()))
+            return {"success": True, "operation": "updated_beacon"}
+
+    async def read(_handle, as_raw_node=False):
+        return SimpleNamespace(name="alpha #x", note="AST_QUALNAME: alpha\n")
+
+    async def lease(_node_id):
+        events.append("acquire")
+        return [{"lease_id": "t"}]
+
+    async def release(leases, *, primary_error=None):
+        events.append("release")
+
+    monkeypatch.setattr(srv, "get_client", lambda: Client())
+    monkeypatch.setattr(srv, "_resolve_beacon_graph_handle", lambda h: ("node-1", {}))
+    monkeypatch.setattr(srv, "_node_read_impl", read)
+    monkeypatch.setattr(srv, "_acquire_single_beacon_q3_lease", lease)
+    monkeypatch.setattr(srv, "_release_q3_leases_preserving_primary", release)
+    ack = asyncio.run(srv._beacon_sync_node_impl("node-1"))
+    assert ack["changed"] is True
+    assert events == ["acquire", ("write", False), "release"]
+
+
+# ---------------------------------------------------------------------------
+# (v) [ap:WB323O] root_handles scopes symbol resolution to beneath given roots
+# ---------------------------------------------------------------------------
+
+_REPO_A = "aaaaaaaa-0000-0000-0000-0000000000a1"
+_REPO_B = "aaaaaaaa-0000-0000-0000-0000000000b1"
+
+
+def _scope_fixture(tmp_path):
+    """Root -> RepoA/a_repo.py + RepoB/b_repo.py, both holding ``shared2``.
+
+    No #wfy-suppress anywhere: the ONLY disambiguator under test is the
+    root_handles scope. ``shared2`` is ambiguous across the two repositories;
+    ``only_a`` / ``only_b`` exist on one side each.
+    """
+    a = tmp_path / "a_repo.py"
+    b = tmp_path / "b_repo.py"
+    a.write_text("def shared2():\n    return 'a'\n\n\ndef only_a():\n    return 1\n", encoding="utf-8")
+    b.write_text("def shared2():\n    return 'b'\n\n\ndef only_b():\n    return 2\n", encoding="utf-8")
+    ids = {
+        "a.shared2": "dddddddd-0000-0000-0000-000000000001",
+        "a.only_a": "dddddddd-0000-0000-0000-000000000002",
+        "b.shared2": "dddddddd-0000-0000-0000-000000000003",
+        "b.only_b": "dddddddd-0000-0000-0000-000000000004",
+    }
+    nodes = [
+        {"id": _ROOT, "name": "Root", "note": "", "parent_id": None},
+        {"id": _REPO_A, "name": "RepoA", "note": "", "parent_id": _ROOT},
+        {"id": _REPO_B, "name": "RepoB", "note": "", "parent_id": _ROOT},
+        {"id": _FILE_A, "name": "a_repo.py", "note": f"Path: {a}", "parent_id": _REPO_A},
+        {"id": _FILE_B, "name": "b_repo.py", "note": f"Path: {b}", "parent_id": _REPO_B},
+        {"id": ids["a.shared2"], "name": "shared2", "note": "AST_QUALNAME: shared2\n", "parent_id": _FILE_A},
+        {"id": ids["a.only_a"], "name": "only_a", "note": "AST_QUALNAME: only_a\n", "parent_id": _FILE_A},
+        {"id": ids["b.shared2"], "name": "shared2", "note": "AST_QUALNAME: shared2\n", "parent_id": _FILE_B},
+        {"id": ids["b.only_b"], "name": "only_b", "note": "AST_QUALNAME: only_b\n", "parent_id": _FILE_B},
+    ]
+    return a, b, ids, nodes
+
+
+def test_client_engine_scopes_candidates_before_counting(tmp_path, monkeypatch):
+    """The shared engine drops out-of-scope candidates BEFORE the 0/1/N count:
+    the same duplicate symbol is ambiguous without a scope and unique with one."""
+    _a, _b, ids, nodes = _scope_fixture(tmp_path)
+    client = _install(monkeypatch, nodes)
+    ambiguous = asyncio.run(client.read_uuid_from_symbol(None, "shared2"))
+    assert ambiguous["match_count"] == 2
+    scoped = asyncio.run(
+        client.read_uuid_from_symbol(None, "shared2", scope_root_ids=[_REPO_A])
+    )
+    assert scoped["match_count"] == 1
+    assert [c["uuid"] for c in scoped["candidates"]] == [ids["a.shared2"]]
+    # A candidate matched only OUTSIDE the scope is reported, not silently
+    # counted as a plain zero: match_count 0 + scope_filtered_count 1.
+    outside = asyncio.run(
+        client.read_uuid_from_symbol(None, "only_b", scope_root_ids=[_REPO_A])
+    )
+    assert outside["match_count"] == 0
+    assert outside["scope_filtered_count"] == 1
+
+
+def test_engine_scope_only_miss_raises_naming_the_scope(tmp_path, monkeypatch):
+    """The snippet path raises a not-found NAMING the scope when every
+    candidate falls outside it."""
+    _a, _b, _ids, nodes = _scope_fixture(tmp_path)
+    client = _install(monkeypatch, nodes)
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(
+            client.read_text_snippet_by_symbol(
+                None, "only_b", scope_root_ids=[_REPO_A]
+            )
+        )
+    message = str(exc_info.value)
+    assert "outside the requested root_handles scope" in message
+    assert _short(_REPO_A) in message
+
+
+def _short(uuid):
+    from workflowy_mcp.client.api_client_nexus import _short_handle_prefix
+
+    return _short_handle_prefix(uuid)
+
+
+def _pin_cache(nodes):
+    """Pin the nodes as the task's operation-cache snapshot (plain mapping).
+
+    ``_resolve_beacon_scope_roots`` resolves roots through the family's ONE
+    graph-handle resolver, which reads the pinned operation cache; in
+    production every dispatch runs inside the cache_operation_boundary that
+    pins it. These direct-dispatch tests pin the same nodes by hand.
+    """
+    from workflowy_mcp.coherence import operation_cache as oc
+
+    class _Pin:
+        def __enter__(self):
+            self.token = oc._OPERATION_CACHE_SNAPSHOT.set(
+                {str(n["id"]): n for n in nodes}
+            )
+            return self
+
+        def __exit__(self, *exc):
+            oc._OPERATION_CACHE_SNAPSHOT.reset(self.token)
+            return False
+
+    return _Pin()
+
+
+def test_beacon_resolve_root_scopes_the_symbol_leg(tmp_path, monkeypatch):
+    """beacon.resolve: root_handles (one handle or a list) disambiguates a
+    duplicate symbol; an unresolvable root fails loud; the scope is echoed."""
+    _a, _b, ids, nodes = _scope_fixture(tmp_path)
+    _install(monkeypatch, nodes, suppress=[])
+    registry = srv.build_beacon_registry()
+
+    with _pin_cache(nodes):
+        ambiguous = asyncio.run(
+            dispatch_operation(registry, "resolve", {"source_handle": "shared2"})
+        )
+        assert ambiguous["match_count"] == 2
+
+        scoped = asyncio.run(
+            dispatch_operation(
+                registry,
+                "resolve",
+                {"source_handle": "shared2", "root_handles": _REPO_B},
+            )
+        )
+        assert scoped["match_count"] == 1
+        assert [c["uuid"] for c in scoped["candidates"]] == [ids["b.shared2"]]
+
+        listed = asyncio.run(
+            dispatch_operation(
+                registry,
+                "resolve",
+                {"source_handle": "shared2", "root_handles": [_REPO_A, _REPO_B]},
+            )
+        )
+        assert listed["match_count"] == 2
+
+        outside = asyncio.run(
+            dispatch_operation(
+                registry,
+                "resolve",
+                {"source_handle": "only_b", "root_handles": _REPO_A},
+            )
+        )
+        assert outside["match_count"] == 0
+        assert outside["scope_filtered_count"] == 1
+
+        bad = asyncio.run(
+            dispatch_operation(
+                registry,
+                "resolve",
+                {"source_handle": "shared2", "root_handles": "nope-nope"},
+            )
+        )
+    assert bad["error"]["code"] == "invalid_parameter_value"
+    assert "not present in the /nodes-export cache" in bad["error"]["message"]
+
+
+def test_beacon_snippet_root_scopes_the_symbol_leg(tmp_path, monkeypatch):
+    """beacon.snippet: root_handles resolves the duplicate to the in-scope
+    side; an explicit UUID source_handle ignores the scope."""
+    a, b, ids, nodes = _scope_fixture(tmp_path)
+    _install(monkeypatch, nodes, suppress=[])
+    registry = srv.build_beacon_registry()
+
+    with _pin_cache(nodes):
+        out = asyncio.run(
+            dispatch_operation(
+                registry,
+                "snippet",
+                {"source_handle": "shared2", "root_handles": [_REPO_A]},
+            )
+        )
+        assert isinstance(out, str), out
+        assert "return 'a'" in out and "return 'b'" not in out
+
+        # The scope governs symbol resolution only: an explicit UUID is read
+        # as given, even when it lies outside every passed root.
+        out_uuid = asyncio.run(
+            dispatch_operation(
+                registry,
+                "snippet",
+                {"source_handle": ids["b.only_b"], "root_handles": _REPO_A},
+            )
+        )
+        assert isinstance(out_uuid, str), out_uuid
+        assert "return 2" in out_uuid
+
+        # A mistyped root is a loud parameter error, never a silent no-scope.
+        bad = asyncio.run(
+            dispatch_operation(
+                registry,
+                "snippet",
+                {"source_handle": "shared2", "root_handles": "zzzzzzzz"},
+            )
+        )
+        assert bad["error"]["code"] == "invalid_parameter_value"
+        assert "not present in the /nodes-export cache" in bad["error"]["message"]
+
+        # An AMBIGUOUS root prefix is a did-you-mean, never a guess.
+        amb = asyncio.run(
+            dispatch_operation(
+                registry,
+                "snippet",
+                {"source_handle": "shared2", "root_handles": "aaaaaaaa"},
+            )
+        )
+    assert amb["error"]["code"] == "invalid_parameter_value"
+    assert amb["error"]["extra"]["candidates"]
+
+
+def test_beacon_snippet_root_scope_needs_only_the_cache(tmp_path, monkeypatch):
+    """Root resolution rides the pinned operation cache: a UUID-shaped handle
+    with a root still never needs a tab (the UUID leg ignores the scope, as
+    it ignores suppression)."""
+    _a, _b, ids, nodes = _scope_fixture(tmp_path)
+    _install(monkeypatch, nodes)
+    registry = srv.build_beacon_registry()
+    with _pin_cache(nodes):
+        out = asyncio.run(
+            dispatch_operation(
+                registry,
+                "resolve",
+                {"source_handle": ids["a.only_a"], "root_handles": _REPO_B},
+            )
+        )
+    # UUID leg ignores the scope (as it ignores suppression): unique, 1.
+    assert out["match_count"] == 1
+    assert out["candidates"][0]["uuid"] == ids["a.only_a"]
+
+
+# ---------------------------------------------------------------------------
+# (vi) [ap:7ORCPL] residue: the symbol FALLBACK of a UUID-shaped handle and
+# the Layer-3 tag/mutator symbol legs honour #wfy-suppress too
+# ---------------------------------------------------------------------------
+
+
+def _hex_symbol_fixture(tmp_path):
+    """real.py + a #wfy-suppress'd copy.py, both holding a HEX-NAMED symbol.
+
+    ``deadbeefcafe`` is pure hex of >= 8 chars, so beacon.snippet routes it
+    through the UUID leg first (the shared gate) and only reaches it as the
+    symbol FALLBACK when no node id carries that prefix -- the exact path
+    Gap 1 left unfiltered.
+    """
+    real = tmp_path / "real.py"
+    copy = tmp_path / "copy.py"
+    real.write_text("def deadbeefcafe():\n    return 'real'\n", encoding="utf-8")
+    copy.write_text("def deadbeefcafe():\n    return 'copy'\n", encoding="utf-8")
+    ids = {
+        "real.deadbeefcafe": "eeeeeeee-0000-0000-0000-000000000001",
+        "copy.deadbeefcafe": "eeeeeeee-0000-0000-0000-000000000002",
+    }
+    nodes = [
+        {"id": _ROOT, "name": "Root", "note": "", "parent_id": None},
+        {"id": _FILE_A, "name": "real.py", "note": f"Path: {real}", "parent_id": _ROOT},
+        {
+            "id": ids["real.deadbeefcafe"],
+            "name": "deadbeefcafe",
+            "note": "AST_QUALNAME: deadbeefcafe\n",
+            "parent_id": _FILE_A,
+        },
+        {"id": _HIDE, "name": "Old copy #<u>wfy-suppress</u>", "note": "", "parent_id": _ROOT},
+        {"id": _FILE_B, "name": "copy.py", "note": f"Path: {copy}", "parent_id": _HIDE},
+        {
+            "id": ids["copy.deadbeefcafe"],
+            "name": "deadbeefcafe",
+            "note": "AST_QUALNAME: deadbeefcafe\n",
+            "parent_id": _FILE_B,
+        },
+    ]
+    return real, copy, ids, nodes
+
+
+def test_uuid_fallback_symbol_leg_drops_suppressed_duplicate(tmp_path, monkeypatch):
+    """Gap 1: a UUID-shaped handle that misses falls back to the symbol leg,
+    and that fallback filters suppressed candidates (the describe promises
+    it). Pre-fix the suppressed duplicate makes the fallback ambiguous."""
+    _real, _copy, _ids, nodes = _hex_symbol_fixture(tmp_path)
+    _install(monkeypatch, nodes, suppress=["wfy-suppress"])
+    out = asyncio.run(
+        dispatch_operation(
+            srv.build_beacon_registry(), "snippet", {"source_handle": "deadbeefcafe"}
+        )
+    )
+    assert isinstance(out, str), out
+    assert "return 'real'" in out and "return 'copy'" not in out
+
+
+def test_uuid_fallback_suppressed_only_symbol_is_not_found(tmp_path, monkeypatch):
+    """A hex-named symbol that exists ONLY under suppression stays invisible
+    to the UUID fallback: a UUID-framed not-found, never a suppressed hit."""
+    real = tmp_path / "real.py"
+    copy = tmp_path / "copy.py"
+    real.write_text("def plain():\n    return 1\n", encoding="utf-8")
+    copy.write_text("def deadbeefcafe():\n    return 'copy'\n", encoding="utf-8")
+    nodes = [
+        {"id": _ROOT, "name": "Root", "note": "", "parent_id": None},
+        {"id": _FILE_A, "name": "real.py", "note": f"Path: {real}", "parent_id": _ROOT},
+        {"id": _HIDE, "name": "Old copy #<u>wfy-suppress</u>", "note": "", "parent_id": _ROOT},
+        {"id": _FILE_B, "name": "copy.py", "note": f"Path: {copy}", "parent_id": _HIDE},
+        {
+            "id": "eeeeeeee-0000-0000-0000-000000000002",
+            "name": "deadbeefcafe",
+            "note": "AST_QUALNAME: deadbeefcafe\n",
+            "parent_id": _FILE_B,
+        },
+    ]
+    _install(monkeypatch, nodes, suppress=["wfy-suppress"])
+    res = asyncio.run(
+        dispatch_operation(
+            srv.build_beacon_registry(), "snippet", {"source_handle": "deadbeefcafe"}
+        )
+    )
+    assert not isinstance(res, str)
+    assert res["success"] is False
+    assert "deadbeefcafe" in str(res)
+
+
+def test_beacon_snippet_exact_uuid_needs_no_tab(tmp_path, monkeypatch):
+    """The lazy-suppression constraint: an exact UUID that resolves never
+    reaches the symbol fallback, so it never needs the suppress list (no
+    connected tab)."""
+    _real, _copy, ids, nodes = _suppression_fixture(tmp_path)
+    _install(monkeypatch, nodes)
+
+    async def no_tab(_target_tab):
+        raise RuntimeError("No live Workflowy tab is connected to the GLIMPSE broker")
+
+    monkeypatch.setattr(srv, "_beacon_symbol_suppress_tags", _REAL_SUPPRESS_READER)
+    monkeypatch.setattr(srv, "_resolve_slice_group_config", no_tab)
+    out = asyncio.run(
+        dispatch_operation(
+            srv.build_beacon_registry(),
+            "snippet",
+            {"source_handle": ids["real.shared"]},
+        )
+    )
+    assert isinstance(out, str), out
+    assert "return 'real'" in out
+
+
+def test_tag_and_mutator_symbol_handles_ignore_suppressed_duplicate(tmp_path, monkeypatch):
+    """Gap 2: the Layer-3 symbol leg behind tag.add/remove/rename and the
+    node mutators honours #wfy-suppress (via resolve_node_handle's
+    suppress_tags_provider, awaited only when the symbol leg runs)."""
+    _real, _copy, ids, nodes = _suppression_fixture(tmp_path)
+    _install(monkeypatch, nodes, suppress=["wfy-suppress"])
+
+    resolved, early = asyncio.run(srv._resolve_tag_node_id("shared"))
+    assert resolved == ids["real.shared"] and early is None
+
+    mut = asyncio.run(
+        srv._resolve_mutator_node_id("shared", label="workflowy_edit_node")
+    )
+    assert mut == ids["real.shared"]
+
+    # Suppressed-only symbol: the tag path no-ops with NO candidates (never a
+    # suppressed hit); the mutator path fails loud.
+    resolved2, early2 = asyncio.run(srv._resolve_tag_node_id("only_copy"))
+    assert resolved2 is None and early2 is not None
+    assert not early2["candidates"]
+
+    with pytest.raises(RuntimeError, match="matched no symbol"):
+        asyncio.run(
+            srv._resolve_mutator_node_id("only_copy", label="workflowy_edit_node")
+        )
+
+
+def test_tag_and_mutator_uuid_and_ap_handles_need_no_tab(tmp_path, monkeypatch):
+    """Lazy read: exact-UUID and AP-ID handles resolve on earlier legs, so
+    they never touch the suppress list (no connected tab)."""
+    _real, _copy, ids, nodes = _suppression_fixture(tmp_path)
+    nodes.append(
+        {
+            "id": "aaaaaaaa-0000-0000-0000-0000000000f1",
+            "name": "[ap:TESTAP] ap target",
+            "note": "",
+            "parent_id": _ROOT,
+        }
+    )
+    _install(monkeypatch, nodes)
+
+    async def no_tab(_target_tab):
+        raise RuntimeError("No live Workflowy tab is connected to the GLIMPSE broker")
+
+    monkeypatch.setattr(srv, "_beacon_symbol_suppress_tags", _REAL_SUPPRESS_READER)
+    monkeypatch.setattr(srv, "_resolve_slice_group_config", no_tab)
+
+    resolved, early = asyncio.run(srv._resolve_tag_node_id(ids["real.shared"]))
+    assert resolved == ids["real.shared"] and early is None
+
+    mut = asyncio.run(
+        srv._resolve_mutator_node_id(ids["real.shared"], label="workflowy_edit_node")
+    )
+    assert mut == ids["real.shared"]
+
+    resolved_ap, early_ap = asyncio.run(srv._resolve_tag_node_id("[ap:TESTAP]"))
+    assert early_ap is None
+    assert resolved_ap == "aaaaaaaa-0000-0000-0000-0000000000f1"
+
+    mut_ap = asyncio.run(
+        srv._resolve_mutator_node_id("[ap:TESTAP]", label="workflowy_edit_node")
+    )
+    assert mut_ap == "aaaaaaaa-0000-0000-0000-0000000000f1"
+
+
+def test_layer3_default_symbol_leg_stays_unfiltered_without_provider(tmp_path, monkeypatch):
+    """resolve_node_handle's no-provider default keeps today's unfiltered
+    symbol leg (other callers unchanged); only callers that pass the
+    provider get suppression."""
+    _real, _copy, _ids, nodes = _suppression_fixture(tmp_path)
+    client = _install(monkeypatch, nodes, suppress=["wfy-suppress"])
+    outcome = asyncio.run(
+        client.resolve_node_handle(
+            "shared",
+            allow_uuid=True,
+            allow_anchor_point=True,
+            allow_symbol=True,
+            prefer="uuid",
+        )
+    )
+    assert outcome.get("resolved_uuid") is None
+    assert outcome.get("candidates_via") == "symbol"
+    assert outcome.get("match_count") == 2

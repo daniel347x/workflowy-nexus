@@ -1,0 +1,437 @@
+"""Stage2-09 (Locked Work Order §6.9) — REAL GC / publisher / job-basis
+protection test (PAIR-029 / T3-08).
+
+Three REAL OS processes on one jobs/coherence root + one shared snapshot
+directory:
+  - GC SCAN      — a real client running the manifest-aware snapshot GC
+                   (``_gc_nodes_export_snapshots_diagnostic``) on
+                   sentinel-driven runs;
+  - PUBLISHER    — a real full-refresh epoch publisher whose fetch parks,
+                   then whose publish is parked at ``publish_epoch`` AFTER
+                   the candidate is durable and the claim names it;
+  - JOB OWNER    — a real sleeper owning a live CARTO claim + job JSON
+                   naming a job-basis snapshot.
+
+Deterministic forcing (never probability sleeps): the protected set is
+captured on BOTH SIDES of the epoch publication —
+  RUN 1: publication parked in its fetch     → manifest base B0 protected,
+         unreferenced garbage deleted, job-basis safe.
+  RUN 2: candidate B1 durable, claim names it, publish parked → B1
+         protected by the ACTIVE-CLAIM CANDIDATE edge (the load-bearing
+         assertion), B0 still protected (manifest not yet swapped),
+         job-basis protected.
+  RUN 3: publication complete → B1 protected by the manifest edge, B0
+         now unreferenced and deleted, job-basis STILL protected (the
+         CARTO job edge).
+
+MUTATION-CHECK (TEST 2): the active-claim candidate edge is disabled in
+the GC actor (claims read back as terminal — never set in the shipped
+test) → B1 is deleted at run 2 (predicted deletion) and the parked
+``publish_epoch`` then fails reading the missing candidate (predicted
+failure) — exactly the PAIR-029 catastrophic outcome the protection set
+exists to prevent.
+
+Every actor logs its real PID; the parent asserts pairwise distinctness.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+from coherence_harness import (
+    make_coherence_root,
+    s02_node,
+    s04_install_base_manifest,
+)
+from stage2_harness import (
+    REPO,
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp.coherence.schema import read_manifest, read_refresh_claim
+from workflowy_mcp.coherence.snapshot_store import write_snapshot_candidate
+
+_API_BASE_URL = "https://workflowy.com/api/v1"
+_API_KEY = "test-key-1234"
+
+_B0_NAME = "20250101-000000-000001_1_nodes_export_snapshot.json"
+_GARBAGE1_NAME = "20250101-000000-000002_1_nodes_export_snapshot.json"
+_GARBAGE2_NAME = "20250101-000000-000003_1_nodes_export_snapshot.json"
+_JOB_BASIS_NAME = "20250101-000000-000004_1_nodes_export_snapshot.json"
+_GARBAGE3_NAME = "99999999-999999-999999_99999_nodes_export_snapshot.json"
+
+
+def _account() -> str:
+    return gov.derive_account_scope_id(gov.normalize_api_base_url(_API_BASE_URL), _API_KEY)
+
+
+def _seed(root):
+    """Epoch-0 lineage + controlled-name garbage + the job-basis file."""
+
+    account = _account()
+    paths = make_coherence_root(root, account)
+    snapshot_dir = root / "nodes_export_cache"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    b0 = snapshot_dir / _B0_NAME
+    write_snapshot_candidate(
+        str(b0),
+        {"nodes": [s02_node("base")]},
+        account_scope_id=account,
+        epoch_number=0,
+        epoch_id="b" * 32,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    for name in (_GARBAGE1_NAME, _GARBAGE2_NAME, _JOB_BASIS_NAME):
+        (snapshot_dir / name).write_text(json.dumps({"nodes": []}), encoding="utf-8")
+    s04_install_base_manifest(paths, base_snapshot_path=str(b0), epoch_id="b" * 32)
+    return paths, snapshot_dir, snapshot_dir / _JOB_BASIS_NAME
+
+
+# ---------------------------------------------------------------------------
+# The GC scan actor (one long-running process; run names arrive as argv).
+# ---------------------------------------------------------------------------
+
+_GC_SCAN = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "root = Path(sys.argv[1])\n"
+    'os.environ["WORKFLOWY_MCP_TEST_RUNTIME_DIR"] = str(root)\n'
+    "from coherence_harness import touch, wait_for_file\n"
+    "from stage2_harness import write_result\n"
+    "from pydantic import SecretStr\n"
+    "from workflowy_mcp.client.api_client_core import WorkFlowyClientCore\n"
+    "from workflowy_mcp.models import APIConfiguration\n"
+    f"BASE_URL = {_API_BASE_URL!r}\n"
+    f"API_KEY = {_API_KEY!r}\n"
+    + """
+if os.environ.get("STAGE2_NEUTRALIZE_CLAIM_EDGE"):
+    # MUTATION-ONLY (never set in the shipped test): disable the
+    # active-claim candidate protection edge — every claim is read back as
+    # TERMINAL, so its candidate is never protected.  The manifest and
+    # CARTO-job edges remain intact.
+    from workflowy_mcp.coherence import schema as _schema
+
+    _real_from_dict = _schema.RefreshPublicationClaim.from_dict
+
+    @classmethod
+    def _as_terminal(cls, payload, *, path=None):
+        # Mutate the raw payload BEFORE parsing (claim_with_updates would
+        # re-enter this patched from_dict and recurse).
+        mutated = dict(payload)
+        mutated["status"] = "completed"
+        return _real_from_dict(mutated, path=path)
+
+    # collect_protected_snapshot_paths imports the class from .schema at
+    # call time, so patching the class attribute lands on its lookup path.
+    _schema.RefreshPublicationClaim.from_dict = _as_terminal
+
+touch(root / "pid_gc", str(os.getpid()))
+config = APIConfiguration(api_key=SecretStr(API_KEY), base_url=BASE_URL)
+client = WorkFlowyClientCore(config)
+for tag in sys.argv[3:]:
+    assert wait_for_file(root / tag, timeout=180)
+    result = client._gc_nodes_export_snapshots_diagnostic(
+        max_keep=1, min_age_seconds=0
+    )
+    write_result(root / f"{tag}_result.json", result)
+touch(root / "gc_done")
+asyncio.run(client.close())
+"""
+)
+
+# ---------------------------------------------------------------------------
+# The epoch publisher (fetch parks; publish parks at publish_epoch after
+# the candidate is durable and the claim names it).
+# ---------------------------------------------------------------------------
+
+_PUBLISHER = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "root = Path(sys.argv[1])\n"
+    'os.environ["WORKFLOWY_MCP_TEST_RUNTIME_DIR"] = str(root)\n'
+    "from coherence_harness import touch, wait_for_file\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "from workflowy_mcp.coherence import run_full_refresh\n"
+    "from workflowy_mcp.coherence.paths import coherence_paths\n"
+    "import workflowy_mcp.coherence.refresh_authority as ra\n"
+    f"BASE_URL = {_API_BASE_URL!r}\n"
+    f"API_KEY = {_API_KEY!r}\n"
+    + """
+ACCOUNT = gov.derive_account_scope_id(gov.normalize_api_base_url(BASE_URL), API_KEY)
+paths = coherence_paths(ACCOUNT, jobs_root=str(root / "cartographer_jobs"))
+touch(root / "pid_publisher", str(os.getpid()))
+
+real_publish = ra.publish_epoch
+
+
+async def _parked_publish(*args, **kwargs):
+    # The candidate is already durable and the claim already names it.
+    touch(root / "publish_reached")
+    assert wait_for_file(root / "gc2_done", timeout=180)
+    return await real_publish(*args, **kwargs)
+
+
+ra.publish_epoch = _parked_publish
+
+
+async def fetch():
+    assert wait_for_file(root / "release_fetch", timeout=180)
+    return {"nodes": [
+        {"id": "base", "name": "refreshed", "note": "", "parent_id": None,
+         "priority": 100, "createdAt": 1, "modifiedAt": 1,
+         "completed": None, "data": None},
+    ]}
+
+
+error = None
+outcome = None
+try:
+    outcome = asyncio.run(run_full_refresh(
+        paths=paths, fetch=fetch, refresh_kind="system", settle_seconds=0.0,
+        snapshot_dir=str(root / "nodes_export_cache"), poll_seconds=0.05,
+    ))
+except Exception as exc:
+    error = f"{type(exc).__name__}: {exc}"
+write_result(root / "publisher_result.json", {
+    "published": outcome is not None and outcome.status == "published",
+    "epoch_number": None if outcome is None else outcome.epoch_number,
+    "error": error,
+})
+"""
+)
+
+# ---------------------------------------------------------------------------
+# The job owner: a real sleeper owning a live CARTO claim + a job JSON
+# naming the job-basis snapshot.
+# ---------------------------------------------------------------------------
+
+_JOB_OWNER = (
+    "import os, sys, time\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch, wait_for_file\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "import json\n"
+    "root = Path(sys.argv[1])\n"
+    f"BASE_URL = {_API_BASE_URL!r}\n"
+    f"API_KEY = {_API_KEY!r}\n"
+    f"BASIS = {_JOB_BASIS_NAME!r}\n"
+    + """
+ACCOUNT = gov.derive_account_scope_id(gov.normalize_api_base_url(BASE_URL), API_KEY)
+jobs_root = root / "cartographer_jobs"
+snapshot_dir = root / "nodes_export_cache"
+basis_path = snapshot_dir / BASIS
+identity = gov.current_process_identity()
+claim = gov.build_claim(
+    job_id="job-basis-job",
+    job_type="CARTO_REFRESH",
+    dedupe_key="d" * 64,
+    account_scope_id=ACCOUNT,
+    footprint={
+        "kind": "file",
+        "path": str(basis_path),
+        "root_uuid": "file-a",
+        "ancestor_chain": ["file-a"],
+    },
+    launcher="agent",
+    parent_job_id=None,
+    launcher_pid=identity.pid,
+    pid=identity.pid,
+    pid_create_time=identity.create_time,
+    pid_start_ticks=identity.start_ticks,
+    pid_boot_id=identity.boot_id,
+    handoff_state="running",
+    spawn_started_at=None,
+    execution_owner="detached_worker",
+)
+gov.write_claim(claim, str(jobs_root))
+job = {
+    "id": "job-basis-job",
+    "kind": "CARTO_REFRESH",
+    "status": "running",
+    "claim_id": claim["claim_id"],
+    "snapshot_path": str(basis_path),
+    "updated_at": gov.utc_now_iso(),
+}
+(jobs_root / "job-basis-job.json").write_text(json.dumps(job), encoding="utf-8")
+touch(root / "pid_job", str(os.getpid()))
+touch(root / "job_ready")
+assert wait_for_file(root / "test_done", timeout=300)
+"""
+)
+
+
+def _wait_active_claim(paths):
+    import time
+
+    for _ in range(600):
+        claim = read_refresh_claim(paths)
+        if claim is not None and not claim.is_terminal and claim.cut_token is not None:
+            return claim
+        time.sleep(0.05)
+    raise AssertionError("publisher claim never became active with a cut")
+
+
+# @beacon[
+#   id=auto-beacon@test_gc_protects_bases_and_job_basis_across_epoch_publication-5qds,
+#   role=test_gc_protects_bases_and_job_basis_across_epoch_publication,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_gc_protects_bases_and_job_basis_across_epoch_publication(tmp_path):
+    """Protected-set capture on BOTH sides of the epoch publication: B0
+    protected pre-publication (deleted only after the swap), B1 protected
+    mid-publication by the ACTIVE-CLAIM CANDIDATE edge (then by the
+    manifest edge), and the live CARTO job's basis protected throughout."""
+    root = tmp_path / "share"
+    paths, snapshot_dir, basis_path = _seed(root)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    job = launch_actor(_JOB_OWNER, str(root), str(REPO))
+    gc = publisher = None
+    try:
+        assert wait_for_file(root / "job_ready", timeout=60)
+        gc = launch_actor(_GC_SCAN, str(root), str(REPO), "gc_run_1", "gc_run_2", "gc_run_3")
+        publisher = launch_actor(_PUBLISHER, str(root), str(REPO))
+
+        # RUN 1 — publication parked in its fetch: manifest base protected.
+        _wait_active_claim(paths)
+        touch(root / "gc_run_1")
+        run1 = read_result(root / "gc_run_1_result.json", timeout=120)
+        assert run1["aborted"] is False
+        assert _B0_NAME in run1["protected"]
+        assert sorted(run1["deleted"]) == sorted([_GARBAGE1_NAME, _GARBAGE2_NAME])
+        assert _JOB_BASIS_NAME in run1["kept_recent"] + run1["protected"]
+
+        # Release the fetch; the publisher writes B1, the claim names it,
+        # and the publish parks at publish_epoch.
+        touch(root / "release_fetch")
+        assert wait_for_file(root / "publish_reached", timeout=180)
+        claim = read_refresh_claim(paths)
+        assert claim is not None and claim.candidate_snapshot_path
+        b1_name = os.path.basename(claim.candidate_snapshot_path)
+
+        # A lexicographically-maximal unreferenced file takes the recent
+        # slot so B1's survival is attributable ONLY to the claim edge.
+        (snapshot_dir / _GARBAGE3_NAME).write_text(
+            json.dumps({"nodes": []}), encoding="utf-8"
+        )
+        touch(root / "gc_run_2")
+        run2 = read_result(root / "gc_run_2_result.json", timeout=120)
+        assert run2["aborted"] is False
+        assert b1_name in run2["protected"]  # ← the claim-candidate edge
+        assert _B0_NAME in run2["protected"]  # manifest base (not yet swapped)
+        assert _JOB_BASIS_NAME in run2["protected"]  # CARTO job edge
+        assert run2["deleted"] == []
+
+        # Release the publish; the epoch advances to E1.
+        touch(root / "gc2_done")
+        pub = read_result(root / "publisher_result.json", timeout=120)
+        assert pub["published"] is True
+        assert pub["epoch_number"] == 1
+        assert read_manifest(paths).epoch_number == 1
+
+        # RUN 3 — B0 is now unreferenced and deleted; B1 protected by the
+        # manifest edge; the job-basis still protected by the job edge.
+        touch(root / "gc_run_3")
+        run3 = read_result(root / "gc_run_3_result.json", timeout=120)
+        assert run3["aborted"] is False
+        assert _B0_NAME in run3["deleted"]
+        assert _JOB_BASIS_NAME in run3["protected"]
+        assert b1_name in run3["protected"] + run3["kept_recent"]
+
+        pids = collect_distinct_pids(root, ["parent", "gc", "publisher", "job"])
+        assert len(set(pids.values())) == 4
+    finally:
+        touch(root / "test_done")
+        if publisher is not None:
+            finish_actor(publisher, label="epoch publisher")
+        if gc is not None:
+            finish_actor(gc, label="gc scan")
+        finish_actor(job, label="job owner")
+
+
+# @beacon[
+#   id=auto-beacon@test_mutation_check_claim_edge_disabled_deletes_candidate_and_fails_publish-y5ft,
+#   role=test_mutation_check_claim_edge_disabled_deletes_candidate_and_fails_publish,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_mutation_check_claim_edge_disabled_deletes_candidate_and_fails_publish(tmp_path):
+    """MUTATION-CHECK: with the active-claim candidate edge disabled, the
+    GC deletes the durable candidate B1 mid-publication (predicted
+    deletion) and the parked publish_epoch then fails reading the missing
+    candidate (predicted failure) — the exact PAIR-029 outcome the
+    protected set prevents in the shipped world."""
+    root = tmp_path / "share"
+    paths, snapshot_dir, basis_path = _seed(root)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    job = launch_actor(_JOB_OWNER, str(root), str(REPO))
+    gc = publisher = None
+    try:
+        assert wait_for_file(root / "job_ready", timeout=60)
+        gc = launch_actor(
+            _GC_SCAN,
+            str(root),
+            str(REPO),
+            "gc_run_1",
+            "gc_run_2",
+            env={"STAGE2_NEUTRALIZE_CLAIM_EDGE": "1"},
+        )
+        publisher = launch_actor(_PUBLISHER, str(root), str(REPO))
+
+        _wait_active_claim(paths)
+        touch(root / "gc_run_1")
+        run1 = read_result(root / "gc_run_1_result.json", timeout=120)
+        assert run1["aborted"] is False
+        assert _B0_NAME in run1["protected"]
+        assert sorted(run1["deleted"]) == sorted([_GARBAGE1_NAME, _GARBAGE2_NAME])
+
+        touch(root / "release_fetch")
+        assert wait_for_file(root / "publish_reached", timeout=180)
+        claim = read_refresh_claim(paths)
+        assert claim is not None and claim.candidate_snapshot_path
+        b1_name = os.path.basename(claim.candidate_snapshot_path)
+
+        (snapshot_dir / _GARBAGE3_NAME).write_text(
+            json.dumps({"nodes": []}), encoding="utf-8"
+        )
+        touch(root / "gc_run_2")
+        run2 = read_result(root / "gc_run_2_result.json", timeout=120)
+        # PREDICTED DELETION: with the edge disabled, B1 is garbage.
+        assert run2["aborted"] is False
+        assert b1_name in run2["deleted"]
+        assert _B0_NAME in run2["protected"]
+        assert _JOB_BASIS_NAME in run2["protected"]
+
+        # PREDICTED FAILURE: the parked publish_epoch reads the deleted
+        # candidate and the refresh fails — the catastrophic outcome the
+        # claim-candidate edge exists to prevent.
+        touch(root / "gc2_done")
+        pub = read_result(root / "publisher_result.json", timeout=120)
+        assert pub["published"] is False
+        assert pub["error"]
+        # The lineage was never advanced: the old base remains authoritative.
+        assert read_manifest(paths).epoch_number == 0
+
+        pids = collect_distinct_pids(root, ["parent", "gc", "publisher", "job"])
+        assert len(set(pids.values())) == 4
+    finally:
+        touch(root / "test_done")
+        if publisher is not None:
+            finish_actor(publisher, label="epoch publisher (edge disabled)")
+        if gc is not None:
+            finish_actor(gc, label="gc scan (edge disabled)")
+        finish_actor(job, label="job owner")

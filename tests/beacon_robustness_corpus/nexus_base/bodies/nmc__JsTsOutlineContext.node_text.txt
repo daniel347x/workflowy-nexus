@@ -1,0 +1,6 @@
+    def node_text(self, node: Any) -> str:
+        """Decode a tree-sitter node's source bytes to a UTF-8 string.
+
+        Wrapper around the Phase A module-level ``_js_node_text``.
+        """
+        return _js_node_text(node, self.source_bytes)

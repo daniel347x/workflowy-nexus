@@ -1,0 +1,235 @@
+from __future__ import annotations
+
+import asyncio
+
+from workflowy_mcp.mcp_api_registry import dispatch_operation, validate_params
+from workflowy_mcp import server
+
+
+def test_each_system_verb_routes_with_exact_parameter_unpack(monkeypatch):
+    calls = []
+
+    async def ping():
+        calls.append(("ping",))
+        return {"route": "ping"}
+
+    async def broker():
+        calls.append(("broker",))
+        return {"route": "broker"}
+
+    async def cache():
+        calls.append(("cache",))
+        return {"route": "cache"}
+
+    async def config(target_tab=None):
+        calls.append(("config", target_tab))
+        return {"route": "config", "target_tab": target_tab}
+
+    async def status(job_id=None):
+        calls.append(("status", job_id))
+        return {"route": "status", "job_id": job_id}
+
+    async def cancel(job_id):
+        calls.append(("cancel", job_id))
+        return {"route": "cancel", "job_id": job_id}
+
+    monkeypatch.setattr(server, "_system_ping_impl", ping)
+    monkeypatch.setattr(server, "_system_broker_status_impl", broker)
+    monkeypatch.setattr(server, "_system_cache_refresh_impl", cache)
+    monkeypatch.setattr(server, "_system_config_get_impl", config)
+    monkeypatch.setattr(server, "_system_job_status_impl", status)
+    monkeypatch.setattr(server, "_system_job_cancel_impl", cancel)
+    registry = server.build_system_registry()
+
+    assert asyncio.run(dispatch_operation(registry, "ping", {})) == {"route": "ping"}
+    assert asyncio.run(dispatch_operation(registry, "broker.status", {})) == {
+        "route": "broker"
+    }
+    assert asyncio.run(dispatch_operation(registry, "cache.refresh", {})) == {
+        "route": "cache"
+    }
+    assert asyncio.run(
+        dispatch_operation(registry, "config.get", {"target_tab": "spine"})
+    ) == {"route": "config", "target_tab": "spine"}
+    assert asyncio.run(dispatch_operation(registry, "job.status", {})) == {
+        "route": "status",
+        "job_id": None,
+    }
+    assert asyncio.run(
+        dispatch_operation(registry, "job.status", {"job_id": "J1"})
+    ) == {"route": "status", "job_id": "J1"}
+    assert asyncio.run(
+        dispatch_operation(registry, "job.cancel", {"job_id": "J2"})
+    ) == {"route": "cancel", "job_id": "J2"}
+
+    assert calls == [
+        ("ping",),
+        ("broker",),
+        ("cache",),
+        ("config", "spine"),
+        ("status", None),
+        ("status", "J1"),
+        ("cancel", "J2"),
+    ]
+
+
+def test_config_get_shapes_extension_settings_and_policy(monkeypatch):
+    raw = {
+        "note_session_tags": ["wfy-ns"],
+        "global_tags": ["canonical-a", "canonical-b"],
+        "note_session_local_postfixes": ["local", "nested"],
+        "default_note_sessions_parent": "PARENT",
+        "default_markdown_folder": "C:/notes",
+        "project_maps_location": "  [ap:PMAPS1]  ",
+        "f8_postfix_auto_expand": "open",
+        "f8_postfix_suppress": "hide",
+        "f8_postfix_deprecated": "old",
+        "f8_global_never_expand_tags": ["wfy-suppress"],
+    }
+
+    async def resolve(target_tab):
+        assert target_tab == "tab-a"
+        return (
+            list(raw["note_session_tags"]),
+            list(raw["global_tags"]),
+            raw["default_note_sessions_parent"],
+            dict(raw),
+        )
+
+    monkeypatch.setattr(server, "_resolve_note_session_config", resolve)
+    result = asyncio.run(server._system_config_get_impl("tab-a"))
+    assert result == {
+        "canonical_tags": ["canonical-a", "canonical-b"],
+        "anchor_dock_tags": ["wfy-ns"],
+        "local_dock_postfixes": ["local", "nested"],
+        # The reply carries no note_session_favorite_postfixes /
+        # note_session_deprecated_postfixes keys -> the shipped defaults.
+        "favorite_dock_postfixes": ["fav"],
+        "deprecated_dock_postfixes": ["deprecated"],
+        "slice_postfixes": {
+            "expand": "open",
+            "suppress": "hide",
+            "deprecated": "old",
+        },
+        "global_never_tags": ["wfy-suppress"],
+        "default_dock_parent_uuid": "PARENT",
+        "default_markdown_folder": "C:/notes",
+        # The Project Maps location is a pointer: the extension's trimmed
+        # string, verbatim (never resolved or validated).
+        "project_maps_location": "[ap:PMAPS1]",
+    }
+
+    # Unset/older-extension shapes all collapse to a null pointer: a missing
+    # key, an empty string, whitespace only, and a non-string value.
+    for patch in (
+        {},
+        {"project_maps_location": ""},
+        {"project_maps_location": "   "},
+        {"project_maps_location": 42},
+    ):
+        async def resolve_variant(target_tab, _patch=patch):
+            assert target_tab == "tab-a"
+            variant = dict(raw)
+            variant.pop("project_maps_location", None)
+            variant.update(_patch)
+            return (
+                list(variant["note_session_tags"]),
+                list(variant["global_tags"]),
+                variant["default_note_sessions_parent"],
+                variant,
+            )
+
+        monkeypatch.setattr(server, "_resolve_note_session_config", resolve_variant)
+        variant_result = asyncio.run(server._system_config_get_impl("tab-a"))
+        assert variant_result["project_maps_location"] is None
+        assert variant_result["default_markdown_folder"] == "C:/notes"
+
+
+def test_legacy_ping_delegate_matches_system_ping(monkeypatch):
+    async def ping():
+        return {"ok": True, "sentinel": 42}
+
+    monkeypatch.setattr(server, "_system_ping_impl", ping)
+    legacy = asyncio.run(server.nexus_ping())
+    consolidated = asyncio.run(
+        dispatch_operation(server.SYSTEM_REGISTRY, "ping", {})
+    )
+    assert legacy == consolidated == {"ok": True, "sentinel": 42}
+
+
+def test_real_system_registry_describe_and_examples_validate():
+    registry = server.SYSTEM_REGISTRY
+    # Archive Reads U3: the two archive verbs join the system family
+    # (registered after job.cancel; describe stays last in the index).
+    assert [spec.verb for spec in registry.operations()] == [
+        "ping",
+        "broker.status",
+        "cache.refresh",
+        "config.get",
+        "job.status",
+        "job.cancel",
+        "archives.list",
+        "archives.mount",
+    ]
+
+    index = registry.describe_index()
+    assert [row["verb"] for row in index["operations"]] == [
+        "ping",
+        "broker.status",
+        "cache.refresh",
+        "config.get",
+        "job.status",
+        "job.cancel",
+        "archives.list",
+        "archives.mount",
+        "describe",
+    ]
+
+    for spec in registry.operations():
+        full = registry.describe_full(spec.verb)
+        assert full["operation"] == spec.canonical_name
+        assert full["params_schema"]["type"] == "object"
+        assert isinstance(full["params_schema"]["additionalProperties"], bool)
+        for example in full["examples"]:
+            validate_params(spec, example["call"].get("params") or {})
+
+    status_description = registry.describe_full("job.status")["returns"]["description"]
+    assert "completed_with_warnings" in status_description
+    assert "cancelling (presentation only" in status_description
+    assert "conservatively treated as active" in status_description
+    cancel_description = registry.describe_full("job.cancel")["returns"]["description"]
+    assert "kill_refused_in_process_job" in cancel_description
+    assert "cancellation_pending=true" in cancel_description
+    assert "An acknowledgement is not proof of stop; poll job.status." in cancel_description
+    assert "Cancelling a MARKDOWN_GENERATE job also stops its inline phase-8 refresh." in cancel_description
+    assert "Poll job.status until actual task completion." in cancel_description
+
+
+def test_system_dispatch_errors_are_registry_generated():
+    unknown = asyncio.run(dispatch_operation(server.SYSTEM_REGISTRY, "nope", {}))
+    assert unknown["error"]["code"] == "unknown_operation"
+    assert "ping —" in unknown["error"]["message"]
+
+    missing = asyncio.run(
+        dispatch_operation(server.SYSTEM_REGISTRY, "job.cancel", {})
+    )
+    assert missing["error"]["code"] == "missing_parameter"
+    assert "job_id" in missing["error"]["message"]
+    assert missing["error"]["describe_hint"] == {
+        "tool": "system",
+        "verb": "describe",
+        "of": "job.cancel",
+    }
+
+
+def test_system_fastmcp_tool_is_registered_without_legacy_surface():
+    tools = asyncio.run(server.mcp.list_tools())
+    names = {tool.name for tool in tools}
+    assert "system" in names
+    assert {
+        "nexus_ping",
+        "workflowy_broker_status",
+        "workflowy_refresh_nodes_export_cache",
+        "mcp_job_status",
+        "mcp_cancel_job",
+    }.isdisjoint(names)

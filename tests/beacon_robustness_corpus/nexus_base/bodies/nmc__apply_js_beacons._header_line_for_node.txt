@@ -1,0 +1,5 @@
+    def _header_line_for_node(node: dict[str, Any]) -> Optional[str]:
+        ln = node.get("orig_lineno_start_unused")
+        if not isinstance(ln, int) or ln <= 0 or ln > len(lines):
+            return None
+        return lines[ln - 1]

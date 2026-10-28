@@ -1,0 +1,150 @@
+"""S04 §10.6/§14.5 — epoch rollover: old processes roll forward after rotation."""
+
+from __future__ import annotations
+
+import asyncio
+
+from coherence_harness import (
+    ACCOUNT_A,
+    assert_semantic_cache_equal,
+    make_coherence_root,
+    s02_node,
+    s04_append,
+    s04_append_n,
+    s04_checkpoint_config,
+    s04_install_base_manifest,
+    s04_write_base_snapshot,
+)
+
+from workflowy_mcp.coherence import (
+    CacheViewPublisher,
+    SemanticEffect,
+    adopt_manifest_head,
+    read_manifest,
+    run_checkpoint_rotation,
+    unpopulated_cache_view,
+)
+
+
+def _snapshot_dir(tmp_path):
+    return tmp_path / "nodes_export_cache"
+
+
+def _based_manifest(paths, tmp_path, nodes):
+    base = s04_write_base_snapshot(
+        paths, _snapshot_dir(tmp_path), nodes, epoch_number=0, epoch_id="b" * 32
+    )
+    s04_install_base_manifest(paths, base_snapshot_path=base, epoch_id="b" * 32)
+    return base
+
+
+def _adopt(paths, publisher, tmp_path):
+    return asyncio.run(
+        adopt_manifest_head(
+            paths=paths,
+            publisher=publisher,
+            snapshot_dir=_snapshot_dir(tmp_path),
+        )
+    )
+
+
+def test_old_process_reloads_new_epoch_and_converges(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _based_manifest(paths, tmp_path, [s02_node("a"), s02_node("b", parent_id="a")])
+    s04_append_n(paths, 3)
+
+    # A process adopts at E0/head-3 (pins the pre-rotation generation).
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+    first = _adopt(paths, publisher, tmp_path)
+    assert first.disposition == "epoch_reloaded"
+    assert first.to_sequence == 3
+    assert first.view.epoch_id == read_manifest(paths, required=True).epoch_id
+
+    # Checkpoint rotates E0 -> E1; the process's next adoption must roll
+    # FORWARD to the new epoch (never backward, never stale-pinned).
+    result = asyncio.run(
+        run_checkpoint_rotation(
+            paths,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            config=s04_checkpoint_config(record_threshold=2),
+        )
+    )
+    assert result.status == "published", result.warnings
+    manifest = read_manifest(paths, required=True)
+
+    second = _adopt(paths, publisher, tmp_path)
+    assert second.disposition == "epoch_reloaded"
+    assert second.view.epoch_id == manifest.epoch_id
+    assert second.view.epoch_number == manifest.epoch_number
+    assert second.view.adopted_sequence == manifest.journal_head_seq
+    # The materialized base content is intact through the rotation.
+    assert set(second.view.nodes_by_id) == {"a", "b"}
+
+    # A post-rotation append adopts via same-epoch tail replay.
+    s04_append(
+        paths,
+        effects=[SemanticEffect.node_create(s02_node("c", parent_id="a"))],
+        transaction_id="tx-post-rotation",
+    )
+    third = _adopt(paths, publisher, tmp_path)
+    assert third.disposition == "tail_replayed"
+    assert "c" in third.view.nodes_by_id
+
+    # Fast path: already current — same view object, zero work.
+    fourth = _adopt(paths, publisher, tmp_path)
+    assert fourth.disposition == "already_current"
+    assert fourth.view is third.view
+
+
+def test_duplicate_replay_is_idempotent_across_rotation(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _based_manifest(paths, tmp_path, [s02_node("a")])
+    s04_append_n(paths, 2)
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+    first = _adopt(paths, publisher, tmp_path)
+    payload_before = first.view.nodes_export
+    # Adopt again at the same markers (idempotent no-op).
+    second = _adopt(paths, publisher, tmp_path)
+    assert second.disposition == "already_current"
+    assert_semantic_cache_equal(second.view.nodes_export, payload_before)
+    # Rotate, adopt, adopt: the new epoch is stable under repeated adoption.
+    asyncio.run(
+        run_checkpoint_rotation(
+            paths,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            config=s04_checkpoint_config(record_threshold=2),
+        )
+    )
+    third = _adopt(paths, publisher, tmp_path)
+    fourth = _adopt(paths, publisher, tmp_path)
+    assert_semantic_cache_equal(third.view.nodes_export, fourth.view.nodes_export)
+
+
+def test_rotation_preserves_journal_effects_in_reloaded_base(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _based_manifest(paths, tmp_path, [s02_node("a")])
+    # Journal an UPDATE to a and a CREATE of b.
+    s04_append(
+        paths,
+        effects=[
+            SemanticEffect.node_fields("a", ["name"], {"name": "renamed-a"}),
+        ],
+        transaction_id="tx-update",
+    )
+    s04_append(
+        paths,
+        effects=[SemanticEffect.node_create(s02_node("b", parent_id="a"))],
+        transaction_id="tx-create",
+    )
+    result = asyncio.run(
+        run_checkpoint_rotation(
+            paths,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            config=s04_checkpoint_config(record_threshold=1),
+        )
+    )
+    assert result.status == "published", result.warnings
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+    adopted = _adopt(paths, publisher, tmp_path)
+    assert adopted.view.nodes_by_id["a"]["name"] == "renamed-a"
+    assert "b" in adopted.view.nodes_by_id

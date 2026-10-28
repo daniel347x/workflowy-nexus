@@ -1,0 +1,735 @@
+"""U4 -- the WS reader loop no longer blocks on the remaining long handlers.
+
+Contract [ap:MUBQ2F] / tether [ap:ELVD5I] / RECON-1 notes [ap:1HWN7A].
+``websocket_handler``'s nine remaining inline ``await`` clauses used to freeze
+every tab<->daemon frame for the duration of the handler: the four named by
+the tether (``render_markdown_modal``, ``open_node_in_windsurf``,
+``carto_clear_job_history``, ``carto_cancel_job``) plus the five NOTE-2
+freshness-await handlers (``bulk_apply_visible_nodes``,
+``generate_markdown_file``, ``materialize_markdown_file``,
+``bulk_materialize_markdown``, ``bulk_generate_markdown``).  Post-fix every one
+of them spawns through ``create_isolated_context_task`` and the pump keeps
+reading -- the ``test_ws_reader_nonblocking_refresh`` postcondition extended to
+the whole long-handler family.
+
+Spawn shapes (per the contract's binding notes):
+* helper family -- the four clauses whose inline failure frame was the generic
+  ``{action, success:false, node_id, error}`` shape spawn
+  ``_spawn_ws_result_handler`` (verbatim net preservation);
+* bare family -- envelope owners with shaped/complete own replies
+  (``bulk_apply_visible_nodes``, ``generate_markdown_file``,
+  ``render_markdown_modal``) spawn bare (the compile_slice_search precedent);
+* lifted family -- the two cache-free carto clauses were lifted VERBATIM into
+  ``_handle_carto_clear_job_history`` / ``_handle_carto_cancel_job`` and spawn
+  bare (no ``@_ws_cache_boundary`` -- their registry classification is
+  unchanged).
+
+NOTE 1 (the one real decision): ``compose_markdown_modal_view`` /
+``_snapshot`` / ``_rows`` are SYNCHRONOUS CPU, so spawning
+``render_markdown_modal`` alone would NOT unblock the channel during a large
+compose.  All three call sites now run via ``asyncio.to_thread`` INSIDE the
+spawned task; ``test_pump_stays_live_while_snapshot_compose_blocks`` is
+CHANGE-DETECTING against BOTH pre-fix states (inline await AND
+spawn-without-offload): the compose stub blocks on a ``threading.Event`` that
+only the pong can set, which no single-threaded event-loop resident can
+satisfy.  The same test locks the S03 ContextVar boundary: the operation
+snapshot established by ``@_ws_cache_boundary`` inside the task is visible to
+``current_operation_cache()`` in the worker thread (asyncio.to_thread
+propagates the context).
+
+Covered
+-------
+* F1 non-blocking (CHANGE-DETECTING, red pre-fix): all nine actions -- a slow
+  handler (or slow underlying impl, for the two lifted carto handlers) must
+  not delay an unrelated ping/pong round-trip on the same connection (the
+  tether's regression requirement).
+* Failure-frame preservation: the four helper actions keep the exact generic
+  frame + log line through the pump; the two lifted carto handlers keep their
+  exact wire shapes (success splat, missing-job_id refusal, failure frame).
+* NOTE-1 locks: the blocking-compose pump test above; compose-exception
+  propagation through ``to_thread`` into the handler's shaped failure reply
+  (PRESERVATION); the three-call-site offload source lock (CHANGE-DETECTING).
+* Boundary: the seven decorated handlers still enter
+  ``cache_operation_boundary`` inside the spawned task, still carry
+  ``@_ws_cache_boundary``; the two lifted carto handlers are boundary-free
+  and stay classified ``cache_free`` in the S03-B registry (record lock).
+* Dispatch clause locks (CHANGE-DETECTING): per-action spawn capture, the
+  bare-spawn AST census, and the absence of every inline await.
+
+Model: local, no network, no real Workflowy; the REAL
+``create_isolated_context_task`` spawns the REAL helper/lifted handlers around
+stub handlers/impls except where a test names the real body deliberately.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import inspect
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from workflowy_mcp import server as srv  # noqa: E402
+
+# The U3-refresh harness is the shared pump fixture (repo convention: sibling
+# test-module imports, e.g. test_dock_peek_layout).
+from test_ws_reader_nonblocking_refresh import (  # noqa: E402
+    PUMP_TIMEOUT_S,
+    _install_client_stub,
+    _QueueWebSocket,
+    _run_pump_and_wait,
+)
+
+
+# action -> (module-level handler name, result_action) for the four clauses
+# whose inline net was the generic {action, success:false, node_id, error}
+# frame -- they spawn the ONE _spawn_ws_result_handler helper.
+HELPER_SPAWNS = {
+    "open_node_in_windsurf": (
+        "_handle_open_node_in_windsurf",
+        "open_node_in_windsurf_result",
+    ),
+    "materialize_markdown_file": (
+        "_handle_materialize_markdown_file",
+        "materialize_markdown_file_result",
+    ),
+    "bulk_materialize_markdown": (
+        "_handle_bulk_materialize_markdown",
+        "bulk_materialize_markdown_result",
+    ),
+    "bulk_generate_markdown": (
+        "_handle_bulk_generate_markdown",
+        "bulk_generate_markdown_result",
+    ),
+}
+
+# action -> handler name for the bare-spawn envelope owners (shaped/complete
+# own replies; the compile_slice_search precedent).
+BARE_SPAWNS = {
+    "bulk_apply_visible_nodes": "_handle_bulk_apply_visible_nodes",
+    "generate_markdown_file": "_handle_generate_markdown_file",
+    "render_markdown_modal": "_handle_render_markdown_modal",
+}
+
+# action -> (lifted handler name, result_action) for the two cache-free carto
+# clauses lifted verbatim into module-level coroutines.
+LIFTED_SPAWNS = {
+    "carto_clear_job_history": (
+        "_handle_carto_clear_job_history",
+        "carto_clear_job_history_result",
+    ),
+    "carto_cancel_job": (
+        "_handle_carto_cancel_job",
+        "carto_cancel_job_result",
+    ),
+}
+
+# action -> spawned handler name, for all nine.
+ALL_SPAWNS = {
+    **{a: h for a, (h, _) in HELPER_SPAWNS.items()},
+    **BARE_SPAWNS,
+    **{a: h for a, (h, _) in LIFTED_SPAWNS.items()},
+}
+
+# The seven handlers that carry @_ws_cache_boundary (the two lifted carto
+# handlers are cache-free by classification and deliberately carry none).
+DECORATED_ACTIONS = {
+    **{a: h for a, (h, _) in HELPER_SPAWNS.items()},
+    **BARE_SPAWNS,
+}
+
+# For the two lifted carto actions the F1 pump test slows the UNDERLYING impl
+# (not the lifted handler) so the same test is red against the pre-fix inline
+# clause, which awaited the impl directly.
+LIFTED_IMPLS = {
+    "carto_clear_job_history": "_clear_carto_job_history",
+    "carto_cancel_job": "_system_job_cancel_impl",
+}
+
+
+def _frame_for(action: str) -> dict:
+    if action == "carto_cancel_job":
+        return {"action": action, "job_id": "J-1"}
+    if action == "render_markdown_modal":
+        return {
+            "action": action,
+            "request_id": "rm-1",
+            "mode": "single",
+            "focus_leaf": "L",
+            "visible_tree": {"root": {"id": "R", "name": "R"}, "children": []},
+        }
+    return {"action": action, "node_id": "N-1"}
+
+
+# ---------------------------------------------------------------------------
+# F1 -- non-blocking: the pump services an unrelated frame while a long
+#        handler runs (the tether's regression requirement, all nine actions)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", sorted(ALL_SPAWNS))
+def test_pump_services_unrelated_frame_while_long_handler_is_pending(monkeypatch, action):
+    """CHANGE-DETECTING LOCK (red pre-fix for every one of the nine): the
+    slow handler waits on an event that is set ONLY once the pong has been
+    observed.  Pre-fix the pump is stuck in the inline await and the run
+    times out; post-fix the pong lands first."""
+    _install_client_stub(monkeypatch)
+    release = asyncio.Event()
+    handler_done = asyncio.Event()
+    order: list[str] = []
+
+    if action in LIFTED_IMPLS:
+        # Slow the underlying impl; the REAL lifted handler runs (locking the
+        # lift + spawn together, and staying red against the pre-fix inline
+        # clause which awaited the same impl global).
+        async def _slow_impl(*args, **kwargs):
+            order.append("handler-start")
+            await release.wait()
+            order.append("handler-end")
+            handler_done.set()
+            return {"success": True}
+
+        monkeypatch.setattr(srv, LIFTED_IMPLS[action], _slow_impl)
+        result_action = LIFTED_SPAWNS[action][1]
+    else:
+        async def _slow_handler(data, websocket):
+            order.append("handler-start")
+            await release.wait()
+            order.append("handler-end")
+            await websocket.send(
+                json.dumps({"action": f"{action}_result", "success": True})
+            )
+            handler_done.set()
+
+        monkeypatch.setattr(srv, ALL_SPAWNS[action], _slow_handler)
+        result_action = f"{action}_result"
+
+    async def exercise():
+        ws = _QueueWebSocket([_frame_for(action), {"action": "ping"}])
+        ws.close()
+
+        async def _release_on_pong():
+            await ws.pong_seen.wait()
+            order.append("pong")
+            release.set()
+
+        releaser = asyncio.ensure_future(_release_on_pong())
+        try:
+            await _run_pump_and_wait(ws, until=handler_done)
+        finally:
+            releaser.cancel()
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert set(order) == {"handler-start", "pong", "handler-end"}
+    assert order.index("pong") < order.index("handler-end")
+    actions = [f.get("action") for f in ws.sent]
+    assert actions.index("pong") < actions.index(result_action)
+
+
+# ---------------------------------------------------------------------------
+# Failure-frame preservation -- the four helper actions keep the exact generic
+# net; the two lifted carto handlers keep their exact wire shapes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", sorted(HELPER_SPAWNS))
+def test_raising_spawned_handler_still_sends_generic_failure_frame(monkeypatch, action):
+    """PRESERVATION: same frame the inline clause's net sent, byte for byte,
+    through the pump (log line included)."""
+    handler_name, result_action = HELPER_SPAWNS[action]
+    _install_client_stub(monkeypatch)
+    logged: list[tuple[str, str]] = []
+    monkeypatch.setattr(srv, "log_event", lambda msg, comp="": logged.append((msg, comp)))
+
+    async def _boom(data, websocket):
+        raise RuntimeError("boom-" + action)
+
+    monkeypatch.setattr(srv, handler_name, _boom)
+
+    async def exercise():
+        ws = _QueueWebSocket([{"action": action, "node_id": "N-fail"}])
+        ws.close()
+        await _run_pump_and_wait(ws, until=ws.result_seen)
+        return ws
+
+    ws = asyncio.run(exercise())
+    failure = [f for f in ws.sent if f.get("action") == result_action]
+    assert failure == [
+        {
+            "action": result_action,
+            "success": False,
+            "node_id": "N-fail",
+            "error": "boom-" + action,
+        }
+    ]
+    assert (f"{action} handler error: boom-{action}", "WS_HANDLER") in logged
+
+
+def test_pump_survives_a_raising_helper_spawned_handler(monkeypatch):
+    """F2 corollary for the new helper family: the pump does not die."""
+    _install_client_stub(monkeypatch)
+
+    async def _boom(data, websocket):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(srv, "_handle_open_node_in_windsurf", _boom)
+
+    async def exercise():
+        ws = _QueueWebSocket(
+            [{"action": "open_node_in_windsurf", "node_id": "N"}, {"action": "ping"}]
+        )
+        ws.close()
+        await _run_pump_and_wait(ws, until=ws.result_seen)
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert {"action": "pong"} in ws.sent
+    assert any(
+        f.get("action") == "open_node_in_windsurf_result" and f["success"] is False
+        for f in ws.sent
+    )
+
+
+def test_lifted_clear_history_handler_preserves_wire_shape(monkeypatch):
+    """PRESERVATION (verbatim lift): success splat + guarded failure frame,
+    byte-identical to the former inline clause."""
+    logged: list[tuple[str, str]] = []
+    monkeypatch.setattr(srv, "log_event", lambda msg, comp="": logged.append((msg, comp)))
+
+    async def _ok(*args, **kwargs):
+        return {"success": True, "cleared_jobs": 3, "preserved_jobs": 1}
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("gc-boom")
+
+    async def exercise():
+        monkeypatch.setattr(srv, "_clear_carto_job_history", _ok)
+        ok_ws = _QueueWebSocket()
+        await srv._handle_carto_clear_job_history({}, ok_ws)
+        monkeypatch.setattr(srv, "_clear_carto_job_history", _boom)
+        boom_ws = _QueueWebSocket()
+        await srv._handle_carto_clear_job_history({}, boom_ws)
+        return ok_ws, boom_ws
+
+    ok_ws, boom_ws = asyncio.run(exercise())
+    assert ok_ws.sent == [
+        {
+            "action": "carto_clear_job_history_result",
+            "success": True,
+            "cleared_jobs": 3,
+            "preserved_jobs": 1,
+        }
+    ]
+    assert boom_ws.sent == [
+        {
+            "action": "carto_clear_job_history_result",
+            "success": False,
+            "error": "gc-boom",
+        }
+    ]
+    assert ("carto_clear_job_history handler error: gc-boom", "WS_HANDLER") in logged
+
+
+def test_lifted_cancel_job_handler_preserves_wire_shape(monkeypatch):
+    """PRESERVATION (verbatim lift): job_id strip + requested_by, the
+    missing-job_id refusal frame, and the guarded failure frame."""
+    calls: list[tuple] = []
+
+    async def _cancel(job_id, *, requested_by):
+        calls.append((job_id, requested_by))
+        return {"success": True, "status": "cancelling"}
+
+    async def _boom(job_id, *, requested_by):
+        raise RuntimeError("cancel-boom")
+
+    monkeypatch.setattr(srv, "_system_job_cancel_impl", _cancel)
+
+    async def exercise():
+        ws = _QueueWebSocket()
+        await srv._handle_carto_cancel_job({"job_id": "  J-9  "}, ws)
+        missing_ws = _QueueWebSocket()
+        await srv._handle_carto_cancel_job({}, missing_ws)
+        monkeypatch.setattr(srv, "_system_job_cancel_impl", _boom)
+        boom_ws = _QueueWebSocket()
+        await srv._handle_carto_cancel_job({"job_id": "J-boom"}, boom_ws)
+        return ws, missing_ws, boom_ws
+
+    ws, missing_ws, boom_ws = asyncio.run(exercise())
+    assert calls == [("J-9", "websocket:carto_cancel_job")]
+    assert ws.sent == [
+        {
+            "action": "carto_cancel_job_result",
+            "success": True,
+            "status": "cancelling",
+        }
+    ]
+    assert missing_ws.sent == [
+        {
+            "action": "carto_cancel_job_result",
+            "success": False,
+            "error": "Missing job_id in carto_cancel_job payload.",
+        }
+    ]
+    assert boom_ws.sent == [
+        {
+            "action": "carto_cancel_job_result",
+            "success": False,
+            "error": "cancel-boom",
+        }
+    ]
+
+
+def test_lifted_carto_handlers_are_module_level_coroutines():
+    """CHANGE-DETECTING (pre-fix these symbols do not exist): the two carto
+    clause bodies live in ONE module-level coroutine each -- no inner
+    coroutine inside websocket_handler does the job."""
+    for name in ("_handle_carto_clear_job_history", "_handle_carto_cancel_job"):
+        fn = getattr(srv, name)
+        assert inspect.iscoroutinefunction(fn)
+        assert fn.__module__ == srv.__name__
+    assert "async def " not in inspect.getsource(srv.websocket_handler).split("\n", 1)[1]
+
+
+# ---------------------------------------------------------------------------
+# NOTE 1 -- the synchronous compose is off the event loop, boundary intact
+# ---------------------------------------------------------------------------
+
+
+def test_pump_stays_live_while_snapshot_compose_blocks(monkeypatch):
+    """CHANGE-DETECTING against BOTH pre-fix states (inline await AND
+    spawn-without-to_thread): the compose stub blocks on a threading.Event
+    that ONLY the pong sets.  A compose resident on the event loop can never
+    be released (the pump cannot answer the ping while the loop is inside the
+    synchronous compose), so any non-offloaded variant times out red.  Also
+    locks the S03 ContextVar boundary: the task's operation snapshot is
+    visible to current_operation_cache() INSIDE the to_thread worker."""
+    import threading
+
+    import workflowy_mcp.coherence.operation_cache as opc
+
+    release = threading.Event()
+    order: list[str] = []
+    propagation: list[bool] = []
+    sentinel = SimpleNamespace(owner=object(), view=None)
+
+    @contextlib.asynccontextmanager
+    async def _sentinel_boundary(client, label):
+        token = opc._OPERATION_CACHE_SNAPSHOT.set(sentinel)
+        try:
+            yield sentinel
+        finally:
+            opc._OPERATION_CACHE_SNAPSHOT.reset(token)
+
+    monkeypatch.setattr(opc, "cache_operation_boundary", _sentinel_boundary)
+
+    class _ClientStub:
+        def compose_markdown_modal_snapshot(self, visible_tree, **kwargs):
+            order.append("compose-start")
+            propagation.append(
+                opc.current_operation_cache(required=False) is sentinel
+            )
+            released = release.wait(timeout=PUMP_TIMEOUT_S)
+            assert released, (
+                "compose was never released: the event loop could not answer "
+                "the ping while the synchronous compose ran (missing "
+                "asyncio.to_thread offload)"
+            )
+            order.append("compose-end")
+            return {
+                "success": True,
+                "renders": {},
+                "render_keyed_by": "row",
+                "rows": [],
+                "root_matched": True,
+                "cache_stale": False,
+                "stale_nodes": [],
+                "since_applied": None,
+                "empty_window": False,
+                "error": None,
+            }
+
+    monkeypatch.setattr(srv, "get_client", lambda: _ClientStub())
+
+    async def exercise():
+        ws = _QueueWebSocket(
+            [
+                {
+                    "action": "render_markdown_modal",
+                    "request_id": "rm-e1",
+                    "mode": "snapshot",
+                    "visible_tree": {
+                        "root": {"id": "R", "name": "R"},
+                        "children": [],
+                    },
+                },
+                {"action": "ping"},
+            ]
+        )
+        ws.close()
+
+        async def _release_on_pong():
+            await ws.pong_seen.wait()
+            order.append("pong")
+            release.set()
+
+        releaser = asyncio.ensure_future(_release_on_pong())
+        try:
+            await _run_pump_and_wait(ws, until=ws.result_seen)
+        finally:
+            releaser.cancel()
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert propagation == [True]  # the S03 snapshot crossed into the worker thread
+    assert order.index("pong") < order.index("compose-end")
+    actions = [f.get("action") for f in ws.sent]
+    assert actions.index("pong") < actions.index("render_markdown_modal_result")
+    result = [
+        f for f in ws.sent if f.get("action") == "render_markdown_modal_result"
+    ][-1]
+    assert result["request_id"] == "rm-e1"
+    assert result["success"] is True
+    assert result["mode"] == "snapshot"
+
+
+def test_compose_exception_in_thread_yields_shaped_failure_reply(monkeypatch):
+    """PRESERVATION: an exception raised inside the offloaded compose
+    propagates back through the to_thread await into the handler's own
+    envelope -- the shaped request_id-correlated failure reply is unchanged."""
+    import workflowy_mcp.coherence.operation_cache as opc
+
+    @contextlib.asynccontextmanager
+    async def _noop_boundary(client, label):
+        yield None
+
+    monkeypatch.setattr(opc, "cache_operation_boundary", _noop_boundary)
+
+    class _BoomClient:
+        def compose_markdown_modal_view(self, *args, **kwargs):
+            raise RuntimeError("compose-boom")
+
+    monkeypatch.setattr(srv, "get_client", lambda: _BoomClient())
+
+    async def exercise():
+        ws = _QueueWebSocket([_frame_for("render_markdown_modal")])
+        ws.close()
+        await _run_pump_and_wait(ws, until=ws.result_seen)
+        return ws
+
+    ws = asyncio.run(exercise())
+    result = [
+        f for f in ws.sent if f.get("action") == "render_markdown_modal_result"
+    ][-1]
+    assert result["success"] is False
+    assert result["request_id"] == "rm-1"
+    assert result["mode"] == "single"
+    assert "compose-boom" in result["error"]
+
+
+def test_all_three_compose_call_sites_are_thread_offloaded():
+    """CHANGE-DETECTING source lock (red pre-fix): the three SYNCHRONOUS
+    compose_markdown_modal_* calls in the handler run via asyncio.to_thread
+    and never as direct synchronous assignments."""
+    src = inspect.getsource(srv._handle_render_markdown_modal)
+    assert src.count("await asyncio.to_thread(") == 3
+    assert re.search(r"=\s+client\.compose_markdown_modal_", src) is None
+    for name in (
+        "compose_markdown_modal_snapshot",
+        "compose_markdown_modal_rows",
+        "compose_markdown_modal_view",
+    ):
+        assert f"client.{name}," in src  # the to_thread callable argument
+
+
+# ---------------------------------------------------------------------------
+# Boundary -- established inside the spawned task; carto lifts stay cache-free
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", sorted(DECORATED_ACTIONS))
+def test_spawned_handler_enters_cache_operation_boundary_in_its_own_task(monkeypatch, action):
+    import workflowy_mcp.coherence.operation_cache as opc
+
+    _install_client_stub(monkeypatch)
+    entered: list[tuple[str, asyncio.Task | None]] = []
+
+    @contextlib.asynccontextmanager
+    async def _recording_boundary(client, label):
+        entered.append((label, asyncio.current_task()))
+        yield
+
+    monkeypatch.setattr(opc, "cache_operation_boundary", _recording_boundary)
+
+    done = asyncio.Event()
+
+    @srv._ws_cache_boundary(f"ws:{action}")
+    async def _decorated_stub(data, websocket):
+        done.set()
+
+    monkeypatch.setattr(srv, ALL_SPAWNS[action], _decorated_stub)
+
+    async def exercise():
+        pump_task = asyncio.current_task()
+        ws = _QueueWebSocket([_frame_for(action)])
+        ws.close()
+        await _run_pump_and_wait(ws, until=done)
+        return pump_task
+
+    pump_task = asyncio.run(exercise())
+    assert [label for label, _ in entered] == [f"ws:{action}"]
+    ((_, boundary_task),) = entered
+    assert boundary_task is not None
+    assert boundary_task is not pump_task  # established INSIDE the spawned task
+
+
+@pytest.mark.parametrize("action", sorted(DECORATED_ACTIONS))
+def test_real_handlers_still_carry_the_ws_cache_boundary_decorator(action):
+    handler = getattr(srv, ALL_SPAWNS[action])
+    assert hasattr(handler, "__wrapped__")  # functools.wraps from _ws_cache_boundary
+    source = inspect.getsource(handler)
+    assert f'@_ws_cache_boundary("ws:{action}")' in source
+
+
+def test_lifted_carto_handlers_are_boundary_free_and_registry_says_cache_free():
+    """The two lifted handlers must NOT gain a boundary (their inline clauses
+    never had one), and the S03-B registry must keep classifying both actions
+    as cache_free -- record-honesty lock tying the classification to the
+    artifact."""
+    for name in ("_handle_carto_clear_job_history", "_handle_carto_cancel_job"):
+        assert "_ws_cache_boundary" not in inspect.getsource(getattr(srv, name))
+    registry = json.loads(
+        (Path(__file__).resolve().parent / "coherence_s03b_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    cache_free = registry["ws_actions"]["cache_free"]
+    owns = registry["ws_actions"]["owns_boundary"]
+    assert "carto_clear_job_history" in cache_free
+    assert "carto_cancel_job" in cache_free
+    assert "carto_clear_job_history" not in owns
+    assert "carto_cancel_job" not in owns
+
+
+# ---------------------------------------------------------------------------
+# Dispatch clause locks -- the loop spawns; the inline awaits are gone
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", sorted(ALL_SPAWNS))
+def test_websocket_handler_task_dispatches_every_long_handler(monkeypatch, action):
+    """CHANGE-DETECTING LOCK (red pre-fix: no spawn happens for these frames).
+    Mirrors the refresh-unit dispatch test, but captures the REAL coroutines
+    (never awaited -- the fake spawner closes them): helper actions spawn the
+    ONE helper carrying the real handler + result_action; bare/lifted actions
+    spawn the real handler coroutine directly with the frame and the socket."""
+    import workflowy_mcp.coherence.operation_cache as opc
+
+    _install_client_stub(monkeypatch)
+    captured: list[dict] = []
+
+    real_name = ALL_SPAWNS[action]
+    if action in BARE_SPAWNS:
+        # These three are @_ws_cache_boundary-decorated: the clause would
+        # spawn the wrapper's _inner(*args, **kwargs) coroutine, whose locals
+        # do not name data/websocket. Patch a stub whose CODE OBJECT is
+        # renamed to the real handler name so the capture names the symbol
+        # deterministically (the decorator itself is locked separately by
+        # test_real_handlers_still_carry_the_ws_cache_boundary_decorator).
+        async def _renamed_stub(data, websocket):
+            raise AssertionError("the fake spawner must never run the handler")
+
+        _renamed_stub.__code__ = _renamed_stub.__code__.replace(co_name=real_name)
+        monkeypatch.setattr(srv, real_name, _renamed_stub)
+
+    def _fake_spawn(coro):
+        frame_locals = dict(coro.cr_frame.f_locals)
+        captured.append(
+            {
+                "co_name": coro.cr_code.co_name,
+                "handler": frame_locals.get("handler"),
+                "data": frame_locals.get("data"),
+                "websocket": frame_locals.get("websocket"),
+                "result_action": frame_locals.get("result_action"),
+            }
+        )
+        coro.close()
+        return None
+
+    monkeypatch.setattr(opc, "create_isolated_context_task", _fake_spawn)
+
+    frame = _frame_for(action)
+
+    async def exercise():
+        ws = _QueueWebSocket([frame])
+        ws.close()
+        await _run_pump_and_wait(ws)
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert len(captured) == 1
+    spawned = captured[0]
+    assert spawned["data"] == frame
+    assert spawned["websocket"] is ws
+    assert ws.sent == []  # nothing sent inline either
+    if action in HELPER_SPAWNS:
+        assert spawned["co_name"] == "_spawn_ws_result_handler"
+        assert spawned["handler"] is getattr(srv, HELPER_SPAWNS[action][0])
+        assert spawned["result_action"] == HELPER_SPAWNS[action][1]
+    else:
+        assert spawned["co_name"] == real_name
+        assert spawned["handler"] is None  # no helper wrapper on the bare form
+
+
+def test_websocket_handler_bare_spawns_the_envelope_owners_and_lifted_handlers():
+    """CHANGE-DETECTING AST census: the five bare-spawn handlers each occur
+    exactly once inside _dispatch_ws_work, as the sole argument of
+    create_isolated_context_task(...)."""
+    import ast
+
+    bare_expected = set(BARE_SPAWNS.values()) | {
+        h for h, _ in LIFTED_SPAWNS.values()
+    }
+    source = inspect.getsource(srv._dispatch_ws_work)
+    tree = ast.parse(source)
+    bare: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name != "create_isolated_context_task":
+            continue
+        assert len(node.args) == 1 and not node.keywords
+        inner = node.args[0]
+        if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
+            if inner.func.id in bare_expected:
+                bare[inner.func.id] = bare.get(inner.func.id, 0) + 1
+    assert bare == {h: 1 for h in bare_expected}
+
+
+@pytest.mark.parametrize("handler_name", sorted(set(ALL_SPAWNS.values())))
+def test_no_inline_await_remains_for_the_nine_long_handlers(handler_name):
+    """DoD, mechanically: websocket_handler never awaits the nine handlers."""
+    source = inspect.getsource(srv.websocket_handler)
+    assert f"await {handler_name}" not in source
+
+
+def test_inline_carto_impl_awaits_left_the_reader_loop():
+    """The two lifted clauses' impl awaits moved out of the pump verbatim."""
+    source = inspect.getsource(srv.websocket_handler)
+    assert "await _clear_carto_job_history" not in source
+    assert "await _system_job_cancel_impl" not in source

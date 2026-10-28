@@ -1,0 +1,469 @@
+from __future__ import annotations
+
+import inspect
+import json
+import os
+import time
+from pathlib import Path
+
+import psutil
+import pytest
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp import server, weave_worker
+
+ACCOUNT = "f" * 32
+
+
+def _footprint(tmp_path: Path) -> dict:
+    target = tmp_path / "repo" / "file.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch(exist_ok=True)
+    cache = {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "file": {"id": "file", "parent_id": "repo"},
+    }
+    return gov.compute_footprint(target, "file", cache, kind="file")
+
+
+def _claim(
+    tmp_path: Path,
+    *,
+    job_id: str,
+    pid: int | None = None,
+    pid_create_time: float | None = None,
+    job_type: str = "CARTO_REFRESH",
+) -> dict:
+    process = psutil.Process(os.getpid())
+    return gov.build_claim(
+        job_id=job_id,
+        job_type=job_type,
+        dedupe_key="a" * 64,
+        account_scope_id=ACCOUNT,
+        footprint=_footprint(tmp_path),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=os.getpid() if pid is None else pid,
+        pid_create_time=process.create_time() if pid_create_time is None else pid_create_time,
+        handoff_state="running",
+        spawn_started_at=gov.utc_now_iso(),
+        execution_owner="detached_worker",
+    )
+
+
+def _write_job(
+    jobs: Path,
+    claim: dict | None,
+    *,
+    job_id: str,
+    status: str = "running",
+    job_type: str = "CARTO_REFRESH",
+    detached: bool = True,
+) -> Path:
+    jobs.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "id": job_id,
+        "type": job_type,
+        "status": status,
+        "pid": (claim or {}).get("pid"),
+        "detached": detached,
+        "created_at": gov.utc_now_iso(),
+        "updated_at": gov.utc_now_iso(),
+    }
+    if claim is not None:
+        payload["claim_id"] = claim["claim_id"]
+    path = jobs / f"{job_id}.json"
+    gov.atomic_write_json(path, payload)
+    return path
+
+
+def _write_heartbeat(jobs: Path, claim: dict, *, job_id: str, mtime: float) -> Path:
+    path = gov.governance_paths(jobs).heartbeats_dir / f"{job_id}.json"
+    gov.atomic_write_json(
+        path,
+        {"pid": claim["pid"], "job_id": job_id, "claim_id": claim["claim_id"]},
+    )
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def test_heartbeat_controller_writes_identity_once_and_touches_mtime_only(tmp_path):
+    path = tmp_path / "jobs" / ".heartbeats" / "job.json"
+    writes: list[dict] = []
+
+    def writer(target, payload):
+        writes.append(dict(payload))
+        return gov.atomic_write_json(target, payload)
+
+    controller = weave_worker.CartoHeartbeatController(
+        path,
+        pid=1234,
+        job_id="job",
+        claim_id="claim",
+        atomic_writer=writer,
+        interval_seconds=10,
+    )
+    assert controller.start()
+    original = path.read_bytes()
+    os.utime(path, (1, 1))
+    assert controller._touch_once()
+    assert path.stat().st_mtime > 1
+    assert path.read_bytes() == original
+    assert writes == [{"pid": 1234, "job_id": "job", "claim_id": "claim"}]
+    controller.stop()
+    assert controller._stop_event.is_set()
+    assert path.exists()  # Phase D cleanup, not thread shutdown, owns deletion.
+
+
+def test_heartbeat_loop_uses_interval_event_and_stops_without_real_sleep(tmp_path):
+    waits: list[float] = []
+    touches: list[Path] = []
+
+    class Event:
+        def wait(self, interval):
+            waits.append(interval)
+            return len(waits) >= 3
+
+    controller = weave_worker.CartoHeartbeatController(
+        tmp_path / "heartbeat.json",
+        pid=1,
+        job_id="job",
+        claim_id="claim",
+        atomic_writer=gov.atomic_write_json,
+        interval_seconds=0.75,
+        utime_fn=lambda path, _times: touches.append(Path(path)),
+    )
+    controller._stop_event = Event()
+    controller._run()
+    assert waits == [0.75, 0.75, 0.75]
+    assert touches == [controller.path, controller.path]
+
+
+def test_heartbeat_failures_are_logged_and_nonfatal(tmp_path):
+    logs: list[str] = []
+
+    def logger(message, _component):
+        logs.append(message)
+
+    def bad_writer(_path, _payload):
+        raise OSError("write denied")
+
+    controller = weave_worker.CartoHeartbeatController(
+        tmp_path / "heartbeat.json",
+        pid=1,
+        job_id="job",
+        claim_id="claim",
+        atomic_writer=bad_writer,
+        log_fn=logger,
+    )
+    assert controller.start() is False
+    assert "initial write failed" in logs[-1]
+
+    controller = weave_worker.CartoHeartbeatController(
+        tmp_path / "heartbeat.json",
+        pid=1,
+        job_id="job",
+        claim_id="claim",
+        atomic_writer=gov.atomic_write_json,
+        utime_fn=lambda *_args: (_ for _ in ()).throw(OSError("touch denied")),
+        log_fn=logger,
+        interval_seconds=10,
+    )
+    assert controller.start()
+    assert controller._touch_once() is False
+    assert "touch failed" in logs[-1]
+    controller.stop()
+
+
+def test_heartbeat_stop_join_is_bounded_and_cannot_wedge(tmp_path):
+    joined: list[float] = []
+
+    class Thread:
+        def join(self, timeout=None):
+            joined.append(timeout)
+
+    controller = weave_worker.CartoHeartbeatController(
+        tmp_path / "heartbeat.json",
+        pid=1,
+        job_id="job",
+        claim_id="claim",
+        atomic_writer=gov.atomic_write_json,
+        join_timeout_seconds=0.125,
+    )
+    controller._thread = Thread()
+    controller.stop()
+    assert joined == [0.125]
+    assert controller._stop_event.is_set()
+
+
+@pytest.mark.parametrize("mode", ["carto_refresh", "markdown_generate"])
+def test_both_detached_modes_start_after_adopted_identity(tmp_path, mode):
+    job_id = f"job-{mode}"
+    claim = {
+        "job_id": job_id,
+        "claim_id": "c" * 32,
+        "pid": os.getpid(),
+    }
+    job_file = tmp_path / "jobs" / f"{job_id}.json"
+    controller = weave_worker._start_carto_heartbeat_after_adoption(
+        mode,
+        {"claim": claim},
+        {"id": job_id, "claim_id": claim["claim_id"]},
+        job_file,
+        jobs_root=job_file.parent,
+    )
+    assert controller is not None
+    assert (
+        controller.path == gov.governance_paths(job_file.parent).heartbeats_dir / f"{job_id}.json"
+    )
+    assert json.loads(controller.path.read_text(encoding="utf-8")) == {
+        "pid": os.getpid(),
+        "job_id": job_id,
+        "claim_id": claim["claim_id"],
+    }
+    controller.stop()
+
+
+@pytest.mark.parametrize(
+    "mode,adoption,job",
+    [
+        ("carto_refresh", None, {"id": "job", "claim_id": "c" * 32}),
+        (
+            "carto_refresh",
+            {"claim": {"job_id": "other", "claim_id": "c" * 32, "pid": os.getpid()}},
+            {"id": "job", "claim_id": "c" * 32},
+        ),
+        (
+            "carto_refresh",
+            {"claim": {"job_id": "job", "claim_id": "c" * 32, "pid": os.getpid() + 1}},
+            {"id": "job", "claim_id": "c" * 32},
+        ),
+        (
+            "direct",
+            {"claim": {"job_id": "job", "claim_id": "c" * 32, "pid": os.getpid()}},
+            {"id": "job", "claim_id": "c" * 32},
+        ),
+    ],
+)
+def test_missing_mismatched_other_owned_or_non_carto_never_starts_heartbeat(
+    tmp_path, mode, adoption, job
+):
+    job_file = tmp_path / "jobs" / "job.json"
+    assert (
+        weave_worker._start_carto_heartbeat_after_adoption(
+            mode,
+            adoption,
+            job,
+            job_file,
+            jobs_root=job_file.parent,
+        )
+        is None
+    )
+    assert not gov.governance_paths(job_file.parent).heartbeats_dir.exists()
+
+
+def test_startup_cancel_precedes_heartbeat_and_heartbeat_precedes_client_bootstrap():
+    source = Path(weave_worker.__file__).read_text(encoding="utf-8")
+    adoption = source.index("adopt_carto_worker_claim(args.carto_job_file)")
+    startup_cancel = source.index("Startup cancellation finalized before client/bootstrap")
+    heartbeat = source.index("carto_heartbeat = _start_carto_heartbeat_after_adoption(")
+    client_import = source.index("from workflowy_mcp.client.api_client import WorkFlowyClient")
+    assert adoption < startup_cancel < heartbeat < client_import
+    assert source.count("carto_heartbeat.stop()") >= 2
+
+
+def test_heartbeat_diagnostics_fresh_stale_negative_missing_invalid_and_bulk(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, job_id="job")
+    job = {
+        "id": "job",
+        "pid": claim["pid"],
+        "claim_id": claim["claim_id"],
+    }
+    view = {"claim": claim}
+    heartbeat = _write_heartbeat(jobs, claim, job_id="job", mtime=100)
+
+    fresh = server._read_carto_heartbeat_diagnostic(
+        base_dir=jobs,
+        job=job,
+        job_type="CARTO_REFRESH",
+        detached=True,
+        liveness_view=view,
+        now_epoch=101,
+    )
+    assert fresh["state"] == "fresh"
+    assert fresh["pid"] == claim["pid"]
+    assert fresh["claim_id"] == claim["claim_id"]
+    assert fresh["age_seconds"] == 1
+
+    stale = server._read_carto_heartbeat_diagnostic(
+        base_dir=jobs,
+        job=job,
+        job_type="CARTO_REFRESH",
+        detached=True,
+        liveness_view=view,
+        now_epoch=120,
+    )
+    assert stale["state"] == "stale"
+    assert stale["age_seconds"] == 20
+
+    negative = server._read_carto_heartbeat_diagnostic(
+        base_dir=jobs,
+        job=job,
+        job_type="CARTO_REFRESH",
+        detached=True,
+        liveness_view=view,
+        now_epoch=90,
+    )
+    assert negative["age_seconds"] == 0
+
+    heartbeat.unlink()
+    missing = server._read_carto_heartbeat_diagnostic(
+        base_dir=jobs,
+        job=job,
+        job_type="CARTO_REFRESH",
+        detached=True,
+        liveness_view=view,
+        now_epoch=120,
+    )
+    assert missing == {
+        "applicable": True,
+        "exists": False,
+        "state": "missing",
+        "pid": None,
+        "claim_id": None,
+        "mtime": None,
+        "age_seconds": None,
+    }
+
+    heartbeat.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat.write_text("{", encoding="utf-8")
+    invalid = server._read_carto_heartbeat_diagnostic(
+        base_dir=jobs,
+        job=job,
+        job_type="CARTO_REFRESH",
+        detached=True,
+        liveness_view=view,
+        now_epoch=120,
+    )
+    assert invalid["state"] == "invalid"
+
+    bulk = server._read_carto_heartbeat_diagnostic(
+        base_dir=jobs,
+        job={"id": "bulk"},
+        job_type="CARTO_BULK_APPLY",
+        detached=False,
+        liveness_view={},
+        now_epoch=120,
+    )
+    assert bulk["applicable"] is False
+    assert bulk["state"] == "missing"
+
+
+def test_identity_mismatch_is_diagnostic_only_and_does_not_repair_claim(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, job_id="job")
+    job = {"id": "job", "pid": claim["pid"], "claim_id": claim["claim_id"]}
+    path = gov.governance_paths(jobs).heartbeats_dir / "job.json"
+    gov.atomic_write_json(
+        path,
+        {"pid": claim["pid"] + 1, "job_id": "job", "claim_id": "wrong"},
+    )
+    before = dict(claim)
+    diagnostic = server._read_carto_heartbeat_diagnostic(
+        base_dir=jobs,
+        job=job,
+        job_type="CARTO_REFRESH",
+        detached=True,
+        liveness_view={"claim": claim, "status": "running"},
+    )
+    assert diagnostic["state"] == "invalid"
+    assert diagnostic["identity_mismatch"] is True
+    assert claim == before
+
+
+def test_fresh_dead_and_stale_live_heartbeat_never_override_pid_liveness(tmp_path):
+    dead_jobs = tmp_path / "dead-jobs"
+    dead_claim = _claim(tmp_path, job_id="dead", pid=99_999_998, pid_create_time=1)
+    gov.write_claim(dead_claim, dead_jobs)
+    _write_job(dead_jobs, dead_claim, job_id="dead")
+    _write_heartbeat(dead_jobs, dead_claim, job_id="dead", mtime=time.time())
+    dead_view = server._scan_carto_job_files(str(dead_jobs))[0]
+    assert dead_view["status"] == "failed"
+    assert dead_view["heartbeat"]["state"] == "fresh"
+
+    live_jobs = tmp_path / "live-jobs"
+    live_claim = _claim(tmp_path, job_id="live")
+    gov.write_claim(live_claim, live_jobs)
+    _write_job(live_jobs, live_claim, job_id="live")
+    _write_heartbeat(live_jobs, live_claim, job_id="live", mtime=1)
+    live_view = server._scan_carto_job_files(str(live_jobs))[0]
+    assert live_view["status"] == "running"
+    assert live_view["heartbeat"]["state"] == "stale"
+
+
+def test_missing_and_unknown_liveness_remain_backward_compatible(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    _write_job(jobs, None, job_id="legacy", job_type="CARTO_REFRESH")
+    scanned = server._scan_carto_job_files(str(jobs))[0]
+    assert scanned["heartbeat"]["state"] == "missing"
+
+    monkeypatch.setattr(
+        server,
+        "inspect_carto_job_liveness",
+        lambda *_args, **_kwargs: {
+            "status": "running",
+            "error": None,
+            "owner_pid": 123,
+            "liveness": "unknown",
+            "claim": None,
+        },
+    )
+    scanned = server._scan_carto_job_files(str(jobs))[0]
+    assert scanned["status"] == "running"
+    assert scanned["heartbeat"]["state"] == "missing"
+
+
+def test_terminal_heartbeat_visible_until_existing_cleanup_and_orphan_grace(tmp_path):
+    jobs = tmp_path / "jobs"
+    terminal_claim = _claim(tmp_path, job_id="terminal")
+    terminal_job = _write_job(jobs, terminal_claim, job_id="terminal", status="completed")
+    heartbeat = _write_heartbeat(jobs, terminal_claim, job_id="terminal", mtime=time.time())
+
+    # Simulate normal claim finalization while retaining the last diagnostic mtime.
+    gov.write_claim(terminal_claim, jobs)
+    assert gov.finalize_claim(terminal_claim["claim_id"], jobs)
+    scanned = server._scan_carto_job_files(str(jobs))[0]
+    assert scanned["heartbeat"]["exists"] is True
+    gov.cleanup_carto_auxiliary_artifacts(jobs)
+    assert terminal_job.exists()
+    assert not heartbeat.exists()
+
+    orphan = gov.governance_paths(jobs).heartbeats_dir / "orphan.json"
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_text("{}", encoding="utf-8")
+    os.utime(orphan, (100, 100))
+    gov.cleanup_carto_auxiliary_artifacts(jobs, now_epoch=105, orphan_grace_seconds=10)
+    assert orphan.exists()
+    gov.cleanup_carto_auxiliary_artifacts(jobs, now_epoch=111, orphan_grace_seconds=10)
+    assert not orphan.exists()
+
+
+def test_heartbeat_never_enters_admission_liveness_cancel_or_status_authorities():
+    for function in (
+        gov.admit_carto_job_locked,
+        gov.inspect_carto_job_liveness,
+        gov.cancel_carto_job,
+        gov.finalize_claim_locked,
+    ):
+        assert "heartbeat" not in inspect.getsource(function).lower()
+    assert "heartbeat" not in inspect.getsource(gov.classify_owner_liveness).lower()
+    controller_source = inspect.getsource(weave_worker.CartoHeartbeatController)
+    assert "os_lock" not in controller_source
+    assert "admission" not in controller_source
+    assert "write_governor" not in controller_source
+    diagnostic_source = inspect.getsource(server._read_carto_heartbeat_diagnostic)
+    assert '["status"] =' not in diagnostic_source
+    assert "merge_write_carto_job_status" not in diagnostic_source

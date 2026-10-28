@@ -1,0 +1,133 @@
+# Beacon batch partial success — narrow policy addendum
+
+## Decision and scope
+
+`beacon.tags.ensure` and `beacon.tags.remove` now continue past ordinary
+item-level resolution and returned preflight failures. Their legacy Lightning
+Rod modes inherit the same behavior through `_lightning_rod_mutate_beacons`.
+
+This supersedes only the older Q3/SPEC-v5 policy that an ordinary failed item
+vetoes every other item before writing. The batch already supported partial
+success for JIT/write failures; this extends that existing result contract to
+earlier domain failures. No new parameter, mode, or response field is added.
+
+**Explicit boundary agreed with Dan:** do not change the governor, coherence
+migration, lease substrate, or the batch's lease acquisition/lifetime/cleanup.
+This policy change can be included in the later coherence-system audit; it is
+not a claim that the in-progress mutation/coherence integration is complete.
+
+## Item-local outcomes
+
+- An unresolved, ambiguous, or out-of-scope symbol keeps its error/candidate row
+  and is never written. Other eligible items proceed.
+- A returned preflight `outcome="failure"` (for example an invalid anchor,
+  beacon identity conflict, or unsupported target) keeps its error row and is
+  never sent to JIT planning or the writer. A conflicting beacon comment is
+  NOT one of these failures (see Comment conflicts below).
+- Preflight noops still skip writing. JIT failures/noops and commit failures
+  retain their established per-item behavior.
+- Successful items keep input order and are JIT-replanned against the current
+  file, including prior same-batch writes. CAS and per-write atomicity remain.
+
+## Comment conflicts (2R4E1P)
+
+A different existing beacon comment is a WARNING, never an error, and never a
+preflight failure. Under the default `comment_mode: fill` the requested
+comment is not applied, the existing comment is kept, and the labels are still
+ensured: the row carries `comment_outcome: "kept_existing_conflict"` plus a
+`warning` naming both texts (existing vs requested), whatever its status
+(committed or noop). The batch result reports kept conflicts in its top-level
+`warnings` list and `detail.summary.comment_conflicts_kept`. The public
+acknowledgement lifts the same list to its `warnings`. Re-running with
+`comment_mode: replace` (explicit overwrite) or `comment_mode: append`
+(extend) applies the requested text through the same pipeline; a comment-only
+edit is `tags.ensure` with the label already present plus `replace`/`append`.
+`tags.remove` accepts no comment or comment_mode.
+
+## Batch-global refusals remain
+
+Malformed requests, invalid root scope, required cache/resolver failure,
+unexpected **raised** preflight exceptions, duplicate-resolved UUIDs, and
+disk-target collisions retain their existing batch-wide refusal behavior.
+Raised preflight exceptions are deliberately not treated as ordinary returned
+planner rejections: they may represent cache/infrastructure failures.
+
+The existing lease call remains **one atomic acquisition over all eligible
+file footprints** after preflight, with same-file deduplication. Any lease
+refusal still prevents every eligible write. There is no per-file admission
+loop, no fallback without a lease, no extra retry, and no relaxation of global
+governance/coherence checks. Acquisition, release, cancellation, and cleanup
+code are unchanged. This remains an in-request disk batch, not a new detached
+job; it performs no Workflowy mutation, cache patch, or automatic map refresh.
+
+## The atomic opt-in ([ap:LPC157] residue)
+
+`atomic: true` (batch-level, `beacon.tags.ensure` and `beacon.tags.remove`;
+default `false`) restores the old strict all-or-nothing gate for callers who
+want it: when ANY item fails preflight (unresolved/ambiguous symbol, returned
+planner rejection, disk-target collision), every other row becomes
+`not_run_due_to_batch_preflight_failure` with zero writes and no lease. The
+veto runs after Phase C and before lease acquisition; the failing item keeps
+its error row. A mid-batch commit failure is still reported per item — each
+write is individually CAS-atomic, and no batch rollback exists. The default
+(false) keeps the per-item partial-success behavior this document describes.
+
+## The one-line summary ([ap:LPC157] residue)
+
+The batch result carries a top-level `summary_line` (surfaced as
+`detail.summary_line` on the public acknowledgement), for example:
+`5 committed · 0 noop · 1 failed (sym: beacon_identity_conflict — <reason>)`.
+With exactly one failed item the parenthesized detail names its symbol,
+`error_kind`, and a bounded reason; with several it lists the distinct
+failure kinds. `detail.summary` keeps the counts.
+
+`beacon_identity_conflict` errors name their deterministic remedy: run ONE
+`beacon.map.refresh` (F12+1) over the containing file to resync the disk
+anchors and the map, then retry the item.
+
+## Reading the existing result
+
+The public acknowledgement keeps the full ledger under `detail`:
+
+- `success=true` only when every row is committed or noop.
+- `changed=true` when at least one operation committed, even if `success=false`.
+- `detail.partial_success=true` for mixed successful/failed item outcomes when
+  a batch-global refusal did not abort preflight.
+- A noop is a successful end-state, so noop + failure can be partial success
+  with `changed=false` and no writes.
+- `detail.summary` reports committed/noop/preflight-failure/commit-failure
+  counts; `detail.results` has one ordered row per normalized operation.
+- `detail.summary_line` condenses the ledger into one actable line.
+- `detail.files_changed` lists only committed files, deduplicated.
+
+Inspect the ledger rather than interpreting `success=false` as zero writes.
+Address the reported errors and retry failed/not-run items, not already
+committed/noop items. A global safety refusal still requires resolving that
+condition first; do not repeatedly re-fire against a live lease conflict.
+
+## Review and regression surface
+
+Behavior changes are confined to item-failure gating in
+`server._lightning_rod_mutate_beacons`, the comment-mode plumbing through
+`lightning_rod_mutation_spec` / `beacon_mutation_contract` /
+`_compute_beacon_write_plan`, and the comment defense-in-depth in
+`_execute_beacon_write_plan` (which now honours the plan's kept decision
+instead of re-refusing it). The client preflight method's reduction of a plan
+to its outcome dict is unchanged except that a noop outcome now also carries
+the plan's `comment_outcome`/`comment_warning` (the kept-conflict warning
+must reach the batch row). The [ap:LPC157] residue adds the `atomic` opt-in
+(normalizer → orchestrator veto before lease acquisition), the top-level
+`summary_line`, and the `beacon_identity_conflict` remedy sentence in
+`_compute_beacon_write_plan`. Registry text advertises the new policy. No other
+batch operation adopts it implicitly:
+`tag.batch`, merge/purge, node edits, F12 pipelines, and governance retain their
+own contracts.
+
+`tests/test_lightning_rod_mutation_modes.py` covers the 50-item/one-failure case,
+ensure/remove/final-label deletion, failure positions, complete ordered ledgers,
+same-file JIT sequencing, all-failure/noop cases, public acknowledgement,
+unexpected preflight exceptions, one multi-file lease refusal with zero writes,
+and cancellation cleanup. Existing duplicate/collision, JIT/CAS, dispatcher,
+and governance regressions remain part of validation. Lease-observer test
+doubles test caller sequencing only; they do not replace the governor's own
+unchanged safety tests.

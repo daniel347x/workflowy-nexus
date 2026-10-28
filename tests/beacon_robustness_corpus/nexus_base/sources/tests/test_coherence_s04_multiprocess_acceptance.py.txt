@@ -1,0 +1,898 @@
+"""S04 Remediation Chain 2 (work-order item 3) — the Family-5 acceptance
+matrix, genuinely multi-process AND deterministically rendezvoused
+(Round 2).
+
+Every actor below is a REAL live subprocess sharing one coherence root;
+synchronization is deterministic file/event barriers (sentinel files via
+the harness's ``launch_subprocess`` / ``wait_for_file`` / ``touch``) plus
+injected test seams (a durable-writer fsync pause, an acquisition-loop
+sleep ack), never probabilistic sleeps or polling margins as the
+load-bearing proof.  This file supersedes the S04-era evidence that read
+as "two real processes" while running one actor per ordering (the U/C
+reducer-order test) and in-process thread pairs (barrier-vs-append and
+concurrent-rotation) — those remain as honest sequential/in-process
+coverage in their own files; THIS file is the cross-process evidence.
+
+Round-2 strengthening (work-order item 3): every shared go signal is now
+gated by an explicit actor-ready rendezvous, and every contention claim is
+backed by a forced ordering, not process scheduling:
+
+1. barrier raiser vs journal appender — TWO DISTINCT COVERAGES:
+   (a) deterministic interleaving (retained, honestly relabeled in
+       Round 3): actor-ready rendezvous + a forced mid-run crossing that
+       HARD-PARKS both actors mid-run (the parent verifies both are
+       unfinished at the crossing), so the raiser's first barrier
+       provably lands between the appender's 2nd and 3rd append.  The
+       appender waits on go_app OUTSIDE the coherence mutex and the
+       barrier raiser completes s04_raise_barrier before releasing
+       go_app, so the two actors' coherence-lock acquisitions never
+       overlap — this is NOT mutex-contention evidence and proves
+       nothing about the cross-process mutex;
+   (b) GENUINE cross-process coherence-MUTEX contention (Round 3, work
+       order item 1): the appender is parked INSIDE the held coherence
+       mutex (an injected DurableFileOps write/fsync seam at append
+       #3's journal-record write — the record write runs under the
+       locked region in append_journal_transaction) while the barrier
+       raiser's lock acquisition spins on the busy mutex, acknowledged
+       by a test-only sleep hook on the mutex RETRY path
+       (acquire_os_lock sleeps only after a BUSY attempt — never a
+       pre-call "attempting" marker).  Before releasing the holder the
+       parent asserts: the holder still owns the contested operation,
+       the contender acknowledged the busy acquisition path, and the
+       contender has not completed;
+2. two checkpoint requesters: actor-ready rendezvous; the winning owner is
+   paused AFTER claim acquisition (inside the candidate write, claim
+   held); the loser provably attempts while THAT fixed claim is active —
+   its dedupe disposition (reachable ONLY under an active covering
+   checkpoint claim) plus the still-active winner-owned claim at that
+   moment are the proof;
+3. checkpoint-first vs full refresh: the checkpoint is released only after
+   the refresh actor's injected sleep seam acknowledges it OBSERVED the
+   active checkpoint claim and entered the contended acquisition path
+   (never merely a pre-call launched marker), with the fixed claim
+   verified still active and winner-owned at the release instant;
+4. full-refresh-first vs checkpoint: already rendezvous-forced in Round 1
+   (the checkpoint defer actor launches only after the refresh holds the
+   claim, and its defer disposition is reachable only under an active
+   non-checkpoint claim) — unchanged;
+5. U and C as separate process actors, each publishing only its own
+   transaction: publication orders were already fully forced by
+   go/done sentinels in Round 1 — unchanged; replay / checkpoint / reload
+   in the parent (a third actor) with the same three oracles.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from pathlib import Path
+
+from coherence_harness import (
+    ACCOUNT_A,
+    assert_semantic_cache_equal,
+    launch_subprocess,
+    make_coherence_root,
+    s02_node,
+    s04_append_n,
+    s04_checkpoint_config,
+    s04_install_base_manifest,
+    s04_write_base_snapshot,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp.coherence import (
+    materialize_current_payload,
+    parse_journal_record_filename,
+    read_manifest,
+    read_refresh_claim,
+    run_checkpoint_rotation,
+)
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def _journal_sequences(paths) -> list[int]:
+    if not paths.journal_dir.exists():
+        return []
+    return sorted(
+        seq
+        for entry in paths.journal_dir.iterdir()
+        if (seq := parse_journal_record_filename(entry.name)) is not None
+    )
+
+
+def _based_root(root: Path, *, nodes: list[dict] | None = None, records: int = 3):
+    paths = make_coherence_root(root, ACCOUNT_A)
+    snapshot_dir = root / "nodes_export_cache"
+    base = s04_write_base_snapshot(
+        paths,
+        snapshot_dir,
+        nodes or [s02_node("base")],
+        epoch_number=0,
+        epoch_id="b" * 32,
+    )
+    s04_install_base_manifest(paths, base_snapshot_path=base, epoch_id="b" * 32)
+    if records:
+        s04_append_n(paths, records)
+    return paths, snapshot_dir
+
+
+# ---------------------------------------------------------------------------
+# 1. Barrier raiser + journal appender as separate live subprocesses —
+#    (a) deterministic INTERLEAVING coverage (retained from Round 2,
+#        honestly relabeled — NOT mutex-contention evidence);
+#    (b) GENUINE cross-process coherence-MUTEX contention coverage
+#        (Round 3, work-order item 1).
+# ---------------------------------------------------------------------------
+
+_APPEND_ACTOR = r"""
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, s04_append_n, touch, wait_for_file
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+touch(root / "ready_appender")
+assert wait_for_file(root / "go", timeout=60)
+# Two appends, then HARD-PARK at the mid-run crossing: the barrier raiser's
+# first raise provably lands while THIS actor is live and mid-run.
+s04_append_n(paths, 2)
+touch(root / "app_mid")
+assert wait_for_file(root / "go_app", timeout=60)
+s04_append_n(paths, 3)
+touch(root / "append_done")
+print("appended")
+"""
+
+_BARRIER_ACTOR = r"""
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, s04_raise_barrier, touch, wait_for_file
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+touch(root / "ready_raiser")
+assert wait_for_file(root / "go", timeout=60)
+# HARD-PARK at the same crossing until the appender is provably mid-run.
+assert wait_for_file(root / "app_mid", timeout=60)
+touch(root / "raise_ready")
+assert wait_for_file(root / "go_raise", timeout=60)
+s04_raise_barrier(paths, transaction_id="tx-actor-0")
+touch(root / "go_app")
+s04_raise_barrier(paths, transaction_id="tx-actor-1")
+s04_raise_barrier(paths, transaction_id="tx-actor-2")
+touch(root / "barrier_done")
+print("barriers raised")
+"""
+
+
+def test_barrier_raiser_and_journal_appender_deterministic_interleaving(tmp_path):
+    """Two REAL processes — one appending journal records, one raising
+    barriers — driven into a DETERMINISTIC INTERLEAVING on ONE coherence
+    root: an actor-ready rendezvous gates the shared go signal, then a
+    forced mid-run crossing HARD-PARKS both actors mid-run (the parent
+    verifies both are unfinished at the crossing), so the raiser's first
+    barrier provably lands between the appender's 2nd and 3rd append.
+    HONEST SCOPE (Round 3): this is deterministic INTERLEAVING coverage,
+    NOT mutex-contention evidence — the appender waits on go_app OUTSIDE
+    the coherence mutex and the raiser completes s04_raise_barrier before
+    releasing go_app, so the two actors' coherence-lock acquisitions
+    never overlap; a broken cross-process mutex could pass this test.
+    It is retained as useful artifact-serialization coverage: the
+    cross-process mutex serializes every artifact, the journal tail is
+    complete and contiguous, distinct barrier events produce strictly
+    increasing generations, and no valid append clears or masks the
+    barrier (§11.2).  The GENUINE mutex-contention evidence is
+    test_barrier_raiser_and_journal_appender_genuine_mutex_contention."""
+
+    root = tmp_path / "share"
+    paths = make_coherence_root(root, ACCOUNT_A)
+    appender = launch_subprocess(_APPEND_ACTOR, str(root), str(REPO))
+    raiser = launch_subprocess(_BARRIER_ACTOR, str(root), str(REPO))
+    # Actor-ready rendezvous: BOTH actors must signal ready before the
+    # shared go signal is released.
+    assert wait_for_file(root / "ready_appender", timeout=60), "appender never ready"
+    assert wait_for_file(root / "ready_raiser", timeout=60), "raiser never ready"
+    touch(root / "go")
+    # The forced mid-run crossing: the appender signals mid-run; the raiser
+    # then signals it is parked at the crossing too.  Both actors are
+    # provably LIVE and UNFINISHED at this moment (both hard-parked on
+    # sentinels the other side has not released).
+    assert wait_for_file(root / "app_mid", timeout=60), "appender never reached mid-run"
+    assert wait_for_file(root / "raise_ready", timeout=60), "raiser never reached the crossing"
+    assert not (root / "append_done").exists()
+    assert not (root / "barrier_done").exists()
+    # Release the raiser: barrier-0 lands while the appender is still
+    # parked; go_app then releases the appender and the remainder races.
+    touch(root / "go_raise")
+    out_a, err_a = appender.communicate(timeout=120)
+    out_b, err_b = raiser.communicate(timeout=120)
+    assert appender.returncode == 0, f"appender failed:\n{err_a}"
+    assert raiser.returncode == 0, f"raiser failed:\n{err_b}"
+    manifest = read_manifest(paths, required=True)
+    assert manifest.journal_head_seq == 5
+    assert _journal_sequences(paths) == [1, 2, 3, 4, 5]
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.generation == 3
+
+
+# ---------------------------------------------------------------------------
+# 1b. GENUINE mutex contention — the appender parked INSIDE the held
+#     coherence mutex while the barrier raiser acknowledges the busy
+#     acquisition/retry path (Round 3, work-order item 1)
+# ---------------------------------------------------------------------------
+
+_HOLDING_APPEND_ACTOR = r"""
+import os
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, s04_append, s04_append_n, touch, wait_for_file
+from workflowy_mcp.carto_job_governance import (
+    _default_mkdir,
+    _default_replace,
+    _default_tmp_name,
+    _default_unlink,
+    _default_write_fsync,
+)
+from workflowy_mcp.coherence import DurableFileOps, SemanticEffect
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+
+_parked = {"done": False}
+
+
+def write_fsync(path, text):
+    # HOLDER SEAM (the load-bearing proof): append #3's journal-record
+    # write fires UNDER the held coherence mutex (append_journal_transaction
+    # writes the record inside the locked region).  Park INSIDE it: this
+    # actor provably OWNS the coherence mutex while paused here — paused
+    # only AFTER acquiring the mutex and while still owning it.
+    if not _parked["done"] and path.parent.name == "journal":
+        _parked["done"] = True
+        touch(root / "holder_parked", str(os.getpid()))
+        assert wait_for_file(root / "release_holder", timeout=90)
+    _default_write_fsync(path, text)
+
+
+fs_ops = DurableFileOps(
+    write_fsync=write_fsync,
+    replace=_default_replace,
+    mkdir=_default_mkdir,
+    unlink=_default_unlink,
+    tmp_name=_default_tmp_name,
+)
+touch(root / "ready_appender")
+assert wait_for_file(root / "go", timeout=60)
+s04_append_n(paths, 2)  # appends 1-2, uncontended
+# Append 3 parks INSIDE the held coherence mutex at its record write.
+s04_append(paths, effects=[SemanticEffect.tombstone(["s04-holder-park"])], fs_ops=fs_ops)
+s04_append_n(paths, 2)  # appends 4-5 after the release
+touch(root / "append_done")
+print("appended")
+"""
+
+_CONTENDING_BARRIER_ACTOR = r"""
+import json
+import sys
+import time as _time
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, s04_raise_barrier, touch, wait_for_file
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+
+_real_sleep = _time.sleep
+_acked = {"done": False}
+
+
+def ack_sleep(seconds):
+    # CONTENTION ACK (test-only, from the mutex RETRY path): after the
+    # patch point below, the FIRST sleep in this process is reachable
+    # ONLY from acquire_os_lock's busy-retry branch (it sleeps exactly
+    # there, after a BUSY lock attempt) — the raise path performs no
+    # other sleep.  Firing therefore proves this actor OBSERVED the busy
+    # coherence mutex and ENTERED the contended acquisition/retry path.
+    # A pre-call "attempting" marker would prove nothing (work order).
+    if not _acked["done"]:
+        _acked["done"] = True
+        touch(root / "contender_contending", repr(seconds))
+    _real_sleep(seconds)
+
+
+touch(root / "ready_raiser")
+assert wait_for_file(root / "go", timeout=60)
+# Begin the raise only once the holder is PROVABLY parked inside the held
+# mutex — the first acquisition attempt is then guaranteed busy.
+assert wait_for_file(root / "holder_parked", timeout=90)
+_time.sleep = ack_sleep
+try:
+    result = s04_raise_barrier(paths, transaction_id="tx-contender")
+finally:
+    _time.sleep = _real_sleep
+touch(root / "raise_done")
+print(json.dumps({"generation": result.state.generation, "disposition": result.disposition}))
+"""
+
+
+def test_barrier_raiser_and_journal_appender_genuine_mutex_contention(tmp_path):
+    """Two REAL processes — one appending journal records, one raising
+    barriers — forced into GENUINE cross-process coherence-MUTEX
+    contention on ONE coherence root (Round 3, work-order item 1).  The
+    appender (HOLDER) is paused ONLY AFTER acquiring the coherence mutex
+    and WHILE it still owns it: an injected DurableFileOps write/fsync
+    seam at append #3's journal-record write (the record write runs
+    under the locked region in append_journal_transaction).  The barrier
+    raiser (CONTENDER) launches its raise only after the holder is
+    parked, so its first lock attempt is guaranteed busy; a test-only
+    sleep hook on the mutex RETRY path (acquire_os_lock sleeps only
+    after a BUSY attempt) acknowledges its entry into the contended
+    acquisition path.  BEFORE releasing the holder the parent asserts:
+    the holder still owns the contested operation (parked inside the
+    seam, mid-append), the contender acknowledged the busy path, and
+    NEITHER actor has completed.  After the release both must finish
+    successfully, and the final state must show no lost append, no
+    masked barrier, and no torn or missing committed record: journal
+    head 5 with a contiguous 1..5 range, and the contender's barrier
+    durable at generation 1."""
+
+    root = tmp_path / "share"
+    paths = make_coherence_root(root, ACCOUNT_A)
+    appender = launch_subprocess(_HOLDING_APPEND_ACTOR, str(root), str(REPO))
+    raiser = launch_subprocess(_CONTENDING_BARRIER_ACTOR, str(root), str(REPO))
+    # Actor-ready rendezvous before the shared go signal.
+    assert wait_for_file(root / "ready_appender", timeout=60), "appender never ready"
+    assert wait_for_file(root / "ready_raiser", timeout=60), "raiser never ready"
+    touch(root / "go")
+    # The HOLDER parks INSIDE the held coherence mutex (mid-append-3).
+    assert wait_for_file(root / "holder_parked", timeout=90), (
+        "holder never parked inside the held coherence mutex"
+    )
+    # The CONTENDER must acknowledge the busy acquisition/retry path
+    # BEFORE the holder is released.
+    assert wait_for_file(root / "contender_contending", timeout=60), (
+        "contender never acknowledged the contended acquisition path "
+        "(no busy-mutex retry observed)"
+    )
+    # PRE-RELEASE ASSERTIONS (work-order item 1): the holder still owns
+    # the contested operation (it is parked inside the seam and cannot
+    # proceed without the release), the contender has acknowledged the
+    # busy acquisition path (above), and NEITHER actor has completed.
+    assert not (root / "append_done").exists()
+    assert not (root / "raise_done").exists()
+    # Release the holder: the record write lands, the mutex frees, the
+    # contender's retry acquires it, and both actors finish.
+    touch(root / "release_holder")
+    out_a, err_a = appender.communicate(timeout=120)
+    out_b, err_b = raiser.communicate(timeout=120)
+    assert appender.returncode == 0, f"appender failed:\n{err_a}"
+    assert raiser.returncode == 0, f"raiser failed:\n{err_b}"
+    r_raise = json.loads(out_b.strip().splitlines()[-1])
+    assert r_raise == {"generation": 1, "disposition": "raised"}, r_raise
+    manifest = read_manifest(paths, required=True)
+    assert manifest.journal_head_seq == 5
+    assert _journal_sequences(paths) == [1, 2, 3, 4, 5]
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.generation == 1
+    assert manifest.dirty_status.transaction_id == "tx-contender"
+
+
+# ---------------------------------------------------------------------------
+# 2. Two checkpoint requesters as separate live subprocesses
+# ---------------------------------------------------------------------------
+
+_CHECKPOINT_RACER = r"""
+import asyncio
+import json
+import os
+import sys
+sys.path.insert(0, sys.argv[3] + "/tests")
+from pathlib import Path
+from coherence_harness import (
+    ACCOUNT_A,
+    make_coherence_root,
+    s04_checkpoint_config,
+    touch,
+    wait_for_file,
+)
+from workflowy_mcp.carto_job_governance import (
+    _default_mkdir,
+    _default_replace,
+    _default_tmp_name,
+    _default_unlink,
+    _default_write_fsync,
+)
+from workflowy_mcp.coherence import DurableFileOps, run_checkpoint_rotation
+
+root = Path(sys.argv[1])
+name = sys.argv[2]
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+
+
+def write_fsync(path, text):
+    # The WINNING owner pauses mid-rotation while holding the fixed
+    # checkpoint claim (the candidate snapshot write): signal held, then
+    # await the release.  Only the claim owner ever reaches this write.
+    if path.parent.name != "journal" and "nodes_export_snapshot" in path.name:
+        touch(root / f"ck_holding_{name}", str(os.getpid()))
+        assert wait_for_file(root / "release_ck", timeout=90)
+    _default_write_fsync(path, text)
+
+
+fs_ops = DurableFileOps(
+    write_fsync=write_fsync,
+    replace=_default_replace,
+    mkdir=_default_mkdir,
+    unlink=_default_unlink,
+    tmp_name=_default_tmp_name,
+)
+touch(root / f"ready_{name}")
+assert wait_for_file(root / "go", timeout=60)
+result = asyncio.run(
+    run_checkpoint_rotation(
+        paths,
+        snapshot_dir=root / "nodes_export_cache",
+        config=s04_checkpoint_config(record_threshold=2),
+        fs_ops=fs_ops,
+    )
+)
+touch(root / f"result_{name}", json.dumps({"status": result.status}))
+print(json.dumps({"status": result.status}))
+"""
+
+
+def test_two_checkpoint_requesters_as_separate_subprocesses(tmp_path):
+    """Two REAL checkpoint requesters race on the ONE fixed
+    RefreshPublicationClaim — strengthened (Round 2, item 3): an explicit
+    actor-ready rendezvous gates the go signal; the WINNING owner is paused
+    after claim acquisition (inside the candidate write, claim held); the
+    LOSER provably attempts acquisition while THAT fixed claim is active —
+    its dedupe disposition (reachable ONLY under an active covering
+    checkpoint claim) plus the still-active winner-owned claim at that
+    moment are the deterministic contention proof.  Exactly one epoch
+    publication results."""
+
+    root = tmp_path / "share"
+    paths, _sd = _based_root(root, records=3)
+    first = launch_subprocess(_CHECKPOINT_RACER, str(root), "A", str(REPO))
+    second = launch_subprocess(_CHECKPOINT_RACER, str(root), "B", str(REPO))
+    # Actor-ready rendezvous before the shared go signal.
+    assert wait_for_file(root / "ready_A", timeout=60), "racer A never ready"
+    assert wait_for_file(root / "ready_B", timeout=60), "racer B never ready"
+    touch(root / "go")
+    # Whichever actor wins the claim pauses holding it mid-rotation — poll
+    # BOTH sentinels under one shared deadline (a sequential per-name wait
+    # would burn the whole budget when the second name wins).
+    winner = None
+    deadline = time.monotonic() + 90
+    while winner is None and time.monotonic() < deadline:
+        for name in ("A", "B"):
+            if (root / f"ck_holding_{name}").exists():
+                winner = name
+                break
+        if winner is None:
+            time.sleep(0.05)
+    assert winner is not None, "neither requester acquired the checkpoint claim"
+    loser = "B" if winner == "A" else "A"
+    # The LOSER must complete its acquisition attempt while the fixed claim
+    # is active.  The dedupe disposition is reachable ONLY under an active
+    # covering checkpoint claim — the deterministic proof of contention.
+    assert wait_for_file(root / f"result_{loser}", timeout=60), "loser never attempted"
+    loser_result = json.loads((root / f"result_{loser}").read_text())
+    assert loser_result == {"status": "deferred_publisher_busy"}, loser_result
+    # … and the winner's fixed claim is STILL active at that moment (the
+    # loser attempted while THAT claim was held), owned by the winner
+    # actor's real interpreter pid (the venv python.exe is a launcher shim
+    # on this machine, so Popen.pid is the shim, not the interpreter).
+    claim = read_refresh_claim(paths)
+    assert claim is not None and not claim.is_terminal
+    assert claim.refresh_kind == "checkpoint"
+    winner_pid = int((root / f"ck_holding_{winner}").read_text().strip())
+    assert claim.owner_pid == winner_pid
+    touch(root / "release_ck")
+    out1, err1 = first.communicate(timeout=180)
+    out2, err2 = second.communicate(timeout=180)
+    assert first.returncode == 0, f"racer A failed:\n{err1}"
+    assert second.returncode == 0, f"racer B failed:\n{err2}"
+    winner_out = out1 if winner == "A" else out2
+    r_winner = json.loads(winner_out.strip().splitlines()[-1])
+    assert r_winner == {"status": "published"}, r_winner
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 1  # the epoch advanced EXACTLY once
+    assert manifest.base_incorporated_through_seq == 3
+
+
+# ---------------------------------------------------------------------------
+# 3. Checkpoint publisher vs full-refresh publisher — both claim-first orders
+# ---------------------------------------------------------------------------
+
+_CHECKPOINT_HOLDER = r"""
+import asyncio
+import json
+import os
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import (
+    ACCOUNT_A,
+    make_coherence_root,
+    s04_checkpoint_config,
+    touch,
+    wait_for_file,
+)
+from workflowy_mcp.carto_job_governance import (
+    _default_mkdir,
+    _default_replace,
+    _default_tmp_name,
+    _default_unlink,
+    _default_write_fsync,
+)
+from workflowy_mcp.coherence import DurableFileOps, run_checkpoint_rotation
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+
+
+def write_fsync(path, text):
+    # Pause INSIDE the rotation while holding the checkpoint claim (the
+    # candidate snapshot write): signal held (with this actor's real
+    # interpreter pid — the venv python.exe is a launcher shim), then
+    # await the release.
+    if path.parent.name != "journal" and "nodes_export_snapshot" in path.name:
+        touch(root / "ck_holding", str(os.getpid()))
+        assert wait_for_file(root / "release_ck", timeout=60)
+    _default_write_fsync(path, text)
+
+
+fs_ops = DurableFileOps(
+    write_fsync=write_fsync,
+    replace=_default_replace,
+    mkdir=_default_mkdir,
+    unlink=_default_unlink,
+    tmp_name=_default_tmp_name,
+)
+result = asyncio.run(
+    run_checkpoint_rotation(
+        paths,
+        snapshot_dir=root / "nodes_export_cache",
+        config=s04_checkpoint_config(record_threshold=2),
+        fs_ops=fs_ops,
+    )
+)
+print(json.dumps({"status": result.status, "incorporated": result.incorporated_through_seq}))
+"""
+
+_FULL_REFRESH_ACTOR = r"""
+import asyncio
+import json
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import (
+    ACCOUNT_A,
+    make_coherence_root,
+    s02_fetch,
+    s02_make_export,
+    s02_node,
+    touch,
+)
+from workflowy_mcp.coherence import run_full_refresh
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+
+_contended = {"signaled": False}
+
+
+async def ack_sleep(seconds):
+    # The first acquisition-loop POLL sleep (seconds > 0 — never the
+    # post-acquisition settle sleep, which is 0.0 here) is the
+    # deterministic acknowledgement: it fires only because this actor
+    # observed the ACTIVE checkpoint claim and entered the contended
+    # acquisition path (it could neither acquire nor join).  A pre-call
+    # "launched" marker proves nothing about contention; this injected
+    # sleep seam does (Round 2, item 3).
+    if seconds > 0 and not _contended["signaled"]:
+        _contended["signaled"] = True
+        touch(root / "fr_contending")
+    await asyncio.sleep(seconds)
+
+
+outcome = asyncio.run(
+    run_full_refresh(
+        paths=paths,
+        fetch=s02_fetch(s02_make_export([s02_node("fr-node")])),
+        refresh_kind="system",
+        settle_seconds=0,
+        snapshot_dir=root / "nodes_export_cache",
+        sleep=ack_sleep,
+        poll_seconds=0.05,
+        max_wait_seconds=60,
+    )
+)
+print(json.dumps({"status": outcome.status, "epoch_number": outcome.epoch_number}))
+"""
+
+
+def test_checkpoint_first_full_refresh_waits_and_publishes_after(tmp_path):
+    """Claim-first ordering A: the CHECKPOINT publisher wins the fixed
+    claim; the full-refresh publisher (a second REAL subprocess) cannot
+    publish concurrently — it waits through the claim lifecycle and
+    publishes only after the checkpoint's epoch is durable.  Strengthened
+    (Round 2, item 3): the checkpoint is NOT released merely because the
+    refresh actor launched — the parent requires the injected-sleep-seam
+    acknowledgement that the refresh OBSERVED the active checkpoint claim
+    and entered the contended acquisition path, and verifies the fixed
+    claim is still active (and winner-owned) at the release instant."""
+
+    root = tmp_path / "share"
+    paths, _sd = _based_root(root, records=3)
+    ck = launch_subprocess(_CHECKPOINT_HOLDER, str(root), str(REPO))
+    assert wait_for_file(root / "ck_holding", timeout=90), "checkpoint never held the claim"
+    fr = launch_subprocess(_FULL_REFRESH_ACTOR, str(root), str(REPO))
+    # The deterministic acknowledgement (Round 2, item 3): the refresh must
+    # have reached/observed the ACTIVE checkpoint claim (entered the
+    # contended acquisition path) BEFORE the checkpoint is released.
+    assert wait_for_file(root / "fr_contending", timeout=60), (
+        "full refresh never entered the contended acquisition path"
+    )
+    claim = read_refresh_claim(paths)
+    assert claim is not None and not claim.is_terminal
+    assert claim.refresh_kind == "checkpoint"
+    assert claim.owner_pid == int((root / "ck_holding").read_text().strip())
+    touch(root / "release_ck")
+    out_ck, err_ck = ck.communicate(timeout=180)
+    out_fr, err_fr = fr.communicate(timeout=180)
+    assert ck.returncode == 0, f"checkpoint holder failed:\n{err_ck}"
+    assert fr.returncode == 0, f"full-refresh actor failed:\n{err_fr}"
+    r_ck = json.loads(out_ck.strip().splitlines()[-1])
+    r_fr = json.loads(out_fr.strip().splitlines()[-1])
+    assert r_ck["status"] == "published", r_ck
+    assert r_ck["incorporated"] == 3
+    # Serialization proof: the full refresh published ONLY after the
+    # checkpoint — the checkpoint's E+1, then the refresh's E+2.
+    assert r_fr == {"status": "published", "epoch_number": 2}
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 2
+
+
+_FULL_REFRESH_HOLDER = r"""
+import asyncio
+import json
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import (
+    ACCOUNT_A,
+    make_coherence_root,
+    s02_make_export,
+    s02_node,
+    touch,
+    wait_for_file,
+)
+from workflowy_mcp.coherence import run_full_refresh
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+
+
+async def _fetch():
+    # Pause INSIDE the refresh while holding the full-refresh claim.
+    touch(root / "fr_holding")
+    assert wait_for_file(root / "release_fr", timeout=60)
+    return s02_make_export([s02_node("fr-node")])
+
+
+outcome = asyncio.run(
+    run_full_refresh(
+        paths=paths,
+        fetch=_fetch,
+        refresh_kind="system",
+        settle_seconds=0,
+        snapshot_dir=root / "nodes_export_cache",
+        poll_seconds=0.05,
+        max_wait_seconds=60,
+    )
+)
+print(json.dumps({"status": outcome.status, "epoch_number": outcome.epoch_number}))
+"""
+
+_CHECKPOINT_DEFER_ACTOR = r"""
+import asyncio
+import json
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, s04_checkpoint_config, touch, wait_for_file
+from workflowy_mcp.coherence import run_checkpoint_rotation
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+assert wait_for_file(root / "fr_holding", timeout=60)
+result = asyncio.run(
+    run_checkpoint_rotation(
+        paths,
+        snapshot_dir=root / "nodes_export_cache",
+        config=s04_checkpoint_config(record_threshold=2),
+    )
+)
+touch(root / "ck_done")
+print(json.dumps({"status": result.status}))
+"""
+
+
+def test_full_refresh_first_checkpoint_defers_then_publishes_after(tmp_path):
+    """Claim-first ordering B: the FULL-REFRESH publisher wins the fixed
+    claim; the checkpoint requester (a second REAL subprocess) defers
+    WITHOUT waiting (defer-not-queue, §10.1), and a later checkpoint
+    publishes cleanly once the refresh's epoch is durable."""
+
+    root = tmp_path / "share"
+    paths, snapshot_dir = _based_root(root, records=3)
+    fr = launch_subprocess(_FULL_REFRESH_HOLDER, str(root), str(REPO))
+    assert wait_for_file(root / "fr_holding", timeout=90), "full refresh never held the claim"
+    ck = launch_subprocess(_CHECKPOINT_DEFER_ACTOR, str(root), str(REPO))
+    out_ck, err_ck = ck.communicate(timeout=120)
+    assert ck.returncode == 0, f"checkpoint defer actor failed:\n{err_ck}"
+    r_ck = json.loads(out_ck.strip().splitlines()[-1])
+    # Defer-not-queue: the checkpoint refuses to contend with the active
+    # full-refresh publisher and does NOT publish.
+    assert r_ck == {"status": "deferred_publisher_busy"}, r_ck
+    assert wait_for_file(root / "ck_done", timeout=30)
+    touch(root / "release_fr")
+    out_fr, err_fr = fr.communicate(timeout=180)
+    assert fr.returncode == 0, f"full-refresh holder failed:\n{err_fr}"
+    r_fr = json.loads(out_fr.strip().splitlines()[-1])
+    assert r_fr == {"status": "published", "epoch_number": 1}
+    # A later checkpoint over the post-refresh tail publishes E+2.
+    s04_append_n(paths, 2)
+    result = asyncio.run(
+        run_checkpoint_rotation(
+            paths,
+            snapshot_dir=snapshot_dir,
+            config=s04_checkpoint_config(record_threshold=2),
+        )
+    )
+    assert result.status == "published", result.warnings
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 2
+
+
+# ---------------------------------------------------------------------------
+# 4. U and C as separate process actors — forced orders, same three oracles
+# ---------------------------------------------------------------------------
+
+_U_ACTOR = r"""
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, s04_append, touch, wait_for_file
+from workflowy_mcp.coherence import SemanticEffect
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+assert wait_for_file(root / "go_U", timeout=60)
+s04_append(
+    paths,
+    operation_kind="update",
+    effects=[
+        SemanticEffect.node_fields(
+            "A", ["name", "note"], {"name": "A-updated", "note": "note-from-U"}
+        )
+    ],
+    transaction_id="tx-U",
+)
+touch(root / "U_done")
+print("U")
+"""
+
+_C_ACTOR = r"""
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, s02_node, s04_append, touch, wait_for_file
+from workflowy_mcp.coherence import SemanticEffect
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+assert wait_for_file(root / "go_C", timeout=60)
+s04_append(
+    paths,
+    operation_kind="create",
+    effects=[
+        SemanticEffect.node_create(
+            s02_node("C", name="C-created", parent_id="P", priority=150)
+        ),
+        SemanticEffect.child_order(
+            "P",
+            ["A", "C", "B"],
+            priority_by_id={"A": 100, "C": 150, "B": 200},
+            canonical_records={
+                "C": s02_node("C", name="C-created", parent_id="P", priority=150)
+            },
+        ),
+    ],
+    transaction_id="tx-C",
+)
+touch(root / "C_done")
+print("C")
+"""
+
+
+def _run_actor_order(tmp_path: Path, order: str, label: str) -> dict:
+    """Force one U/C publication order across TWO REAL actor subprocesses
+    (each publishes ONLY its own transaction), then replay / checkpoint /
+    reload in the parent process (a third actor)."""
+
+    root = tmp_path / label
+    root.mkdir()
+    nodes = [
+        s02_node("P", name="Parent", priority=100),
+        s02_node("A", name="A-original", parent_id="P", priority=100),
+        s02_node("B", name="B", parent_id="P", priority=200),
+    ]
+    paths, snapshot_dir = _based_root(root, nodes=nodes, records=0)
+    pu = launch_subprocess(_U_ACTOR, str(root), str(REPO))
+    pc = launch_subprocess(_C_ACTOR, str(root), str(REPO))
+    if order == "UC":
+        touch(root / "go_U")
+        assert wait_for_file(root / "U_done", timeout=60), "U actor never finished"
+        touch(root / "go_C")
+        assert wait_for_file(root / "C_done", timeout=60), "C actor never finished"
+    else:
+        touch(root / "go_C")
+        assert wait_for_file(root / "C_done", timeout=60), "C actor never finished"
+        touch(root / "go_U")
+        assert wait_for_file(root / "U_done", timeout=60), "U actor never finished"
+    _out_u, err_u = pu.communicate(timeout=120)
+    _out_c, err_c = pc.communicate(timeout=120)
+    assert pu.returncode == 0, f"U actor failed:\n{err_u}"
+    assert pc.returncode == 0, f"C actor failed:\n{err_c}"
+    manifest = read_manifest(paths, required=True)
+    assert manifest.journal_head_seq == 2  # exactly the two actor transactions
+    replayed = materialize_current_payload(paths, manifest).payload
+    rotation = asyncio.run(
+        run_checkpoint_rotation(
+            paths,
+            snapshot_dir=snapshot_dir,
+            config=s04_checkpoint_config(record_threshold=1),
+        )
+    )
+    assert rotation.status == "published", rotation.warnings
+    manifest = read_manifest(paths, required=True)
+    reloaded = materialize_current_payload(paths, manifest).payload
+    return {"replayed": replayed, "reloaded": reloaded}
+
+
+def test_update_and_create_actors_commute_in_forced_orders(tmp_path):
+    """U (exact-node UPDATE, owns A's name/note) and C (sibling CREATE +
+    child-order, owns membership/order/priority ranks) as SEPARATE process
+    actors; forced U→C and C→U.  Both orders converge to identical cache
+    state across replay, checkpoint, and epoch reload (Axiom 7)."""
+
+    uc = _run_actor_order(tmp_path, "UC", "order_uc")
+    cu = _run_actor_order(tmp_path, "CU", "order_cu")
+
+    # The same three oracles: replayed ≡ checkpoint-reloaded ≡ (across orders).
+    assert_semantic_cache_equal(uc["replayed"], cu["replayed"])
+    assert_semantic_cache_equal(uc["reloaded"], cu["reloaded"])
+    assert_semantic_cache_equal(uc["replayed"], uc["reloaded"])
+    assert_semantic_cache_equal(cu["replayed"], cu["reloaded"])
+
+    by_id = {n["id"]: n for n in cu["reloaded"]["nodes"]}
+    # A's content comes from U, never overwritten by C's child-order records.
+    assert by_id["A"]["name"] == "A-updated"
+    assert by_id["A"]["note"] == "note-from-U"
+    # Membership/order/priority come from C's structural effect.
+    assert set(by_id) == {"P", "A", "B", "C"}
+    assert by_id["C"]["name"] == "C-created"
+    assert by_id["C"]["parent_id"] == "P"
+    children = [n for n in cu["reloaded"]["nodes"] if n.get("parent_id") == "P"]
+    ordered = sorted(children, key=lambda n: n.get("priority", 0))
+    assert [n["id"] for n in ordered] == ["A", "C", "B"]

@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "NEXUS for Workflowy",
+  "version": "3.54.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApQdLFxUZo/59kRpZ3eLaGhoT0MEldEgdwVR4IMrDU+T+36kpMlN5iOXYrVd4PqhGJH5B5A7CLrMmT4xg8aWDEajw81IsLJh6OkWd8fJDiqH4lZ3/GmyOENkL5nWRoeiN0pJuRxoi0P9tApAUNtYCCBo+3Yns96/5LVYjXPSsN9H4GGDaw8kukzL3k8KzMvfHGTiCkPdFING2vS6nXgE99qC9evQsvGe90rh0ZV+5hJM90PZtI9Y5wXCtkvG6yX6Gj9tAcgXfjpYPRM+g83Ch9004n944x+/F50kJtF1TrgcSE5Rm/YzFZ4SplGu4hHJP3piWUk/l/n9yNDlaD8z90wIDAQAB",
+  "description": "Workflowy context management, with your agents",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://workflowy.com/*",
+    "https://*.workflowy.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://workflowy.com/*",
+        "https://*.workflowy.com/*"
+      ],
+      "js": ["content-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://workflowy.com/*",
+        "https://*.workflowy.com/*"
+      ],
+      "css": ["katex/katex.min.css", "katex-overrides.css", "glimpse-md-render.css", "glimpse-ui.css"],
+      "js": ["hotkeys-shared.js", "marked.min.js", "katex/katex.min.js", "marked-katex-init.js", "glimpse-md-render.js", "glimpse-ui.js", "glimpse-ui-help.js", "glimpse-ui-drawers.js", "glimpse-cache-client.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["katex/fonts/*"],
+      "matches": ["https://workflowy.com/*", "https://*.workflowy.com/*"]
+    }
+  ]
+}

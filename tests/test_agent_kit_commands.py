@@ -1,0 +1,884 @@
+"""U2 command tests (spec 12.4): every behaviour of spec 10.2-10.10, on the
+fixture repository F1 of spec 14 and on the small per-report repositories of
+spec 12.1 (F2).  The kit runs as a subprocess in the fixture repository, or
+in-process through main() where a knob must be patched.  Nothing touches an
+account: the only writes are the fixture's own code-map/ files.
+"""
+from __future__ import annotations
+
+import ast
+import io
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+for _p in (str(REPO_ROOT / "src"), str(REPO_ROOT)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+KIT_SCRIPTS = REPO_ROOT / "agent-kit" / ".claude" / "skills" / "code-map" / "scripts"
+if str(KIT_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(KIT_SCRIPTS))
+
+import _engine  # noqa: E402
+import code_map as cm  # noqa: E402
+from test_agent_kit_build import F1_FILES  # noqa: E402
+from test_agent_kit_parity import build_fixture_repo, run_kit  # noqa: E402
+
+SCRIPT = KIT_SCRIPTS / "code_map.py"
+
+
+# ---------------------------------------------------------------------------
+# Fixture helpers
+# ---------------------------------------------------------------------------
+
+
+def block(comment_text: str, *, bid: str, labels: str, kind: str = "ast",
+          prefix: str = "#", role: str | None = None, show_span: str | None = None) -> str:
+    lines = [f"{prefix} @beacon["]
+    lines.append(f"{prefix}   id={bid},")
+    if role is not None:
+        lines.append(f"{prefix}   role={role},")
+    lines.append(f"{prefix}   slice_labels={labels},")
+    lines.append(f"{prefix}   kind={kind},")
+    if show_span is not None:
+        lines.append(f"{prefix}   show_span={show_span},")
+    lines.append(f"{prefix}   comment={comment_text},")
+    lines.append(f"{prefix} ]")
+    return "\n".join(lines)
+
+
+def close_block(bid: str, prefix: str = "#") -> str:
+    return f"{prefix} @beacon-close[\n{prefix}   id={bid},\n{prefix} ]"
+
+
+def catalog_text(rows) -> str:
+    lines = [
+        "# catalog", "", "## Area", "",
+        "| Label | Symbols | What it covers |",
+        "|---|---:|---|",
+    ]
+    for label, count, description in rows:
+        lines.append(f"| `{label}` | {count} | {description} |")
+    return "\n".join(lines) + "\n"
+
+
+def make_repo(tmp_path: Path, files: dict[str, str], *, catalog: str | None = None,
+              slices: dict[str, str] | None = None, extra_untracked: dict[str, str] | None = None,
+              raw_files: dict[str, bytes] | None = None) -> Path:
+    payload = dict(files)
+    if catalog is not None:
+        payload["code-map/CATALOG.md"] = catalog
+    for rel, text in (slices or {}).items():
+        payload[f"code-map/slices/{rel}"] = text
+    for rel, data in (raw_files or {}).items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    build_fixture_repo(tmp_path, payload)
+    for rel, text in (extra_untracked or {}).items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode("utf-8"))
+    return tmp_path
+
+
+@pytest.fixture()
+def f1_repo(tmp_path: Path) -> Path:
+    return make_repo(tmp_path, F1_FILES)
+
+
+KIT_COPY_IGNORES = shutil.ignore_patterns("*.pyc", "__pycache__")
+
+
+# ---------------------------------------------------------------------------
+# Discovery (spec 12.1 F1 additions)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def discovery_repo(tmp_path: Path) -> Path:
+    files = dict(F1_FILES)
+    files[".gitignore"] = "build/\n"
+    files["build/gen.py"] = block("Generated.", bid="demo@gen", labels="demo") + "\nx = 1\n"
+    files["docs/guide.md"] = (
+        "<!-- @beacon[\n   id=demo@guide,\n   slice_labels=demo,\n   kind=ast,\n"
+        "   comment=Guide entry,\n] -->\n# Guide\n"
+    )
+    files["code-map/CATALOG.md"] = catalog_text([("demo", 11, "The demo family.")])
+    repo = make_repo(tmp_path, files, extra_untracked={
+        "pkg/new.py": block("New file.", bid="demo@new", labels="demo")
+        + "\ndef new_thing():\n    pass\n",
+    })
+    kit_copy = repo / ".claude" / "skills" / "code-map"
+    kit_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(KIT_SCRIPTS.parent, kit_copy, ignore=KIT_COPY_IGNORES)
+    (kit_copy / "scripts" / "stub.py").write_text(
+        block("Stub block.", bid="demo@stub", labels="demo")
+        + "\ndef stub_thing():\n    pass\n",
+        encoding="utf-8",
+    )
+    return repo
+
+
+def test_discovery_git_view_and_own_folder_skip(discovery_repo: Path):
+    mine = run_kit(discovery_repo, "labels")
+    assert mine.returncode == 0, mine.stderr
+    rows = dict(line.split("\t")[0:2] for line in mine.stdout.decode().splitlines())
+    # demo: the eleven of F1, +1 for the untracked pkg/new.py; the ignored
+    # build/gen.py and the never-read docs/guide.md contribute nothing; the
+    # copied skill folder is ordinary files to this (outside) script.
+    assert rows["demo"] == "13"
+    copied = subprocess.run(
+        [sys.executable, ".claude/skills/code-map/scripts/code_map.py", "labels"],
+        cwd=str(discovery_repo), capture_output=True, timeout=300,
+    )
+    assert copied.returncode == 0, copied.stderr
+    copied_rows = dict(line.split("\t")[0:2] for line in copied.stdout.decode().splitlines())
+    # A8: the copied script skips its own skill folder, so the stub is gone.
+    assert copied_rows["demo"] == "12"
+
+
+# ---------------------------------------------------------------------------
+# labels
+# ---------------------------------------------------------------------------
+
+
+def test_labels_descriptions_from_catalog(f1_repo: Path):
+    (f1_repo / "code-map").mkdir()
+    (f1_repo / "code-map" / "CATALOG.md").write_text(catalog_text([
+        ("demo", 11, "The demo family."),
+        ("web", 3, "The web greeter."),
+    ]), encoding="utf-8")
+    kit = run_kit(f1_repo, "labels")
+    assert kit.returncode == 0
+    lines = kit.stdout.decode().splitlines()
+    assert lines[0] == "demo\t11\tThe demo family."
+    assert lines[4] == "web\t3\tThe web greeter."
+    assert lines[1].endswith("(not in catalog)")
+
+
+def test_labels_write_updates_counts_and_appends(f1_repo: Path):
+    catalog_dir = f1_repo / "code-map"
+    catalog_dir.mkdir()
+    catalog = catalog_dir / "CATALOG.md"
+    rows = catalog_text([
+        ("demo", 99, "The demo family."),
+        ("web", 3, "The web greeter."),
+    ])
+    # drop the demo-cli row entirely and give demolition a stale count
+    rows = rows.replace("| `demo` | 99 |", "| `demo` | 99 |").replace(
+        "| `web` | 3 |", "| `web` | 2 |"
+    )
+    catalog.write_text(rows, encoding="utf-8")
+    before = catalog.read_text(encoding="utf-8")
+    assert "demo-cli" not in before
+    kit = run_kit(f1_repo, "labels", "--write")
+    assert kit.returncode == 0, kit.stderr
+    after = catalog.read_text(encoding="utf-8")
+    assert "| `demo` | 11 | The demo family. |" in after
+    assert "| `web` | 3 | The web greeter. |" in after
+    assert "| `demo-cli` | 1 |  |" in after
+    assert "| `demolition` | 1 |  |" in after
+    assert "| `demo--x` | 1 |  |" in after
+    # the new rows sit under the last ## New labels table line
+    new_section = after.split("## New labels", 1)[1]
+    assert "`demo-cli`" in new_section
+    # nothing was deleted and no description changed
+    assert "The demo family." in after and "The web greeter." in after
+
+
+def test_labels_write_creates_new_labels_section(f1_repo: Path):
+    catalog_dir = f1_repo / "code-map"
+    catalog_dir.mkdir()
+    catalog = catalog_dir / "CATALOG.md"
+    catalog.write_text(
+        "# catalog\n\n## Area\n\n| Label | Symbols | What it covers |\n|---|---:|---|\n",
+        encoding="utf-8",
+    )
+    kit = run_kit(f1_repo, "labels", "--write")
+    assert kit.returncode == 0, kit.stderr
+    after = catalog.read_text(encoding="utf-8")
+    assert "## New labels" in after
+    assert "| Label | Symbols | What it covers |" in after.split("## New labels", 1)[1]
+    assert "| `demo` | 11 |  |" in after
+
+
+def test_labels_write_preserves_and_skips_unchanged(f1_repo: Path):
+    catalog_dir = f1_repo / "code-map"
+    catalog_dir.mkdir()
+    catalog = catalog_dir / "CATALOG.md"
+    correct = catalog_text([
+        ("demo", 11, "The demo family."),
+        ("demo--x", 1, "The serve entry."),
+        ("demo-cli", 1, "Command-line handling."),
+        ("demolition", 1, "Demolition."),
+        ("web", 3, "The web greeter."),
+    ])
+    catalog.write_bytes(correct.encode("utf-8"))
+    stat_before = catalog.stat().st_mtime_ns
+    kit = run_kit(f1_repo, "labels", "--write")
+    assert kit.returncode == 0, kit.stderr
+    assert catalog.read_bytes() == correct.encode("utf-8")
+    assert catalog.stat().st_mtime_ns == stat_before
+
+
+def test_labels_write_keeps_crlf(f1_repo: Path):
+    catalog_dir = f1_repo / "code-map"
+    catalog_dir.mkdir()
+    catalog = catalog_dir / "CATALOG.md"
+    lf = catalog_text([("demo", 1, "One.")])
+    crlf = lf.replace("| `demo` | 1 | One. |", "| `demo` | 99 | One. |").replace("\n", "\r\n")
+    catalog.write_bytes(crlf.encode("utf-8"))
+    kit = run_kit(f1_repo, "labels", "--write")
+    assert kit.returncode == 0, kit.stderr
+    data = catalog.read_bytes()
+    assert b"\r\n" in data and data.count(b"\r\n") == data.count(b"\n")
+    assert b"| `demo` | 11 | One. |" in data
+
+
+def test_labels_write_without_catalog_refuses(f1_repo: Path):
+    kit = run_kit(f1_repo, "labels", "--write")
+    assert kit.returncode == 1
+    assert b"init" in kit.stderr
+
+
+# ---------------------------------------------------------------------------
+# slice --write and empty selections
+# ---------------------------------------------------------------------------
+
+
+def test_slice_write_lifecycle(f1_repo: Path):
+    pytest.importorskip("tree_sitter_language_pack")
+    (f1_repo / "code-map").mkdir()
+    (f1_repo / "code-map" / "CATALOG.md").write_text(catalog_text([]), encoding="utf-8")
+    first = run_kit(f1_repo, "slice", "--write")
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.decode().strip() == "wrote 5, deleted 0, unchanged 0"
+    slices = f1_repo / "code-map" / "slices"
+    assert sorted(p.name for p in slices.glob("*.md")) == [
+        "demo--x.md", "demo-cli.md", "demo.md", "demolition.md", "web.md",
+    ]
+    # an unchanged file is not rewritten
+    demo = slices / "demo.md"
+    stat_before = demo.stat().st_mtime_ns
+    (slices / "zzz-stale.md").write_bytes(b"stale\n")
+    second = run_kit(f1_repo, "slice", "--write")
+    assert second.returncode == 0, second.stderr
+    assert second.stdout.decode().strip() == "wrote 0, deleted 1, unchanged 5"
+    assert demo.stat().st_mtime_ns == stat_before
+    assert not (slices / "zzz-stale.md").exists()
+    # one named label that is already fresh
+    named = run_kit(f1_repo, "slice", "--write", "demo")
+    assert named.stdout.decode().strip() == "wrote 0, deleted 0, unchanged 1"
+
+
+def test_slice_write_refuses_unknown_label(f1_repo: Path):
+    (f1_repo / "code-map").mkdir()
+    (f1_repo / "code-map" / "slices").mkdir()
+    fresh = f1_repo / "code-map" / "slices" / "demo.md"
+    fresh.write_bytes(b"fresh\n")
+    stat_before = fresh.stat().st_mtime_ns
+    kit = run_kit(f1_repo, "slice", "--write", "nope")
+    assert kit.returncode == 1
+    assert b"nope" in kit.stderr
+    assert fresh.stat().st_mtime_ns == stat_before
+
+
+def test_slice_write_refuses_unportable_name(tmp_path: Path):
+    files = {
+        "x.py": block("Odd.", bid="odd@1", labels="a<b") + "\ndef f():\n    pass\n",
+        "code-map/CATALOG.md": catalog_text([("a<b", 1, "Odd label.")]),
+    }
+    repo = make_repo(tmp_path, files)
+    kit = run_kit(repo, "slice", "--write")
+    assert kit.returncode == 1
+    assert b"portable" in kit.stderr
+    assert not (repo / "code-map" / "slices").is_dir() or not list(
+        (repo / "code-map" / "slices").glob("*.md")
+    )
+
+
+def test_slice_write_refuses_case_collision(tmp_path: Path):
+    files = {
+        "a.py": block("Upper.", bid="case@u", labels="Foo") + "\ndef u():\n    pass\n",
+        "b.py": block("Lower.", bid="case@l", labels="foo") + "\ndef l():\n    pass\n",
+        "code-map/CATALOG.md": catalog_text([("Foo", 1, "Upper."), ("foo", 1, "Lower.")]),
+    }
+    repo = make_repo(tmp_path, files)
+    kit = run_kit(repo, "slice", "--write")
+    assert kit.returncode == 1
+    assert b"case" in kit.stderr
+
+
+def test_slice_write_headings_conflict_is_usage_error(f1_repo: Path):
+    kit = run_kit(f1_repo, "slice", "--headings", "--write")
+    assert kit.returncode == 2
+
+
+def test_slice_write_without_code_map_refuses(f1_repo: Path):
+    kit = run_kit(f1_repo, "slice", "--write")
+    assert kit.returncode == 1
+
+
+def test_slice_empty_selection(f1_repo: Path):
+    kit = run_kit(f1_repo, "slice", "nope")
+    assert kit.returncode == 1
+    assert kit.stdout == b""
+    assert kit.stderr
+
+
+# ---------------------------------------------------------------------------
+# read
+# ---------------------------------------------------------------------------
+
+
+def test_read_bare_name_header_and_rows(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "serve")
+    assert kit.returncode == 0, kit.stderr
+    lines = kit.stdout.decode().splitlines()
+    file_lines = (f1_repo / "pkg/core.py").read_text(encoding="utf-8").splitlines()
+    expected_header = _engine.format_snippet_header("pkg/core.py | ", file_lines, 61, 75)
+    assert lines[0] == expected_header
+    assert lines[0] == "[pkg/core.py | lines 61-75 of 131 | 15 lines, 305 bytes, ~102 tokens]"
+    assert lines[2] == "62 | def serve(port: int = 8080) -> None:"
+
+
+def test_read_class_method(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "Registry.register")
+    assert kit.returncode == 0, kit.stderr
+    lines = kit.stdout.decode().splitlines()
+    assert lines[0].startswith("[pkg/core.py | lines 26-28 of 131 | 3 lines")
+    assert lines[1] == "26 |     def register(self, name: str, handler=None):"
+
+
+def test_read_block_id_ast(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "demo@serve")
+    assert kit.returncode == 0, kit.stderr
+    lines = kit.stdout.decode().splitlines()
+    assert lines[0].startswith("[pkg/core.py | lines 61-75 of 131 | 15 lines")
+    assert lines[1] == "61 | @decorator"
+
+
+def test_read_block_id_span(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "demo@limits")
+    assert kit.returncode == 0, kit.stderr
+    lines = kit.stdout.decode().splitlines()
+    assert lines[0].startswith("[pkg/core.py | lines 89-102 of 131 | 14 lines")
+    assert lines[1] == " 89 | # @beacon["
+    assert lines[-1] == "102 | # ]"
+
+
+def test_read_block_id_ast_attached_to_nothing(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "web@Shape")
+    assert kit.returncode == 1
+
+
+UNCLOSED_FILES = {
+    "u.py": block("Open region.", bid="open@1", labels="open", kind="span") + "\nMAX = 1\n",
+}
+
+
+def test_read_unclosed_span_id(tmp_path: Path):
+    repo = make_repo(tmp_path, UNCLOSED_FILES)
+    path = repo / "u.py"
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    kit = run_kit(repo, "read", "open@1")
+    assert kit.returncode == 0, kit.stderr
+    assert kit.stdout.decode().splitlines()[0].startswith("[u.py | lines 1-7 of 7 |")
+    assert "MAX = 1" in kit.stdout.decode()
+    assert before == (path.read_bytes(), path.stat().st_mtime_ns)
+
+
+@pytest.mark.parametrize("extension,prefix,body", [
+    (".py", "#", "value = 1"), (".js", "//", "const value = 1;"),
+    (".sql", "--", "SELECT 1;"), (".sh", "#", "echo safe"), (".yaml", "#", "value: safe"),
+])
+def test_read_open_only_uses_shared_eof_and_keeps_closed_neighbour(tmp_path, monkeypatch, extension, prefix, body):
+    if extension == ".js" and not cm.parser_ready():
+        pytest.skip("existing JS parser capability is unavailable")
+    opening = [prefix + " " + line for line in ["@beacon[", "id=read@open,", "kind=span,", "slice_labels=x,", "],"]]
+    target = tmp_path / ("open" + extension)
+    target.write_bytes(("\n".join(opening + [body, "", body]) + "\n").encode())
+    safe = tmp_path / ("safe" + extension)
+    safe_lines = [line.replace("read@open", "read@safe") for line in opening] + [body]
+    safe_lines += [prefix + " " + line for line in ["@beacon-close[", "id=read@safe,", "]"]]
+    safe.write_bytes(("\n".join(safe_lines) + "\n").encode())
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in (target, safe)}
+    repo = cm.Repository(str(tmp_path), [target.name, safe.name])
+    monkeypatch.setattr(cm, "_open_repository", lambda: (str(tmp_path), repo))
+    for name, expected_end in (("read@open", 8), ("read@safe", 9)):
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, "stdout", stream)
+            result = cm.cmd_read(SimpleNamespace(name=name, file=None, start=None, end=None, size=False))
+            output = stream.buffer.getvalue().decode()
+        assert result == 0
+        assert f"lines 1-{expected_end} of {expected_end}" in output
+    assert before == {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in (target, safe)}
+
+
+def test_read_span_survives_missing_bracket_and_outline_error_with_physical_lines(tmp_path, monkeypatch):
+    path = tmp_path / "bad.py"
+    lines = ["# before\fnot a physical line", "# @beacon[", "# id=read@bad,", "# kind=span,", "# slice_labels=x,", "if ("]
+    path.write_bytes(("\n".join(lines) + "\n").encode())
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    repo = cm.Repository(str(tmp_path), [path.name])
+    monkeypatch.setattr(cm, "_open_repository", lambda: (str(tmp_path), repo))
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stdout", stream)
+        result = cm.cmd_read(SimpleNamespace(name="read@bad", file=None, start=None, end=None, size=False))
+        output = stream.buffer.getvalue().decode()
+    assert result == 0
+    assert "lines 2-6 of 6" in output and "if (" in output
+    assert before == (path.read_bytes(), path.stat().st_mtime_ns)
+    safe = tmp_path / "safe.py"
+    safe.write_bytes((block("Safe.", bid="safe@0", labels="x", kind="span") + "\nvalue = 1\n" + close_block("safe@0") + "\n").encode())
+    before_safe = safe.read_bytes(), safe.stat().st_mtime_ns
+    safe_repo = cm.Repository(str(tmp_path), [safe.name])
+    selected = safe_repo.blocks(safe.name)[0]
+    assert cm._resolve_block_span(safe_repo, safe.name, selected, "safe@0") == (safe.name, 1, 10)
+    assert before_safe == (safe.read_bytes(), safe.stat().st_mtime_ns)
+
+
+AMBIGUOUS_FILES = {
+    "pkg/a.py": "def helper():\n    return 1\n",
+    "pkg/b.py": "def helper():\n    return 2\n",
+}
+
+
+def test_read_ambiguous_lists_sorted_candidates(tmp_path: Path):
+    repo = make_repo(tmp_path, AMBIGUOUS_FILES)
+    kit = run_kit(repo, "read", "helper")
+    assert kit.returncode == 1
+    err = kit.stderr.decode()
+    a_pos = err.index("pkg/a.py:1  helper")
+    b_pos = err.index("pkg/b.py:1  helper")
+    assert a_pos < b_pos
+
+
+def test_read_file_filter(tmp_path: Path):
+    repo = make_repo(tmp_path, AMBIGUOUS_FILES)
+    kit = run_kit(repo, "read", "helper", "--file", "pkg/b.py")
+    assert kit.returncode == 0, kit.stderr
+    assert kit.stdout.decode().splitlines()[0].startswith("[pkg/b.py | lines 1-2 of 2 |")
+    missing = run_kit(repo, "read", "helper", "--file", "pkg/zzz.py")
+    assert missing.returncode == 1
+
+
+def test_read_size_flag(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "serve", "--size")
+    assert kit.returncode == 0, kit.stderr
+    out_lines = kit.stdout.decode().splitlines()
+    assert len(out_lines) == 1
+    assert out_lines[0] == "[pkg/core.py | lines 61-75 of 131 | 15 lines, 305 bytes, ~102 tokens]"
+
+
+def test_read_explicit_window(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "serve", "--start", "62", "--end", "63")
+    assert kit.returncode == 0, kit.stderr
+    file_lines = (f1_repo / "pkg/core.py").read_text(encoding="utf-8").splitlines()
+    lines = kit.stdout.decode().splitlines()
+    assert lines[0] == _engine.format_snippet_header("pkg/core.py | ", file_lines, 62, 63)
+    assert lines[0].endswith("2 lines, 62 bytes, ~21 tokens]")
+    assert lines[1] == "62 | def serve(port: int = 8080) -> None:"
+    assert lines[2] == '63 |     """Start serving."""'
+
+
+def test_read_window_start_after_end_is_usage_error(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "serve", "--start", "63", "--end", "62")
+    assert kit.returncode == 2
+
+
+LONG_FILES = {
+    "long.py": (
+        "def f64():\n" + "".join(f"    x{i} = {i}\n" for i in range(63))
+        + "\n\ndef f65():\n" + "".join(f"    y{i} = {i}\n" for i in range(64))
+    ),
+}
+
+
+def test_read_guard_64_and_65(tmp_path: Path):
+    repo = make_repo(tmp_path, LONG_FILES)
+    file_lines = (repo / "long.py").read_text(encoding="utf-8").splitlines()
+    whole = run_kit(repo, "read", "f64")
+    assert whole.returncode == 0, whole.stderr
+    whole_lines = whole.stdout.decode().splitlines()
+    assert len(whole_lines) == 65  # header + 64 rows
+    assert whole_lines[0] == _engine.format_snippet_header("long.py | ", file_lines, 1, 64)
+    assert whole_lines[1] == " 1 | def f64():"
+    assert whole_lines[-1] == "64 |     x62 = 62"
+
+    guarded = run_kit(repo, "read", "f65")
+    assert guarded.returncode == 0, guarded.stderr
+    lines = guarded.stdout.decode().splitlines()
+    # f65 spans lines 67-131; head 48 rows, one elision row, tail 16 rows
+    assert lines[0] == _engine.format_snippet_header("long.py | ", file_lines, 67, 131)
+    assert len(lines) == 66  # header + 48 + elision + 16
+    assert lines[1] == " 67 | def f65():"
+    assert lines[49] == (
+        "... | ... 1 lines not shown (115-115); "
+        "read them with --start 115 --end 115"
+    )
+    assert lines[50] == "116 |     y48 = 48"
+    assert lines[-1] == "131 |     y63 = 63"
+
+
+def test_read_unresolved_name(f1_repo: Path):
+    kit = run_kit(f1_repo, "read", "no_such_symbol")
+    assert kit.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# check
+# ---------------------------------------------------------------------------
+
+
+def write_catalog_for(repo: Path, rows) -> None:
+    (repo / "code-map").mkdir(exist_ok=True)
+    (repo / "code-map" / "CATALOG.md").write_text(catalog_text(rows), encoding="utf-8")
+
+
+def test_check_clean_f1_reports_shared_info_and_shape_orphan(f1_repo: Path):
+    pytest.importorskip("tree_sitter_language_pack")
+    write_catalog_for(f1_repo, [
+        ("demo", 11, "The demo family."),
+        ("demo--x", 1, "The serve entry."),
+        ("demo-cli", 1, "Command-line handling."),
+        ("demolition", 1, "Demolition."),
+        ("web", 3, "The web greeter."),
+    ])
+    assert run_kit(f1_repo, "slice", "--write").returncode == 0
+    kit = run_kit(f1_repo, "check")
+    assert kit.returncode == 1
+    assert kit.stdout.decode().splitlines() == [
+        f"{loc}: info legacy_field: Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed."
+        for loc in ("config.yaml:2", "db/schema.sql:2", "ops/build.sh:3", "pkg/core.py:89", "pkg/core.py:105")
+    ] + [
+        "web/app.ts:32: error block_not_mapped: This physical block reaches no mapped node, even if another copy of its id maps; relocate or convert metadata, never add FILE capability implicitly."
+    ]
+
+
+def test_check_without_catalog(f1_repo: Path):
+    kit = run_kit(f1_repo, "check")
+    assert kit.returncode == 1
+    assert b"init" in kit.stderr
+    assert kit.stdout == b""
+
+
+F2_PY_BODY = "def f():\n    pass\n"
+
+F2_CASES = {
+    "ast_orphan": (
+        {"x.py": block("Orphan.", bid="o@1", labels="o") + "\nx = compute()\n"},
+        [],
+        ["x.py:1: error block_not_mapped: This physical block reaches no mapped node, even if another copy of its id maps; relocate or convert metadata, never add FILE capability implicitly."],
+    ),
+    "span_unclosed": (
+        {"x.py": block("Open.", bid="s@1", labels="s", kind="span", role="s") + "\nMAX = 1\n"},
+        [("s", 1, "The region.")],
+        ["x.py:1: info legacy_field: Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed.",
+         "x.py:1: info span_without_close: This legal open-only span runs to its file/section end; keep it or explicitly choose an exact close."],
+    ),
+    "dup_ids": (
+        {
+            "x.py": (
+                block("One.", bid="d@1", labels="d") + "\n" + F2_PY_BODY + "\n\n"
+                + block("Two.", bid="d@1", labels="d") + "\n" + F2_PY_BODY
+            )
+        },
+        [("d", 2, "Duplicated.")],
+        ["x.py:7: error writer_target_ambiguous: This qualified name has several current targets; an independent physical witness can still select a member.",
+         "x.py:11: error duplicate_id: Id d@1 has 2 physical copies; independently anchored copies remain writable, and an id-only request needs a member choice.",
+         "x.py:17: error writer_target_ambiguous: This qualified name has several current targets; an independent physical witness can still select a member."],
+    ),
+    "two_on_one": (
+        {
+            "x.py": (
+                block("First.", bid="p@1", labels="p") + "\n" + block("Second.", bid="p@2", labels="p")
+                + "\n" + F2_PY_BODY
+            )
+        },
+        [("p", 1, "Stacked.")],
+        ["x.py:13: error two_blocks_one_symbol: Several physical blocks map to this target; only a shared-planner compatible same-id merge is automatic, otherwise choose the survivor/fields.",
+         "x.py:13: error writer_anchor_ambiguous: Several complete blocks attach to this target; physical members remain selectable and incompatible merges need explicit choices."],
+    ),
+    "label_not_listed": (
+        {"x.py": block("Solo.", bid="solo@1", labels="solo") + "\n" + F2_PY_BODY},
+        [],
+        "catalog: label `solo` is in use but not listed",
+    ),
+    "row_unused": (
+        {},
+        [("ghost", 0, "Gone.")],
+        "catalog: row `ghost` is listed but not in use",
+    ),
+    "two_rows": (
+        {"x.py": block("Twin.", bid="twin@1", labels="dup") + "\n" + F2_PY_BODY},
+        [("dup", 1, "Twin."), ("dup", 1, "Twin again.")],
+        "catalog: label `dup` is listed in 2 rows",
+    ),
+    "count_diff": (
+        {"x.py": block("Count.", bid="c@1", labels="c") + "\n" + F2_PY_BODY},
+        [("c", 3, "Overstated.")],
+        "catalog: row `c` says 3 symbols but 1 carry it",
+    ),
+    "empty_desc": (
+        {"x.py": block("Empty.", bid="e@1", labels="e") + "\n" + F2_PY_BODY},
+        [("e", 1, "")],
+        "catalog: row `e` has an empty description",
+    ),
+    "unreadable": (
+        {},
+        [],
+        "bad.py:0: file cannot be read or mapped",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(F2_CASES))
+def test_check_f2_shared_rows_and_kit_checks(tmp_path: Path, case: str):
+    files, rows, expected = F2_CASES[case]
+    raw = {"bad.py": b"# @beacon[\n#   id=bad@1,\n# ]\n\xff\xfe\n"} if case == "unreadable" else None
+    repo = make_repo(tmp_path, files, catalog=catalog_text(rows), raw_files=raw)
+    # Fresh slices leave only this case's shared findings or kit-only check.
+    assert run_kit(repo, "slice", "--write").returncode == 0
+    kit = run_kit(repo, "check")
+    assert kit.returncode == (0 if case == "span_unclosed" else 1)
+    assert kit.stdout.decode().splitlines() == (expected if isinstance(expected, list) else [expected])
+
+
+def test_check_stale_slice(tmp_path: Path):
+    files = {"x.py": block("Stale.", bid="st@1", labels="st") + "\n" + F2_PY_BODY}
+    repo = make_repo(
+        tmp_path, files,
+        catalog=catalog_text([("st", 1, "Stale slice.")]),
+        slices={"st.md": "# wrong content\n"},
+    )
+    kit = run_kit(repo, "check")
+    assert kit.returncode == 1
+    assert kit.stdout.decode().splitlines() == ["slices: st.md is stale; run slice --write"]
+
+
+def test_check_missing_slice(tmp_path: Path):
+    files = {"x.py": block("Missing.", bid="m@1", labels="m") + "\n" + F2_PY_BODY}
+    repo = make_repo(tmp_path, files, catalog=catalog_text([("m", 1, "Missing slice.")]))
+    kit = run_kit(repo, "check")
+    assert kit.returncode == 1
+    assert kit.stdout.decode().splitlines() == ["slices: missing slice file for `m`"]
+
+
+def test_check_orphan_slice(tmp_path: Path):
+    body = block("Real.", bid="r@1", labels="r") + "\n" + F2_PY_BODY
+    files = {"x.py": body}
+    repo = make_repo(
+        tmp_path, files,
+        catalog=catalog_text([("r", 1, "Real.")]),
+        slices={"old.md": "# orphan\n"},
+    )
+    # write the fresh r.md from the kit itself, then add the orphan
+    assert run_kit(repo, "slice", "--write", "r").returncode == 0
+    (repo / "code-map" / "slices" / "old.md").write_text("# orphan\n", encoding="utf-8")
+    kit = run_kit(repo, "check")
+    assert kit.returncode == 1
+    assert kit.stdout.decode().splitlines() == [
+        "slices: old.md is for a label no longer in use"
+    ]
+
+
+# ---------------------------------------------------------------------------
+# init
+# ---------------------------------------------------------------------------
+
+
+def test_init_creates_seeds_and_refuses_again(f1_repo: Path):
+    kit = run_kit(f1_repo, "init")
+    assert kit.returncode == 0, kit.stderr
+    catalog = f1_repo / "code-map" / "CATALOG.md"
+    assert catalog.is_file()
+    assert (f1_repo / "code-map" / "slices").is_dir()
+    text = catalog.read_text(encoding="utf-8")
+    assert "| `demo` | 11 |  |" in text
+    assert "| `web` | 3 |  |" in text
+    again = run_kit(f1_repo, "init")
+    assert again.returncode == 1
+    assert b"already exists" in again.stderr
+
+
+def test_script_parses_at_python_310():
+    source = SCRIPT.read_text(encoding="utf-8")
+    ast.parse(source, feature_version=(3, 10))
+
+
+# ---------------------------------------------------------------------------
+# The parser gate (spec 10.3), patched in-process
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def no_parser(monkeypatch, f1_repo: Path):
+    monkeypatch.setattr(_engine, "_HAVE_TREE_SITTER", False)
+    monkeypatch.chdir(f1_repo)
+    return f1_repo
+
+
+def test_parser_gate_print_commands_skip(no_parser, capsysbinary):
+    rc = cm.main(["slice", "demo"])
+    captured = capsysbinary.readouterr()
+    assert rc == 0
+    assert b"JavaScript/TypeScript parser not installed: 1 file(s)" in captured.err
+    assert b"tree-sitter-language-pack==1.8.1" in captured.err
+    assert b"web" not in captured.out  # the web slice is skipped, not printed
+
+    rc = cm.main(["labels"])
+    captured = capsysbinary.readouterr()
+    assert rc == 0
+    assert b"parser not installed" in captured.err
+    assert b"web\t" not in captured.out  # no web entries without the parser
+    assert b"demo\t11\t" in captured.out
+
+
+def test_parser_gate_write_commands_refuse(no_parser, capsysbinary):
+    for argv in (
+        ["slice", "--write"],
+        ["labels", "--write"],
+        ["init"],
+        ["check"],
+    ):
+        rc = cm.main(argv)
+        captured = capsysbinary.readouterr()
+        assert rc == 1, argv
+        assert b"JavaScript/TypeScript parser not installed" in captured.err
+    # init wrote nothing
+    assert not (no_parser / "code-map").exists()
+
+
+def test_parser_gate_read_skips_js_ts(no_parser, capsysbinary):
+    rc = cm.main(["read", "greet"])
+    captured = capsysbinary.readouterr()
+    assert rc == 1
+    assert b"parser not installed" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# W2: block identity comes only from the engine's generated beacon records.
+# A raw ``id:`` line inside ordinary prose (a docstring) is never an
+# identity: it cannot mask an orphan report, redirect a read, or make a
+# real attached id falsely ambiguous.
+# ---------------------------------------------------------------------------
+
+DECOY_PY = (
+    block("Orphan.", bid="o@1", labels="o") + "\nx = 1\n\n\n"
+    + 'def g():\n    """Documentation quoting another block:\n\n    id: o@1\n\n    """\n    pass\n'
+)
+
+ATTACHED_DECOY_PY = (
+    block("The real one.", bid="d@g", labels="d") + "\n"
+    + 'def g():\n    """The real carrier; the id is quoted again below.\n\n    id: d@g\n\n    """\n    pass\n\n\n'
+    + 'def h():\n    """Only prose:\n\n    id: d@g\n\n    """\n    pass\n'
+)
+
+
+@pytest.fixture()
+def decoy_repo(tmp_path: Path) -> Path:
+    # The orphan attaches to nothing, so its label is not in use: an empty
+    # catalog and no slice files keep every other report quiet.
+    return make_repo(tmp_path, {"z.py": DECOY_PY}, catalog=catalog_text([]))
+
+
+def test_check_orphan_reported_despite_decoy_id_line(decoy_repo: Path):
+    proc = run_kit(decoy_repo, "check")
+    problems = proc.stdout.decode("utf-8").splitlines()
+    assert proc.returncode == 1, problems
+    assert problems == ["z.py:1: error block_not_mapped: This physical block reaches no mapped node, even if another copy of its id maps; relocate or convert metadata, never add FILE capability implicitly."], problems
+
+
+def test_read_by_orphan_id_refused_despite_decoy_id_line(decoy_repo: Path):
+    proc = run_kit(decoy_repo, "read", "o@1")
+    assert proc.returncode == 1
+    assert b"attaches to no definition" in proc.stderr
+    assert proc.stdout == b""
+
+
+@pytest.fixture()
+def attached_decoy_repo(tmp_path: Path) -> Path:
+    repo = make_repo(
+        tmp_path, {"z.py": ATTACHED_DECOY_PY},
+        catalog=catalog_text([("d", 1, "The label.")]),
+    )
+    assert run_kit(repo, "slice", "--write").returncode == 0
+    return repo
+
+
+def test_check_clean_when_an_attached_id_is_quoted_in_prose(attached_decoy_repo: Path):
+    proc = run_kit(attached_decoy_repo, "check")
+    assert proc.returncode == 0, proc.stdout
+    assert proc.stdout == b""
+
+
+def test_read_by_attached_id_reads_its_symbol_despite_decoy(attached_decoy_repo: Path):
+    proc = run_kit(attached_decoy_repo, "read", "d@g")
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout.decode("utf-8")
+    assert "def g()" in out
+    assert "def h()" not in out
+
+
+# ---------------------------------------------------------------------------
+# W3: a label a block repeats counts once for that entry.
+# ---------------------------------------------------------------------------
+
+DUP_ONCE_PY = (
+    block("Twice.", bid="t@1", labels="demo,demo") + "\ndef f():\n    pass\n"
+)
+
+
+def test_w3_duplicate_label_counts_once(tmp_path: Path):
+    repo = make_repo(
+        tmp_path, {"z.py": DUP_ONCE_PY},
+        catalog=catalog_text([("demo", 1, "The demo family.")]),
+    )
+    assert run_kit(repo, "slice", "--write").returncode == 0
+    proc = run_kit(repo, "labels")
+    assert proc.returncode == 0
+    assert proc.stdout.decode("utf-8").splitlines() == ["demo\t1\tThe demo family."]
+    # a catalog row already saying 1 is accepted, and --write keeps 1
+    check = run_kit(repo, "check")
+    assert check.returncode == 0, check.stdout
+    write = run_kit(repo, "labels", "--write")
+    assert write.returncode == 0
+    catalog = (repo / "code-map" / "CATALOG.md").read_text(encoding="utf-8")
+    assert "| `demo` | 1 | The demo family. |" in catalog
+
+
+def test_w3_tag_with_repeated_label_counts_once(tmp_path: Path):
+    files = (
+        block("Solo.", bid="s@1", labels="demo") + "\ndef f():\n    pass\n\n\ndef g():\n    pass\n"
+    )
+    repo = make_repo(
+        tmp_path, {"z.py": files},
+        catalog=catalog_text([("demo", 1, "The demo family.")]),
+    )
+    assert run_kit(repo, "slice", "--write").returncode == 0
+    tagged = run_kit(repo, "tag", "g", "demo", "demo")
+    assert tagged.returncode == 0, tagged.stderr
+    proc = run_kit(repo, "labels")
+    assert proc.returncode == 0
+    # two entries carry demo, one each: the duplicate is not counted twice
+    assert proc.stdout.decode("utf-8").splitlines() == ["demo\t2\tThe demo family."]
+    assert run_kit(repo, "labels", "--write").returncode == 0
+    catalog = (repo / "code-map" / "CATALOG.md").read_text(encoding="utf-8")
+    assert "| `demo` | 2 | The demo family. |" in catalog
+    # the slice file is regenerated for the new labels, then check agrees
+    assert run_kit(repo, "slice", "--write").returncode == 0
+    check = run_kit(repo, "check")
+    assert check.returncode == 0, check.stdout
+    shown = run_kit(repo, "slice", "demo")
+    assert shown.returncode == 0
+    text = shown.stdout.decode("utf-8")
+    assert "## function `f()`" in text and "## function `g()`" in text

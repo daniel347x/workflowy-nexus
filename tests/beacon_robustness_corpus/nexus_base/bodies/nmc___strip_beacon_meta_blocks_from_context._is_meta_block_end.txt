@@ -1,0 +1,4 @@
+    def _is_meta_block_end(norm: str) -> bool:
+        # Close delimiter is a line that begins with ']'.
+        # We intentionally do NOT use substring matching.
+        return norm.strip().startswith("]")

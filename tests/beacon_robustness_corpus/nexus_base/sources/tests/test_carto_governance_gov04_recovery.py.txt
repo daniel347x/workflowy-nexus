@@ -1,0 +1,696 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import psutil
+import pytest
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp import server
+
+ACCOUNT = "a" * 32
+REPO = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cleanup_registry(monkeypatch):
+    gov._CLEANUP_OBLIGATIONS.clear()
+    gov._CLEANUP_TASKS.clear()
+    gov._CLEANUP_WAKE_EVENTS.clear()
+    monkeypatch.setattr(gov, "DEFAULT_CLEANUP_LATER_DELAY_SECONDS", 0.01)
+    monkeypatch.setattr(gov, "DEFAULT_CLEANUP_BACKOFF_MAX_SECONDS", 0.04)
+    yield
+    for task in list(gov._CLEANUP_TASKS.values()):
+        task.cancel()
+    gov._CLEANUP_OBLIGATIONS.clear()
+    gov._CLEANUP_TASKS.clear()
+    gov._CLEANUP_WAKE_EVENTS.clear()
+
+
+def _cache() -> dict[str, dict]:
+    return {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "file": {"id": "file", "parent_id": "repo"},
+    }
+
+
+def _footprint(tmp_path: Path) -> dict:
+    target = tmp_path / "repo" / "a.py"
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("x = 1\n", encoding="utf-8")
+    return gov.compute_footprint(target, "file", _cache(), kind="file")
+
+
+def _lease(tmp_path: Path, jobs: Path) -> dict:
+    return gov.acquire_q3_leases([_footprint(tmp_path)], account_scope_id=ACCOUNT, jobs_root=jobs)[
+        0
+    ]
+
+
+def _claim(tmp_path: Path, jobs: Path, *, job_id: str = "gov04-recovery") -> dict:
+    process = psutil.Process(os.getpid())
+    claim = gov.build_claim(
+        job_id=job_id,
+        job_type="CARTO_BULK_APPLY",
+        dedupe_key=hashlib.sha256(job_id.encode()).hexdigest(),
+        account_scope_id=ACCOUNT,
+        footprint=_footprint(tmp_path),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=os.getpid(),
+        pid_create_time=process.create_time(),
+        handoff_state="running",
+        spawn_started_at=None,
+        execution_owner="launcher",
+    )
+    gov.write_claim(claim, jobs)
+    return claim
+
+
+def _lock_holder(lock_path: Path, tmp_path: Path) -> tuple[subprocess.Popen, Path]:
+    ready = tmp_path / "lock-ready"
+    release = tmp_path / "lock-release"
+    code = r"""
+import sys, time
+from pathlib import Path
+from workflowy_mcp.carto_job_governance import acquire_os_lock
+lock_path, ready, release = map(Path, sys.argv[1:])
+held = acquire_os_lock(lock_path, timeout_seconds=5.0, poll_seconds=0.01)
+ready.write_text("ready", encoding="utf-8")
+try:
+    deadline = time.monotonic() + 10.0
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+finally:
+    held.release()
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, str(lock_path), str(ready), str(release)],
+        cwd=REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 5.0
+    while not ready.exists() and time.monotonic() < deadline:
+        if process.poll() is not None:
+            out, err = process.communicate()
+            raise AssertionError(f"lock holder exited early: {out}\n{err}")
+        time.sleep(0.01)
+    assert ready.exists()
+    return process, release
+
+
+def _finish_holder(process: subprocess.Popen, release: Path) -> None:
+    release.write_text("release", encoding="utf-8")
+    out, err = process.communicate(timeout=5)
+    assert process.returncode == 0, f"{out}\n{err}"
+
+
+async def _cancel_supervisors() -> None:
+    tasks = list(gov._CLEANUP_TASKS.values())
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+
+
+async def _wait_until(predicate, *, timeout: float = 2.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError("condition did not become true before timeout")
+        await asyncio.sleep(0.005)
+
+
+def test_q3_lock_open_failure_queues_one_supervisor_and_preserves_lease(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+
+    def broken_open(_path: Path):
+        raise OSError("broken admission lock path")
+
+    monkeypatch.setattr(gov, "_open_lock_handle", broken_open)
+
+    async def scenario() -> None:
+        with pytest.raises(gov.GovernanceCleanupError) as caught:
+            await gov.release_q3_leases_async([lease], jobs_root=jobs)
+        key = f"q3:{lease_path.name}"
+        assert "admission-lock acquisition" in str(caught.value)
+        assert str(lease_path) in str(caught.value)
+        assert lease_path.exists()
+        assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+        assert [row["key"] for row in gov.pending_cleanup_obligations()] == [key]
+        assert list(gov._CLEANUP_TASKS) == [key]
+        assert not gov._CLEANUP_TASKS[key].done()
+        await _cancel_supervisors()
+        assert lease_path.exists()
+        assert key in gov._CLEANUP_OBLIGATIONS
+
+    asyncio.run(scenario())
+
+
+def test_claim_lock_open_failure_queues_one_supervisor_and_preserves_claim(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, jobs)
+    claim_path = gov.claim_path_for(claim, jobs)
+
+    monkeypatch.setattr(
+        gov,
+        "_open_lock_handle",
+        lambda _path: (_ for _ in ()).throw(OSError("broken admission lock path")),
+    )
+
+    async def scenario() -> None:
+        with pytest.raises(gov.GovernanceCleanupError) as caught:
+            await gov.finalize_claim_async(claim["claim_id"], jobs)
+        key = f"claim:{claim['claim_id']}"
+        assert "admission.mutex" in str(caught.value)
+        assert claim_path.exists()
+        assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+        assert [row["key"] for row in gov.pending_cleanup_obligations()] == [key]
+        assert list(gov._CLEANUP_TASKS) == [key]
+        assert not gov._CLEANUP_TASKS[key].done()
+        await _cancel_supervisors()
+        assert claim_path.exists()
+
+    asyncio.run(scenario())
+
+
+def test_busy_timeout_queues_then_supervisor_releases_without_manual_retry(tmp_path):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+    process, release = _lock_holder(gov.governance_paths(jobs).admission_mutex, tmp_path)
+
+    async def scenario() -> None:
+        with pytest.raises(gov.GovernanceCleanupError) as caught:
+            await gov.release_q3_leases_async([lease], jobs_root=jobs, mutex_wait_seconds=0.03)
+        assert "remained busy" in str(caught.value)
+        key = f"q3:{lease_path.name}"
+        assert key in gov._CLEANUP_OBLIGATIONS
+        assert key in gov._CLEANUP_TASKS
+        release.write_text("release", encoding="utf-8")
+        await _wait_until(lambda: not lease_path.exists())
+        await _wait_until(lambda: key not in gov._CLEANUP_TASKS)
+        assert key not in gov._CLEANUP_OBLIGATIONS
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        if process.poll() is None:
+            _finish_holder(process, release)
+        else:
+            out, err = process.communicate()
+            assert process.returncode == 0, f"{out}\n{err}"
+
+
+def test_persistent_supervisor_retries_beyond_first_attempt_without_duplicates(tmp_path):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+    blocked = True
+    attempts = 0
+    attempt_event: asyncio.Event | None = None
+    released_event: asyncio.Event | None = None
+
+    def controlled_unlink(path: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        assert attempt_event is not None and released_event is not None
+        attempt_event.set()
+        if blocked:
+            raise PermissionError("scanner still holds lease")
+        path.unlink()
+        released_event.set()
+
+    async def scenario() -> None:
+        nonlocal blocked, attempt_event, released_event
+        attempt_event = asyncio.Event()
+        released_event = asyncio.Event()
+        ticks = 0
+        stop = asyncio.Event()
+
+        async def ticker() -> None:
+            nonlocal ticks
+            while not stop.is_set():
+                ticks += 1
+                await asyncio.sleep(0)
+
+        ticker_task = asyncio.create_task(ticker())
+        with pytest.raises(gov.GovernanceCleanupError):
+            await gov.release_q3_leases_async(
+                [lease],
+                jobs_root=jobs,
+                unlink_fn=controlled_unlink,
+                immediate_attempts=1,
+            )
+        key = f"q3:{lease_path.name}"
+        supervisor = gov._CLEANUP_TASKS[key]
+        while attempts < 3:
+            attempt_event.clear()
+            await asyncio.wait_for(attempt_event.wait(), timeout=1)
+        assert gov._CLEANUP_TASKS[key] is supervisor
+        assert len(gov._CLEANUP_TASKS) == 1
+
+        with pytest.raises(gov.GovernanceCleanupError):
+            await gov.release_q3_leases_async(
+                [lease],
+                jobs_root=jobs,
+                unlink_fn=controlled_unlink,
+                immediate_attempts=1,
+            )
+        assert gov._CLEANUP_TASKS[key] is supervisor
+        assert len(gov._CLEANUP_TASKS) == 1
+
+        blocked = False
+        await asyncio.wait_for(released_event.wait(), timeout=1)
+        await _wait_until(lambda: key not in gov._CLEANUP_TASKS)
+        stop.set()
+        await ticker_task
+        assert ticks > attempts
+        assert not lease_path.exists()
+        assert key not in gov._CLEANUP_OBLIGATIONS
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_q3_lock_wait_queues_obligation_without_late_transaction(tmp_path):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+    process, release = _lock_holder(gov.governance_paths(jobs).admission_mutex, tmp_path)
+
+    async def scenario() -> None:
+        waiting = asyncio.Event()
+        unlink_calls = 0
+
+        def cancel_check() -> bool:
+            waiting.set()
+            return False
+
+        def unlink(path: Path) -> None:
+            nonlocal unlink_calls
+            unlink_calls += 1
+            path.unlink()
+
+        task = asyncio.create_task(
+            gov.release_q3_leases_async(
+                [lease],
+                jobs_root=jobs,
+                cancel_check=cancel_check,
+                unlink_fn=unlink,
+            )
+        )
+        await waiting.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        key = f"q3:{lease_path.name}"
+        assert unlink_calls == 0
+        assert lease_path.exists()
+        assert key in gov._CLEANUP_OBLIGATIONS
+        assert key in gov._CLEANUP_TASKS
+        await _cancel_supervisors()
+        release.write_text("release", encoding="utf-8")
+        await asyncio.sleep(0.05)
+        assert unlink_calls == 0
+        assert lease_path.exists()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        if process.poll() is None:
+            _finish_holder(process, release)
+        else:
+            out, err = process.communicate()
+            assert process.returncode == 0, f"{out}\n{err}"
+
+
+def test_cancelled_supervisor_leaves_artifact_and_obligation_fail_closed(tmp_path):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+
+    async def scenario() -> None:
+        with pytest.raises(gov.GovernanceCleanupError):
+            await gov.release_q3_leases_async(
+                [lease],
+                jobs_root=jobs,
+                unlink_fn=lambda _path: (_ for _ in ()).throw(PermissionError("blocked")),
+                immediate_attempts=1,
+            )
+        key = f"q3:{lease_path.name}"
+        supervisor = gov._CLEANUP_TASKS[key]
+        supervisor.cancel()
+        result = await asyncio.gather(supervisor, return_exceptions=True)
+        assert isinstance(result[0], asyncio.CancelledError)
+        await asyncio.sleep(0)
+        assert lease_path.exists()
+        assert key in gov._CLEANUP_OBLIGATIONS
+        assert key not in gov._CLEANUP_TASKS
+
+    asyncio.run(scenario())
+
+
+def test_replacement_q3_lease_is_preserved_without_stale_retry_or_tombstone(tmp_path):
+    jobs = tmp_path / "jobs"
+    original = _lease(tmp_path, jobs)
+    path = gov.q3_lease_path_for(original, jobs)
+    replacement = {**original, "lease_id": "b" * 32}
+    gov.atomic_write_json(path, replacement)
+
+    async def scenario() -> None:
+        assert await gov.release_q3_leases_async([original], jobs_root=jobs) == []
+        assert gov.read_q3_lease(path)["lease_id"] == "b" * 32
+        assert not gov.pending_cleanup_obligations()
+        assert not gov._CLEANUP_TASKS
+        assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+    asyncio.run(scenario())
+
+
+def test_claim_ambiguous_exact_token_is_loud_noop_without_retry_or_tombstone(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, jobs)
+    original_path = gov.claim_path_for(claim, jobs)
+    duplicate_path = gov.governance_paths(jobs).claims_dir / "duplicate.lock.json"
+    gov.atomic_write_json(duplicate_path, claim)
+    diagnostics: list[str] = []
+
+    async def scenario() -> None:
+        assert not await gov.finalize_claim_async(
+            claim["claim_id"], jobs, diagnostic=diagnostics.append
+        )
+        assert original_path.exists() and duplicate_path.exists()
+        assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+        assert not gov.pending_cleanup_obligations()
+        assert not gov._CLEANUP_TASKS
+        assert any("ambiguous" in message for message in diagnostics)
+
+    asyncio.run(scenario())
+
+
+def test_finalize_claim_async_is_idempotent_after_release_and_when_initially_absent(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, jobs)
+
+    async def scenario() -> None:
+        assert await gov.finalize_claim_async(claim["claim_id"], jobs)
+        tombstones = list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+        assert len(tombstones) == 1
+        first_payload = tombstones[0].read_bytes()
+        assert await gov.finalize_claim_async(claim["claim_id"], jobs)
+        assert tombstones[0].read_bytes() == first_payload
+        assert await gov.finalize_claim_async("never-existed", jobs)
+        assert not gov.pending_cleanup_obligations()
+        assert not gov._CLEANUP_TASKS
+
+    asyncio.run(scenario())
+
+
+def test_exact_claim_tombstone_failure_is_structured_blocked(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, jobs)
+    claim_path = gov.claim_path_for(claim, jobs)
+
+    with gov.os_lock(gov.governance_paths(jobs).admission_mutex):
+        outcome = gov._finalize_claim_locked_outcome(
+            claim["claim_id"],
+            jobs,
+            atomic_writer=lambda _path, _payload: (_ for _ in ()).throw(
+                OSError("tombstone unavailable")
+            ),
+        )
+    assert outcome.status == "blocked"
+    assert outcome.artifact_paths == (str(claim_path),)
+    assert claim_path.exists()
+    assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_successful_legacy_q3_writer_cannot_report_clean_success_when_release_blocks(
+    tmp_path, monkeypatch
+):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+    original_unlink = Path.unlink
+
+    def block_lease_unlink(path: Path, *args, **kwargs):
+        if path == lease_path:
+            raise PermissionError("lease file held open")
+        return original_unlink(path, *args, **kwargs)
+
+    class Client:
+        async def update_beacon_from_node(self, **_kwargs):
+            return {"success": True, "operation": "updated_beacon"}
+
+    monkeypatch.setattr(Path, "unlink", block_lease_unlink)
+    monkeypatch.setattr(server, "get_client", lambda: Client())
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    monkeypatch.setattr(server, "_governance_jobs_root", lambda: jobs)
+    monkeypatch.setattr(
+        server,
+        "_acquire_single_beacon_q3_lease",
+        lambda _node_id: asyncio.sleep(0, result=[lease]),
+    )
+
+    async def scenario() -> None:
+        with pytest.raises(gov.GovernanceCleanupError) as caught:
+            await server.update_beacon_from_node("node", "name", "note")
+        key = f"q3:{lease_path.name}"
+        assert "mutation completed" in str(caught.value).lower()
+        assert lease_path.exists()
+        assert key in gov._CLEANUP_OBLIGATIONS
+        assert key in gov._CLEANUP_TASKS
+        await _cancel_supervisors()
+
+    asyncio.run(scenario())
+
+
+def test_q3_cleanup_error_preserves_primary_operation_failure(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+    original_unlink = Path.unlink
+
+    def block_lease_unlink(path: Path, *args, **kwargs):
+        if path == lease_path:
+            raise PermissionError("lease file held open")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", block_lease_unlink)
+    monkeypatch.setattr(server, "_governance_jobs_root", lambda: jobs)
+
+    async def scenario() -> None:
+        with pytest.raises(gov.GovernanceCleanupError) as caught:
+            await server._release_q3_leases_preserving_primary(
+                [lease], primary_error=RuntimeError("disk CAS failed")
+            )
+        message = str(caught.value)
+        assert "disk CAS failed" in message
+        assert "lease release remains fail-closed" in message
+        assert lease_path.exists()
+        await _cancel_supervisors()
+
+    asyncio.run(scenario())
+
+
+def _snapshot(path: Path) -> dict:
+    # S02: governed snapshots carry the v1 lineage wrapper (legacy wrappers
+    # are bootstrap-only and no longer accepted at this seam).
+    payload = {
+        "snapshot_schema_version": 1,
+        "snapshot_timestamp": gov.utc_now_iso(),
+        "account_scope_id": ACCOUNT,
+        "epoch_number": 0,
+        "epoch_id": "e" * 32,
+        "incorporated_through_seq": 0,
+        "publication_kind": "full_refresh",
+        "nodes_export": {"nodes": []},
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return {"snapshot_path": str(path), "freshness_disposition": "performed"}
+
+
+def test_prepared_job_cleanup_failure_sets_actionable_failed_state_and_obligation(
+    tmp_path, monkeypatch
+):
+    jobs = tmp_path / "jobs"
+    worker = tmp_path / "worker.py"
+    worker.write_text("# worker\n", encoding="utf-8")
+    snapshot = _snapshot(tmp_path / "snapshot.json")
+    tasks: list[asyncio.Task] = []
+
+    def fail_tombstone(*_args, **_kwargs):
+        raise OSError("tombstone volume unavailable")
+
+    monkeypatch.setattr(gov, "write_tombstone_max_merge", fail_tombstone)
+
+    async def scenario() -> None:
+        def task_factory(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        result = await gov.launch_carto_refresh_job(
+            root_uuid="file",
+            mode="file",
+            account_scope_id=ACCOUNT,
+            footprint_factory=lambda _selection: _footprint(tmp_path),
+            jobs_root=jobs,
+            worker_script=worker,
+            env={},
+            preparation=lambda *_args: {"success": False, "operation": "noop"},
+            preparation_gate=lambda _value: {
+                "proceed": False,
+                "status": "completed",
+            },
+            initial_footprint=_footprint(tmp_path),
+            freshness_callback=lambda: snapshot,
+            task_factory=task_factory,
+        )
+        assert result["success"] is True
+        await tasks[0]
+        job_file = next(jobs.glob("*.json"))
+        payload = json.loads(job_file.read_text(encoding="utf-8"))
+        assert payload["status"] == "failed"
+        assert "Governance cleanup required" in payload["error"]
+        claim_files = list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+        assert len(claim_files) == 1
+        claim_id = gov.read_claim(claim_files[0])["claim_id"]
+        assert f"claim:{claim_id}" in gov._CLEANUP_OBLIGATIONS
+        assert f"claim:{claim_id}" in gov._CLEANUP_TASKS
+        await _cancel_supervisors()
+
+    asyncio.run(scenario())
+
+
+def test_prepared_scheduling_failure_surfaces_cleanup_and_keeps_claim(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    worker = tmp_path / "worker.py"
+    worker.write_text("# worker\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        gov,
+        "write_tombstone_max_merge",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("tombstone unavailable")),
+    )
+
+    async def scenario() -> None:
+        def fail_schedule(coro):
+            coro.close()
+            raise RuntimeError("task scheduler unavailable")
+
+        result = await gov.launch_carto_refresh_job(
+            root_uuid="file",
+            mode="file",
+            account_scope_id=ACCOUNT,
+            footprint_factory=lambda _selection: _footprint(tmp_path),
+            jobs_root=jobs,
+            worker_script=worker,
+            env={},
+            preparation=lambda *_args: {"success": True},
+            initial_footprint=_footprint(tmp_path),
+            freshness_callback=lambda: _snapshot(tmp_path / "snapshot.json"),
+            task_factory=fail_schedule,
+        )
+        assert result["success"] is False
+        assert result["error_kind"] == "governance_cleanup_required"
+        assert "task scheduler unavailable" in result["error"]
+        assert "ownership remains blocking" in result["error"]
+        assert len(result["blocking_artifacts"]) == 1
+        assert Path(result["blocking_artifacts"][0]).exists()
+        assert gov.pending_cleanup_obligations()
+        assert gov._CLEANUP_TASKS
+        await _cancel_supervisors()
+
+    asyncio.run(scenario())
+
+
+def test_bulk_apply_cleanup_failure_overrides_clean_terminal_state(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    completed = asyncio.Event()
+
+    async def fake_bulk_run(*_args, **_kwargs):
+        completed.set()
+
+    async def no_refresh():
+        return None
+
+    monkeypatch.setattr(server, "_get_carto_jobs_base_dir", lambda: str(jobs))
+    monkeypatch.setattr(server, "_governance_jobs_root", lambda: jobs)
+    monkeypatch.setattr(server, "_carto_account_scope_and_env", lambda: (ACCOUNT, {}))
+    monkeypatch.setattr(
+        server, "_build_bulk_visible_root_from_payload", lambda _payload: {"id": "file"}
+    )
+    monkeypatch.setattr(
+        server,
+        "_carto_footprint_from_selection",
+        lambda **_kwargs: _footprint(tmp_path),
+    )
+    monkeypatch.setattr(server, "_run_carto_bulk_visible_apply_job", fake_bulk_run)
+    monkeypatch.setattr(server, "_refresh_carto_job_tracker_once", no_refresh)
+
+    async def _noop_gate(paths, *, operation):
+        return None
+
+    # S04: the hard-stop launch/recheck gates are covered by the S04 suites;
+    # this test exercises the cleanup-override lifecycle in isolation.
+    monkeypatch.setattr(
+        "workflowy_mcp.coherence.admission.require_coherence_mutation_admission",
+        _noop_gate,
+    )
+
+    # S03-B: the in-process bulk runner establishes its own operation boundary
+    # before the bulk call; install a boundary-capable client double.
+    from types import SimpleNamespace
+
+    from coherence_harness import make_boundary_capable
+
+    monkeypatch.setattr(
+        server,
+        "get_client",
+        lambda: make_boundary_capable(SimpleNamespace(), nodes=[]),
+    )
+    monkeypatch.setattr(
+        gov,
+        "write_tombstone_max_merge",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("tombstone unavailable")),
+    )
+
+    async def scenario() -> None:
+        result = await server._start_carto_bulk_visible_apply_job(
+            root_uuid="file",
+            mode="file",
+            visible_tree_payload={},
+            selected_snapshot={"snapshot_path": str(tmp_path / "snapshot.json")},
+        )
+        assert result["success"] is True
+        await completed.wait()
+        job_file = Path(result["carto_job_file"])
+        await _wait_until(
+            lambda: "ownership remains blocking"
+            in str(json.loads(job_file.read_text(encoding="utf-8")).get("error") or "")
+        )
+        payload = json.loads(job_file.read_text(encoding="utf-8"))
+        assert payload["status"] == "failed"
+        assert "Governance claim release failed" in payload["error"]
+        claim_files = list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+        assert len(claim_files) == 1
+        claim_id = gov.read_claim(claim_files[0])["claim_id"]
+        assert f"claim:{claim_id}" in gov._CLEANUP_OBLIGATIONS
+        await _cancel_supervisors()
+
+    asyncio.run(scenario())

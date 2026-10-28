@@ -1,0 +1,12 @@
+    def _flush() -> None:
+        if cur_key is None:
+            return
+        val = " ".join(p for p in parts if p).strip()
+        while val and val[-1] in ",]":
+            val = val[:-1].rstrip()
+        # Same quote rule as the historical loops (byte-identical results).
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
+            val = val[1:-1]
+        fields[cur_key] = val

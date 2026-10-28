@@ -1,0 +1,288 @@
+{
+  "record_layout": "summary-head/2",
+  "id": "carto-refresh-folder-a9b44230",
+  "type": "CARTO_REFRESH",
+  "mode": "folder",
+  "root_uuid": "a9b44230-7506-16e5-cbfa-042267c40f4f",
+  "status": "completed_with_warnings",
+  "outcome": "completed_with_errors",
+  "has_errors": true,
+  "has_warnings": true,
+  "has_findings": true,
+  "error": null,
+  "created_at": "2026-10-26T11:49:08.564321+00:00",
+  "updated_at": "2026-10-26T13:46:47.711093",
+  "progress": {
+    "total_files": 8,
+    "completed_files": 8,
+    "current_phase": "folder:complete",
+    "nodes_created": 5,
+    "nodes_updated": 1,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+  },
+  "warning_count": 2,
+  "warnings": [
+    {
+      "type": "file_refresh_failed",
+      "error": "OSError: [Errno 13] Permission denied"
+    },
+    {
+      "file": "E:\\work\\mixed\\warned.css",
+      "reason": "unsupported_extension"
+    }
+  ],
+  "execution_model": "daemon_task",
+  "execution_owner": "launcher",
+  "detached": false,
+  "cache_refresh_required": true,
+  "freshness_disposition": "current",
+  "snapshot_path": "C:\\Users\\daniel\\AppData\\Local\\workflowy-mcp\\nodes_export_cache\\nodes.json",
+  "logs_path": "C:\\Users\\daniel\\AppData\\Local\\workflowy-mcp\\cartographer_jobs\\mixed.log",
+  "claim_id": "e3d240e5-e658-cf80-9e85-902db9489e70",
+  "dedupe_key": "mixed-folder-fixture",
+  "account_scope_id": "fixture-account",
+  "footprint": {
+    "root_uuid": "a9b44230-7506-16e5-cbfa-042267c40f4f",
+    "path": "E:\\work\\mixed"
+  },
+  "launcher": "system.job.status",
+  "parent_job_id": null,
+  "handoff_state": "completed",
+  "pid": 4242,
+  "evidence": {
+    "files": {
+      "path": "files.jsonl",
+      "rows": 8,
+      "lines": 25,
+      "bytes": 131541,
+      "pending": 0
+    },
+    "nodes": null
+  },
+  "in_flight": null,
+  "result_summary": {
+    "warnings_total": 2,
+    "warnings_by_type": {
+      "file_refresh_failed": 1,
+      "unsupported_extension": 1
+    },
+    "warnings_truncated": 0,
+    "changed": true,
+    "findings_total": 251,
+    "findings_by_code": {
+      "empty_comment": 250,
+      "mapper_parse_error": 1
+    },
+    "findings_truncated": 51,
+    "summary_line": "6 successful \u00b7 2 failed \u00b7 0 skipped \u00b7 251 findings \u00b7 2 events",
+    "status": "completed_with_warnings",
+    "successful": 6,
+    "failed": 2,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "files_refreshed": 5,
+    "files_deleted": 0,
+    "new_files_created": 1,
+    "new_folders_created": 0,
+    "errors_total": 2,
+    "node_errors_total": 0,
+    "phase8_failed": false,
+    "files_changed_total": 1,
+    "events_total": 2,
+    "findings_by_severity": {
+      "error": 1,
+      "info": 250
+    },
+    "findings_preview": [
+      {
+        "code": "mapper_parse_error",
+        "severity": "error",
+        "message": "The mapper rejected the file; existing nodes are preserved.",
+        "file": "E:\\work\\mixed\\corrupt.py",
+        "line": 4,
+        "finding_id": "f-963b6fff3455d405"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 1 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 1,
+        "finding_id": "f-714e5b3f5cce1c11"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 2 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 2,
+        "finding_id": "f-ba31cf1f3da99813"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 3 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 3,
+        "finding_id": "f-ea6fee85e5c3985e"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 4 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 4,
+        "finding_id": "f-f7f6cfed50c81a8a"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 5 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 5,
+        "finding_id": "f-811b55abf1e29493"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 6 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 6,
+        "finding_id": "f-49d4f3eb1f6868d9"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 7 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 7,
+        "finding_id": "f-ab16524d108f3242"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 8 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 8,
+        "finding_id": "f-da68022fd1307ffe"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 9 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 9,
+        "finding_id": "f-617ebe983bf803da"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 10 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 10,
+        "finding_id": "f-f528599dcab02d58"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 11 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 11,
+        "finding_id": "f-9f9357531033af7b"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 12 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 12,
+        "finding_id": "f-34ea43974a2602cf"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 13 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 13,
+        "finding_id": "f-e4f0ab3560a0f573"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 14 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 14,
+        "finding_id": "f-f2f08d6147161540"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 15 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 15,
+        "finding_id": "f-92f3ee89df770efb"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 16 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 16,
+        "finding_id": "f-a203ddba3242cb89"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 17 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 17,
+        "finding_id": "f-3a41bb4cb9549a18"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 18 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 18,
+        "finding_id": "f-7b3c5241863c18c3"
+      },
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "Beacon block 19 carries no comment.",
+        "file": "E:\\work\\mixed\\many_findings.py",
+        "line": 19,
+        "finding_id": "f-06cd17ff532fcf7b"
+      }
+    ],
+    "files_changed": [
+      "E:\\work\\mixed\\new.py"
+    ],
+    "errors": [
+      "OSError: [Errno 13] Permission denied",
+      "'E:\\work\\mixed\\unreadable.md' is not valid UTF-8"
+    ],
+    "refresh_errors": [
+      "OSError: [Errno 13] Permission denied",
+      "'E:\\work\\mixed\\unreadable.md' is not valid UTF-8"
+    ],
+    "nexusignore_sources": [
+      "E:\\work\\mixed\\scratch\\*.log",
+      "E:\\work\\mixed\\tests\\.last_run.*"
+    ],
+    "missing_paths": [
+      "E:\\work\\mixed\\gone.py"
+    ],
+    "preview_totals": {
+      "findings_preview": 251,
+      "files_changed": 1,
+      "errors": 2,
+      "refresh_errors": 2,
+      "nexusignore_sources": 2,
+      "missing_paths": 1
+    }
+  }
+}

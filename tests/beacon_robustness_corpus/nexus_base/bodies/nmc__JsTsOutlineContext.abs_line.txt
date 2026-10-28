@@ -1,0 +1,10 @@
+    def abs_line(self, local_line: int) -> int:
+        """Translate a Tree-sitter local line into a file-absolute line.
+
+        For whole-file JS/TS this is the identity (``line_offset0=0``).
+        For Vue script blocks this adds ``line_offset0`` so the emitted
+        ``orig_lineno_start_unused`` / ``orig_lineno_end_unused`` fields
+        reference the .vue file's line space, not the extracted script
+        block's local line space.
+        """
+        return int(local_line) + int(self.line_offset0 or 0)

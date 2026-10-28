@@ -1,0 +1,3276 @@
+{
+  "schema": 1,
+  "base_rev": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+  "status": "G1 characterization only; no parser repair applied",
+  "files": [
+    {
+      "path": "README.txt",
+      "bytes": 2447,
+      "sha256": "38dd3e52ae79d9a589cb0fb67042a2d0ea82e03436a192fdb2bb695d1f9c3bfd"
+    },
+    {
+      "path": "area1/a1lib.py.txt",
+      "bytes": 14490,
+      "sha256": "a2caac27ddf95b2a25022877906763c0ca17e5df3b039269534964e5955dfefb"
+    },
+    {
+      "path": "area1/area1_c1c2_delta.json",
+      "bytes": 1295977,
+      "sha256": "56a7c4274fc3ec8a5133dd8a7cf915461a745561c4f462ccc91e9aa4155bca5f"
+    },
+    {
+      "path": "area1/area1_c1c2_keylist.json",
+      "bytes": 8720,
+      "sha256": "bada5b18aceeb6110bfc0c1d69b9bd3a7472494b5dfcf96f688daff654b651b2"
+    },
+    {
+      "path": "area1/measure_golden.py.txt",
+      "bytes": 4709,
+      "sha256": "de9ded18e375e9368baced37e345e980797c28f3d95b1d8d9acb2ed1426ef4ac"
+    },
+    {
+      "path": "area1/reconstruct_delta.py.txt",
+      "bytes": 17440,
+      "sha256": "a0e5a9f70adba50e2da5ed7f264f2f78a398915e0bb44754bccbd2fca20fd044"
+    },
+    {
+      "path": "area10/area10_manifest.json",
+      "bytes": 194714,
+      "sha256": "0736604830396c754ec705dce3274decbb06562095fbfbc4ce7033ceb6f7d850"
+    },
+    {
+      "path": "area10/area10_spans.txt",
+      "bytes": 1057,
+      "sha256": "53dcf14a99175ccc489cd59b9df71be3496b25e693355e7e8cee0b5520584cba"
+    },
+    {
+      "path": "area10/area10_window_rows.json",
+      "bytes": 513430,
+      "sha256": "7b644e6e01147776c0dda8b2e5ddd0846b83e2a25674573de7956a20e8c54192"
+    },
+    {
+      "path": "area10/area10_wrong_rows.json",
+      "bytes": 79086,
+      "sha256": "d5cc57004ca798e6b0cbaa5eeeac0144f46774ffd3f94ad0b8437e6707291487"
+    },
+    {
+      "path": "area10/area10_wrong_rows.txt",
+      "bytes": 77325,
+      "sha256": "f72636cc0fa4d8eccb29bb05b26e81638e9b98cb5ffd926550866b2764b24c2f"
+    },
+    {
+      "path": "area1_q1/area1_q1_corruptions.json",
+      "bytes": 192088,
+      "sha256": "e14a786350f8dabc408d4de1ee15ddbd33b8984499b625acc75a386245f2a04f"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_base.js.txt",
+      "bytes": 677,
+      "sha256": "776d18d2473beba7a883d3e6f48cf8e2bb1180b27ea3b6d482ec7951679a1dc0"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k10_lost_bracket_inside_string.js.txt",
+      "bytes": 752,
+      "sha256": "87e1ccfe5a1cebf17137b563a08ccf35f3b0aaba5409563a40bc1267c7cf01f8"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k11_complete_block_inside_string.js.txt",
+      "bytes": 804,
+      "sha256": "f58721bbacac8913b490eefc0c89830cd73985f8d699a316227359b41e6fd35e"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k12_lost_bracket_then_bracket_led_code.js.txt",
+      "bytes": 802,
+      "sha256": "ea0abb571424de767aabb2977edfa422afc3ddf74f0f9b3326336c0fe6ef3490"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k13_lost_bracket_then_fieldlike_code.js.txt",
+      "bytes": 832,
+      "sha256": "b43df9dda9c5dc139ddf000e54d8d0e890b5bed181273d77f41d86d8964f769b"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k14_duplicate_keys.js.txt",
+      "bytes": 727,
+      "sha256": "20ed44c4060bcd38bdc808a986db3d0c469f62a97a2f96f06f4c733d878f3113"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k1_opener_lost_bracket.js.txt",
+      "bytes": 807,
+      "sha256": "7fd9ee41dd737f4533706cf2ad0229d2e2e0b5f6b3238673fd307bd0524a7592"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k2_bracket_trailing_comma.js.txt",
+      "bytes": 678,
+      "sha256": "c3e663bc08ec7bb8475d2161f7bc078258c9382ff9571391fce9605b9d7eb0a4"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k3_bracket_trailing_space.js.txt",
+      "bytes": 678,
+      "sha256": "ee62b2a23c3fb754cf3735c60039a1f845ed01bb1faf31423e52272afb3bca5c"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k4_stray_bracket.js.txt",
+      "bytes": 683,
+      "sha256": "9295d68a65755bba5b3b26e9667925d5c1c5abacd086019e40465659f0ccf636"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k5_opener_inside_opener.js.txt",
+      "bytes": 837,
+      "sha256": "5eb5d30e65551ebafe8fe4984b08beb5ce15f8feabfa5085bdaf5433b3b1d9fc"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k6_one_line_block.js.txt",
+      "bytes": 759,
+      "sha256": "14fd286ac529156a1333aa3735cf5d81ef9a3234edfe4b15c3f3d4b011a03a9c"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k7_close_lost_bracket.js.txt",
+      "bytes": 672,
+      "sha256": "8f03fbcf5f023f63fdd320e58e3891073d30a6921b469453fb871928f9131221"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k8_bare_field_no_opener.js.txt",
+      "bytes": 724,
+      "sha256": "0a44ba6b7b5ee3576ceda94aadb28a49a3c3c4e62dea97ec141c8fded570ed1b"
+    },
+    {
+      "path": "area1_q1/sources/js_ts_k9_unterminated_at_eof.js.txt",
+      "bytes": 775,
+      "sha256": "f13c7dc38ed8b9e3735498a025321bd4a8096c411c3071eb2a97d5e413d41b5f"
+    },
+    {
+      "path": "area1_q1/sources/markdown_base.md.txt",
+      "bytes": 596,
+      "sha256": "3e7cd20016afa09b0a7f115be1bd35934119e963fdc1e207de69e3c2cb1dcd1f"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k10_lost_bracket_inside_string.md.txt",
+      "bytes": 635,
+      "sha256": "ea86a2b6c4983b2cad6c8f0f3dd3a751d9ba8812d1a1600a604c69c4ebfdb313"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k11_complete_block_inside_string.md.txt",
+      "bytes": 706,
+      "sha256": "c9db3a53b17dc7e63c6bda1714dc7034c0f41cb0159fbbac49639d381d2f3894"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k12_lost_bracket_then_bracket_led_code.md.txt",
+      "bytes": 728,
+      "sha256": "e1b2a635924603feb530acf7c0d938cb40793baf1d7850d1b8ca53b3207fd74e"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k13_lost_bracket_then_fieldlike_code.md.txt",
+      "bytes": 732,
+      "sha256": "6dfa8d9f062903b1b64856096038ad1bcf52bf09ea2e8b1a135c36d60622efa8"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k14_duplicate_keys.md.txt",
+      "bytes": 640,
+      "sha256": "06dc170f917c13f3053e53c05d72dd47ac9f255ca68648f776468fe33d475f78"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k1b_md_lost_bracket_keeps_dashdash.md.txt",
+      "bytes": 711,
+      "sha256": "4d72ee5f2c1a27a9ec3e5e7a2640c7b4c944de6e0ba52feadd858a6d7bf5379f"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k1c_md_lost_dashdash.md.txt",
+      "bytes": 592,
+      "sha256": "aed20c4cded06013d7f0a5a73ecb277e9813ae311a2e0809d62e969ba2b1983a"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k2_bracket_trailing_comma.md.txt",
+      "bytes": 597,
+      "sha256": "e8cb9e4ce15e0caa1ce1ab95348face62e615f188699490c2f6671ef20511c97"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k3_bracket_trailing_space.md.txt",
+      "bytes": 597,
+      "sha256": "e72ee3b983fbe54e104bb641a037c72ac9ff345c16d55609e6f0ef5d51faab45"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k4_stray_bracket.md.txt",
+      "bytes": 608,
+      "sha256": "3c9aca666d2427ab82b4bc9a103cdc8e80cd26022044eb79c77d5e11b67d9dd1"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k5_opener_inside_opener.md.txt",
+      "bytes": 732,
+      "sha256": "456fba5e6639ba0c9e4f5e87ecae0f8abe25597e6b50a5738a3459540c57aa84"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k6_one_line_block.md.txt",
+      "bytes": 675,
+      "sha256": "d6a4f3c7cd46a56ceb0c4c2c3e615266737502ce494c56082735ad1d484e7179"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k7_close_lost_bracket.md.txt",
+      "bytes": 594,
+      "sha256": "eaacd4049b56b336ee597bcbb818196feb1c8af925cc33a00a090c04a89abdbf"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k8_bare_field_no_opener.md.txt",
+      "bytes": 640,
+      "sha256": "a4b3a701501c59dfb77fd3beab5764143893209a025902e03c11eadbf068e2f9"
+    },
+    {
+      "path": "area1_q1/sources/markdown_k9_unterminated_at_eof.md.txt",
+      "bytes": 688,
+      "sha256": "6aa759d73539a5a614a3079544dba03308d8549b8c590a96fc63f8c9187f4626"
+    },
+    {
+      "path": "area1_q1/sources/python_base.py.txt",
+      "bytes": 620,
+      "sha256": "5f80e888329bdb0f3a03999dcb5238f3d6c8398b8f93d994821e73411f9b43f0"
+    },
+    {
+      "path": "area1_q1/sources/python_k10_lost_bracket_inside_string.py.txt",
+      "bytes": 740,
+      "sha256": "8c2ed1b4306f1552bdfa039269138f786a6b27c98af8e443fbdc148570bc1b64"
+    },
+    {
+      "path": "area1_q1/sources/python_k11_complete_block_inside_string.py.txt",
+      "bytes": 801,
+      "sha256": "c07d1dfe608c0299adaae67072fa36860e59ef14026cdd465ef7b9889daa8cff"
+    },
+    {
+      "path": "area1_q1/sources/python_k12_lost_bracket_then_bracket_led_code.py.txt",
+      "bytes": 742,
+      "sha256": "7efb107fa1fcce3feffa581e0c4d1900d0b5dfdd1a7cd5a75a0061bdd076deea"
+    },
+    {
+      "path": "area1_q1/sources/python_k13_lost_bracket_then_fieldlike_code.py.txt",
+      "bytes": 767,
+      "sha256": "ad90c73d308ae6f14c323d31e2c257a85e255f40eb0b5b47aec46a74776db1a2"
+    },
+    {
+      "path": "area1_q1/sources/python_k14_duplicate_keys.py.txt",
+      "bytes": 668,
+      "sha256": "9f65d3d4795f0bafe41f14615422936b8698e9a2791abb2a22902b26e8e706fb"
+    },
+    {
+      "path": "area1_q1/sources/python_k1_opener_lost_bracket.py.txt",
+      "bytes": 739,
+      "sha256": "2a150d8c2c9a16d59c9117f16855424938aa654bbdb2c6dcb7a34d6c54823141"
+    },
+    {
+      "path": "area1_q1/sources/python_k2_bracket_trailing_comma.py.txt",
+      "bytes": 621,
+      "sha256": "1f41ef0571555d14b0c5b2fbb91b437f8dce86b20a0068635c8f37fe52ac8fc8"
+    },
+    {
+      "path": "area1_q1/sources/python_k3_bracket_trailing_space.py.txt",
+      "bytes": 621,
+      "sha256": "8a0b383ef48ef3983b1d98c6cd1e118e771165564c54c2b7fd26fab3e5c803e4"
+    },
+    {
+      "path": "area1_q1/sources/python_k4_stray_bracket.py.txt",
+      "bytes": 625,
+      "sha256": "86d5d0e4137460f28941f8ca036a1f9503349383d98e1679483360ea6186e113"
+    },
+    {
+      "path": "area1_q1/sources/python_k5_opener_inside_opener.py.txt",
+      "bytes": 766,
+      "sha256": "b9fc8835c569858f7d5b72a11ab58d85bc84490ba353bc9a8feaf8e02ce32faa"
+    },
+    {
+      "path": "area1_q1/sources/python_k6_one_line_block.py.txt",
+      "bytes": 695,
+      "sha256": "a5f722552b1c161f7a7c326347af16883f1c74a578a9cb24b26e2a6886b4fc15"
+    },
+    {
+      "path": "area1_q1/sources/python_k7_close_lost_bracket.py.txt",
+      "bytes": 616,
+      "sha256": "72016f6f64636094892e88b4da3ad9759a5a3b4b2ce0784727c8c1ce0e983b4e"
+    },
+    {
+      "path": "area1_q1/sources/python_k8_bare_field_no_opener.py.txt",
+      "bytes": 660,
+      "sha256": "4c50f6d0a85c0ce9d5e1365bcad9a9d4214d8d94f9a3ffc4df6f7ca56f8a84f7"
+    },
+    {
+      "path": "area1_q1/sources/python_k9_unterminated_at_eof.py.txt",
+      "bytes": 713,
+      "sha256": "d5c1d32f0e84e17f552d61a60447f5e01f3da710ae4d2a7e9b8b926e601de0ba"
+    },
+    {
+      "path": "area1_q1/sources/shell_base.sh.txt",
+      "bytes": 600,
+      "sha256": "b2344dab5d098dae0739e7d9c4dc2e524fc898a28a4c67f70082a42fa8eb87af"
+    },
+    {
+      "path": "area1_q1/sources/shell_k10_lost_bracket_inside_string.sh.txt",
+      "bytes": 668,
+      "sha256": "551e5eb41a2dd9514bcf0dddf1ec0303f7949ca6171a26216874d34d4bfefc31"
+    },
+    {
+      "path": "area1_q1/sources/shell_k11_complete_block_inside_string.sh.txt",
+      "bytes": 717,
+      "sha256": "c591ba5d54c020af765b2d413da2197e8fbeb88db2e756917cc901f1327e8bd1"
+    },
+    {
+      "path": "area1_q1/sources/shell_k12_lost_bracket_then_bracket_led_code.sh.txt",
+      "bytes": 714,
+      "sha256": "c70dc41e55651e8191db92b308d93000a9ba5241dbc1bc7cb7ef301e90c3bbcc"
+    },
+    {
+      "path": "area1_q1/sources/shell_k13_lost_bracket_then_fieldlike_code.sh.txt",
+      "bytes": 719,
+      "sha256": "a599df63bfd54749b6866645c49a802a16d7e65834081e7cc3c4f456a67045e1"
+    },
+    {
+      "path": "area1_q1/sources/shell_k14_duplicate_keys.sh.txt",
+      "bytes": 648,
+      "sha256": "ec1b13776abd8acfe95f997dc915255070c9ea3b17c349086348bb19868c0ce4"
+    },
+    {
+      "path": "area1_q1/sources/shell_k1_opener_lost_bracket.sh.txt",
+      "bytes": 714,
+      "sha256": "fc25f8444da31a2ab881b6d32c57d789562f38a794fe2fa8b252ed3257ca4b7c"
+    },
+    {
+      "path": "area1_q1/sources/shell_k2_bracket_trailing_comma.sh.txt",
+      "bytes": 601,
+      "sha256": "2f0cac447512bb6dc7d4cc7fe66e7171c9655a56cfbc486a82fb11b1991e82d4"
+    },
+    {
+      "path": "area1_q1/sources/shell_k3_bracket_trailing_space.sh.txt",
+      "bytes": 601,
+      "sha256": "cfde9a36ef03cf36be5962dc24c959cac15c9143a7e26a61ccb3ab69cc86abc4"
+    },
+    {
+      "path": "area1_q1/sources/shell_k4_stray_bracket.sh.txt",
+      "bytes": 605,
+      "sha256": "fd2269c613a77dda79dd1b9ca8998d4c4b21a941b260a39623298fae1e684240"
+    },
+    {
+      "path": "area1_q1/sources/shell_k5_opener_inside_opener.sh.txt",
+      "bytes": 741,
+      "sha256": "46aaa2ed512b5b819a2d6afcf4b6bbb5fef38acf0c5a28e274b255487694ab9f"
+    },
+    {
+      "path": "area1_q1/sources/shell_k6_one_line_block.sh.txt",
+      "bytes": 670,
+      "sha256": "3644c6f0e71c0a3fe89da9a016b6ffbbc715ffadf9a3c7ead842813f1efd9557"
+    },
+    {
+      "path": "area1_q1/sources/shell_k7_close_lost_bracket.sh.txt",
+      "bytes": 596,
+      "sha256": "d90fe59430074da4e8ff44c0b946489a3a35d5a6db2ce916485b9689bad3ddd2"
+    },
+    {
+      "path": "area1_q1/sources/shell_k8_bare_field_no_opener.sh.txt",
+      "bytes": 635,
+      "sha256": "fe5e3bd8b7991ba9967e3d03ec386db95baa1351ed374158ba8878bcc452b861"
+    },
+    {
+      "path": "area1_q1/sources/shell_k9_unterminated_at_eof.sh.txt",
+      "bytes": 693,
+      "sha256": "4de1d76f66ff60ca9643aa1febcb8addcef3db79508936d2680ca4296fcc6bab"
+    },
+    {
+      "path": "area1_q1/sources/sql_base.sql.txt",
+      "bytes": 621,
+      "sha256": "76e09ee8ff7d41ac62a56af66b64d51392ff05799880dbd9f9eb5c9fa863065e"
+    },
+    {
+      "path": "area1_q1/sources/sql_k10_lost_bracket_inside_string.sql.txt",
+      "bytes": 695,
+      "sha256": "91487953de67d3961a570056db7c086486702892deb9d53ab5d5f5c0b9035efc"
+    },
+    {
+      "path": "area1_q1/sources/sql_k11_complete_block_inside_string.sql.txt",
+      "bytes": 747,
+      "sha256": "861482a1444f803664d31c2ba346e8c231d16f289a6f09fcdc9ddbed8c8e66f2"
+    },
+    {
+      "path": "area1_q1/sources/sql_k12_lost_bracket_then_bracket_led_code.sql.txt",
+      "bytes": 746,
+      "sha256": "1feed421cdce907b7199df06084651eb01414a0331bdc0369a9d1f6a24994988"
+    },
+    {
+      "path": "area1_q1/sources/sql_k13_lost_bracket_then_fieldlike_code.sql.txt",
+      "bytes": 731,
+      "sha256": "8ec15f8c8f59305023b688b63378c2fe2b72b36afb24a0bba8d2023d9927817a"
+    },
+    {
+      "path": "area1_q1/sources/sql_k14_duplicate_keys.sql.txt",
+      "bytes": 671,
+      "sha256": "fe1e364589c402bc76036bb8e5f4de753d9fe4b847e802fafac92d638a6e524a"
+    },
+    {
+      "path": "area1_q1/sources/sql_k1_opener_lost_bracket.sql.txt",
+      "bytes": 737,
+      "sha256": "aa365b8177a7707d0fa80e8950f217be0d6b10310133c2bb7d55ff96d3e5678a"
+    },
+    {
+      "path": "area1_q1/sources/sql_k2_bracket_trailing_comma.sql.txt",
+      "bytes": 622,
+      "sha256": "b29e9a0f34ad4632aded21fb58d0379bdf51a4b110d2995a1c5772848c92e4a8"
+    },
+    {
+      "path": "area1_q1/sources/sql_k3_bracket_trailing_space.sql.txt",
+      "bytes": 622,
+      "sha256": "bab3607dd24fe63425c7ff56f948ece718b52c43ebd793c79d9f0b46c5833dfd"
+    },
+    {
+      "path": "area1_q1/sources/sql_k4_stray_bracket.sql.txt",
+      "bytes": 627,
+      "sha256": "986361caa2b21c2d0032be5bbb34ffa88a4a818f0f656f6263e1f504f33a1e4f"
+    },
+    {
+      "path": "area1_q1/sources/sql_k5_opener_inside_opener.sql.txt",
+      "bytes": 767,
+      "sha256": "db057d9a8ced9c8bd96fc4f1b2875aa4db74b81faf1e1205b4d299f22ef10c9e"
+    },
+    {
+      "path": "area1_q1/sources/sql_k6_one_line_block.sql.txt",
+      "bytes": 689,
+      "sha256": "e736f0f03f5bca46bb3cd5c863376d713205d4f01ad5828834af752ce0c95135"
+    },
+    {
+      "path": "area1_q1/sources/sql_k7_close_lost_bracket.sql.txt",
+      "bytes": 616,
+      "sha256": "ce54ec45be1f7b2b006266fd590fe4850321cc87f7e9a7cb71f890a42166870d"
+    },
+    {
+      "path": "area1_q1/sources/sql_k8_bare_field_no_opener.sql.txt",
+      "bytes": 654,
+      "sha256": "6777b4a4a0a25998852749df5bc6e84128bf67a193fa0d37e23f1a21e4215be0"
+    },
+    {
+      "path": "area1_q1/sources/sql_k9_unterminated_at_eof.sql.txt",
+      "bytes": 719,
+      "sha256": "c607e648092da839598f4da66fcab36a8f2f6c46651764b09a3998da7fdd1f1a"
+    },
+    {
+      "path": "area1_q1/sources/yaml_base.yaml.txt",
+      "bytes": 576,
+      "sha256": "a25c8b9d7d95a6ddd5ecc9df785137b34f1349e8b40305a09a3cdcf534a07d45"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k10_lost_bracket_inside_string.yaml.txt",
+      "bytes": 641,
+      "sha256": "9bd567acb05c53e6ebae8dfce1b342dfe394c34c605dbfe3e079a7382b7db21c"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k11_complete_block_inside_string.yaml.txt",
+      "bytes": 696,
+      "sha256": "d06536de6743fd3eaef503379b0c50e45415eae86fb9988f4ac0ec99a05a6231"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k12_lost_bracket_then_bracket_led_code.yaml.txt",
+      "bytes": 690,
+      "sha256": "7aca750bf21811451c4d0bae393971c9b3b168b353ec159e56049c0944a36365"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k13_lost_bracket_then_fieldlike_code.yaml.txt",
+      "bytes": 695,
+      "sha256": "6f2bebf98002b06c8f875e6412e5f8eb2b06832fed133fbf28317dc29b5b2216"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k14_duplicate_keys.yaml.txt",
+      "bytes": 624,
+      "sha256": "989f1be9b3b480f118fcccd6c2f18c9060eaa1576bcfd227b4c9f30b938ae63f"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k1_opener_lost_bracket.yaml.txt",
+      "bytes": 684,
+      "sha256": "410c889d73081130907228782945af0918075bc357db8da7c28596c33d36ecc6"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k2_bracket_trailing_comma.yaml.txt",
+      "bytes": 577,
+      "sha256": "16fe2525673cfb8bc7a4da58548cb6184ad9cc674e985dad8e75df1a7c7d770f"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k3_bracket_trailing_space.yaml.txt",
+      "bytes": 577,
+      "sha256": "04e4041eb5491e267edc52e63a1d6b0bef90a298e32b709625c39e1d58f8e220"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k4_stray_bracket.yaml.txt",
+      "bytes": 581,
+      "sha256": "f1f991910b9c5b6d8b76b461745dcb892215ffe3309d8423db539817ccaa3587"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k5_opener_inside_opener.yaml.txt",
+      "bytes": 711,
+      "sha256": "75732b5e1154c091d951845730f95429fdad4ec72f4707b4457030a79188cfd2"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k6_one_line_block.yaml.txt",
+      "bytes": 640,
+      "sha256": "e677c056e9b960039ce39d25b11e08bb8ad2592bba5ab0642d3a8b1ddf17958a"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k7_close_lost_bracket.yaml.txt",
+      "bytes": 572,
+      "sha256": "a679fa581b66c745f80ba0d7bc2122b1de4f0af6f0e1461fa4f0492d83d6d01a"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k8_bare_field_no_opener.yaml.txt",
+      "bytes": 605,
+      "sha256": "bb8d2195138da85a1b7f307562efd0ed30f14fb9c81cc571798cb34f1be434d9"
+    },
+    {
+      "path": "area1_q1/sources/yaml_k9_unterminated_at_eof.yaml.txt",
+      "bytes": 669,
+      "sha256": "c56bbec6bc43acf37040921ef03666f0d99da4c03e21f394d90c98ca29fb7601"
+    },
+    {
+      "path": "area6/area6_baseline_table.txt",
+      "bytes": 4999,
+      "sha256": "c5963cd2d04db88bcc4e68756307ffa85f9b11ff02658ce8f3a65682a92ea2d3"
+    },
+    {
+      "path": "area6/area6_inputs.json",
+      "bytes": 28764,
+      "sha256": "3b774058c0bfba333fd9ff0ad4707ea49563e7317f97042bdb5bb880de40e590"
+    },
+    {
+      "path": "area6/area6_outcomes.json",
+      "bytes": 147902,
+      "sha256": "8ed0cb6f0024678a1a87d109308585488f570afb0b34c4d9a9a98025ad7b9310"
+    },
+    {
+      "path": "nexus_base/bodies/bi__check_beacon_file.txt",
+      "bytes": 14965,
+      "sha256": "331a10d84056e2e63836ac960cabe0fc2e7f121364eb9c7ce2c8a3c45b14f0d0"
+    },
+    {
+      "path": "nexus_base/bodies/bi__run_beacon_check.txt",
+      "bytes": 2535,
+      "sha256": "52aabdf07c2935f93ee6c395f77af662e2ce86e54728150ef609b672eff093e0"
+    },
+    {
+      "path": "nexus_base/bodies/bmc__parse_beacon_field_lines._flush.txt",
+      "bytes": 461,
+      "sha256": "f037ee3f928e2a8f2b6fe20497d01c4e0383e6235587f64a38ae907e4043e676"
+    },
+    {
+      "path": "nexus_base/bodies/bmc__parse_beacon_field_lines.txt",
+      "bytes": 2150,
+      "sha256": "3f48ca7b5dd1d83497b875b18ffed7a85c7022f47556ca446548b6cff43267b7"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.abs_line.txt",
+      "bytes": 517,
+      "sha256": "eb5e57670fac2536ebdaf7848bb792f2c01ef3af2d5205f2e122f40211d437a7"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.body_node.txt",
+      "bytes": 240,
+      "sha256": "91e7efc4b752e309d49dd7d19ee22d1fd6a53c283c2c459bd4ba5c3954591ba0"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.callee_simple_name.txt",
+      "bytes": 275,
+      "sha256": "a5bdfc66dbcf64e138f98d6b12f7dbe1ad23e5d9367144afb47585b5f7ada29a"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.find_define_store_options_object.txt",
+      "bytes": 314,
+      "sha256": "9f5d92180e13e4a08643126a1b98cef65ea9063909c61ecb82e6d4a8f8356d25"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.find_define_store_setup_body.txt",
+      "bytes": 319,
+      "sha256": "d749c2bc363c3faaaa10e0f781c8f896396fee5bf2262e011b72ce8285f2364d"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.find_function_wrapper_body.txt",
+      "bytes": 311,
+      "sha256": "631ed7e744138a690f6e16adb691193a638cc4bd344286a01041ce661c3def3a"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.from_file.txt",
+      "bytes": 1243,
+      "sha256": "9ff40f84509d6a33d9e0593d14b39321b7e82b7032199bc16db481368110d52e"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.from_source.txt",
+      "bytes": 1442,
+      "sha256": "d704b24251efa72c820f59ba20a5d8cea89171a598f2986aa2c43be376100d4e"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.is_function_like.txt",
+      "bytes": 253,
+      "sha256": "e44fe6f788c241149ba7fe8765b2de6f9140473444e919fd848d52f6f854a8dd"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.key_text.txt",
+      "bytes": 232,
+      "sha256": "7ed5024b60d7f70cbb8bcf9be7b97d704950dce236c1b57356393824cad010b5"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.make_note.txt",
+      "bytes": 1613,
+      "sha256": "379fb56c6580f72103f001318ec8683ec897a8b9330ef8482ec7229c5352d0eb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.next_priority.txt",
+      "bytes": 422,
+      "sha256": "787da4fc638396a3b2a7a137d5cf584897c14b1a2b3f5c25964d87f613e5d010"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.node_text.txt",
+      "bytes": 248,
+      "sha256": "d8c77b3d4e68042b562f810ee879488f4b94078ac87234e31fc37a4a0717bd57"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.params_text.txt",
+      "bytes": 267,
+      "sha256": "f35917c6f5d9c365443ce5946f19bc551059b193bbc06ea82e993b8f52bb7ff1"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.qualify.txt",
+      "bytes": 856,
+      "sha256": "9bc1c9e973ce8f1efe522493010e2f2a76846d09ba0efd9fd677d0286aff84ae"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__JsTsOutlineContext.txt",
+      "bytes": 10581,
+      "sha256": "a0462fbb03d56a2165cd05626a86dbfab71548839641c64408cd10a57037176b"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___beacon_block_diagnostic.txt",
+      "bytes": 681,
+      "sha256": "36150ed68278d1fbf495e9b1f109025e8047066183fcde06d667b99df5e8c0f7"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___beacon_block_extent_for_language.txt",
+      "bytes": 1723,
+      "sha256": "ab732fd7ff9e93a375a8a045e7a946bb41a60e526b36fcdd616bc031102fdadc"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___build_js_comment_mask.txt",
+      "bytes": 2919,
+      "sha256": "a1227f4f89e48c70f61da009a2880ea70986326ec90c5ec2d426efea8e2c29dd"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___extract_markdown_beacon_context.txt",
+      "bytes": 2413,
+      "sha256": "22e3203ffe5b9868eb937391549853a8c42518350030d774c1b5d211395ed318"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___extract_sh_beacon_context.txt",
+      "bytes": 4557,
+      "sha256": "8136de136d469de47b9e309b6d7021fefd0964c091561e49379781a41188ea6b"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___extract_sql_beacon_context.txt",
+      "bytes": 5153,
+      "sha256": "4b3823f7a9d30fe1f482fdeb51a7c1ab0c6edf2e55bf5543b692cbfd6c18bf5c"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___extract_yaml_beacon_context.txt",
+      "bytes": 3503,
+      "sha256": "775062b7229ee75e919233b455d5e0452c5fd349005788a0cbd3af2d5b5a0df1"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___find_beacon_close_block_extent.txt",
+      "bytes": 4048,
+      "sha256": "627618f25cc3a9df6d2d98591ce58442f347ee35d7eec84ee63ce0aca18c6fde"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___markdown_source_lines.txt",
+      "bytes": 533,
+      "sha256": "8f1b970f5534bd38b7b07e635a644cd2c1241917b08fa5c2cc22444a6434abfe"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___parse_disk_beacons_for_language.txt",
+      "bytes": 2294,
+      "sha256": "73897ca62afa108858339d3aa27f564d370d191d62ebe37c21333bd0d1855fe1"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___parse_js_ts_outline_from_source.txt",
+      "bytes": 2934,
+      "sha256": "00c5c65f1cb42418cceab27be0066e1541ec303508bdea74fa3275c9a6187a73"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___parse_vue_sfc_tree.txt",
+      "bytes": 343,
+      "sha256": "e269a4b263a3f9fb29bb495ae12b6b0ff83c13ee92d361a5486d92aa835e2d87"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___strip_beacon_meta_blocks_from_context._is_meta_block_end.txt",
+      "bytes": 207,
+      "sha256": "f2e7e6a88950b1f52d6c4665deb630d251f5f6a437f4ee5effeedac6049043db"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___strip_beacon_meta_blocks_from_context._normalize_meta_line.txt",
+      "bytes": 487,
+      "sha256": "a2dc93588811ab9790eda8ae39ac956ef6ca61f336d2e95109603629a518a8da"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___strip_beacon_meta_blocks_from_context.txt",
+      "bytes": 2783,
+      "sha256": "6fe2ee14d943257c15097c51218bd3544c4604ff507608f795d290230b19b05c"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___vue_section_beacons.txt",
+      "bytes": 1305,
+      "sha256": "a0a3ef610bbedc4b424ff9458aff174833a57f901aaed7a851b814e4113539a3"
+    },
+    {
+      "path": "nexus_base/bodies/nmc___vue_sfc_sections.txt",
+      "bytes": 1956,
+      "sha256": "7940f9134df0a07ee5222bd19eed1587484fbc0a2669de2528a936dcc7078cfa"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_js_beacons._extract_js_beacon_context.txt",
+      "bytes": 3908,
+      "sha256": "2c12b6cda27e74706ae02a66b9fd31590331c12e722965b0aa59000d796f80eb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_js_beacons._header_line_for_node.txt",
+      "bytes": 239,
+      "sha256": "0efa2f7d0485dd373d9edda4cf7ee843e37471f370760523a20bb317954ea7cb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_js_beacons._insert_child_in_source_order.txt",
+      "bytes": 453,
+      "sha256": "99d4554f990fd2d744f10d4c1cbf859490ced9564749b2c3cccc205475d46cbb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_js_beacons._js_next_anchor_line_after.txt",
+      "bytes": 470,
+      "sha256": "f419a7a1753178dee5c35c24379b44fc98555a85485c97caaa6713fc27d3be53"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_js_beacons._node_source_order_line.txt",
+      "bytes": 332,
+      "sha256": "331568a039651d873dd0f09789574ab75a9d9c04e98c58c3ea0b2643e29be5b5"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_js_beacons.txt",
+      "bytes": 18397,
+      "sha256": "13959c49e2dd3f83a5cfc840a33bcc97a28f2b301ee3bc33dd872d6452fdf6eb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_markdown_beacons._is_structural_beacon_close_promote.txt",
+      "bytes": 363,
+      "sha256": "677295f9e4af683b3a08aefc942b39b0fdec7240a1a9d63f1e90e59ecba4d697"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_markdown_beacons.iter_nodes.txt",
+      "bytes": 238,
+      "sha256": "093a35784bb3da6a6346426ec102b0a7876ce492fbb5777f511e1df544dac3ee"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_markdown_beacons.txt",
+      "bytes": 16051,
+      "sha256": "b95f7f1dffde83d98fc5165f5683fc73fc368b112db6c72e9d202bb238e4caf1"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_python_beacons._extract_python_beacon_context.txt",
+      "bytes": 5171,
+      "sha256": "02036f02a2a2a331278ce58d4dd4d13d8abd96c5be0abca7de5451af1600e8b9"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_python_beacons._find_triple_span_for_line.txt",
+      "bytes": 197,
+      "sha256": "e2152fab4add98bc8c7d66965aef88fa918fdc485b8daec9330df4da5b98bc65"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_python_beacons._header_line_for_node.txt",
+      "bytes": 239,
+      "sha256": "0efa2f7d0485dd373d9edda4cf7ee843e37471f370760523a20bb317954ea7cb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_python_beacons._insert_child_in_source_order.txt",
+      "bytes": 453,
+      "sha256": "99d4554f990fd2d744f10d4c1cbf859490ced9564749b2c3cccc205475d46cbb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_python_beacons._next_anchor_line_after.txt",
+      "bytes": 744,
+      "sha256": "ab315e88c91dcf797f59cf45b1e0541a9a3b314fcc8eef5968ee1cd8cf0aad09"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_python_beacons._node_source_order_line.txt",
+      "bytes": 332,
+      "sha256": "331568a039651d873dd0f09789574ab75a9d9c04e98c58c3ea0b2643e29be5b5"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_python_beacons.txt",
+      "bytes": 24470,
+      "sha256": "b6e8a51c1305c569839f3ffb54b698e16106f2fa6f57a738b3f69728aad1f9b9"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_sh_beacons.txt",
+      "bytes": 3081,
+      "sha256": "332f16c19ed1193e6bd4dcdeacf088ce3727a9e8bed3f69581104e2a60a9c981"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_sql_beacons.txt",
+      "bytes": 3299,
+      "sha256": "f1895b52a6802ee6d7323f2134af7ba3a05a9dd7b60286f133e0c12a54dc431a"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__apply_yaml_beacons.txt",
+      "bytes": 3094,
+      "sha256": "5de3707d9dba3b4d5f49e77e6f80a131afdbdd5c74be8f9da706e15b483b2bef"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__map_codebase._collect_nexusignore_patterns.txt",
+      "bytes": 1899,
+      "sha256": "b88515b09d5626a91c290cbdda47a232ba146a20296ab193542b08c37322be45"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__map_codebase._is_ignored_name.txt",
+      "bytes": 388,
+      "sha256": "eb94920f3e993bb247b965b520bddb6c5477af7202f184a198a1c3fc3cd2b1a5"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__map_codebase.scan_dir.txt",
+      "bytes": 4272,
+      "sha256": "1ddab57fa6cf2db7baa5f39795fea998ffa40bc20fad932be67cd428d6057c2c"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__map_codebase.should_include.txt",
+      "bytes": 479,
+      "sha256": "482df418569f37b8d7febb25c87f1a1779bfa417e96ac8998ec1083d4042e917"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__map_codebase.txt",
+      "bytes": 14591,
+      "sha256": "f793d0ed4dacdb196a595b27cbfec3888091dfad0d7ce1d673c27dd1d269bfb5"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline.txt",
+      "bytes": 1359,
+      "sha256": "9f3ad5fcb5dab0f2bd061906f7e61d393f3ec258027b9b23b06db4286c3040c4"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline_core._assigned_name_note_label.txt",
+      "bytes": 245,
+      "sha256": "1937145919f3b395a99e53af9efd54c55d7c9757c607b2910f5e2c2ca8b3f5fd"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline_core._extract_ast_comment_context.txt",
+      "bytes": 1518,
+      "sha256": "e1155caed3be658dfc36658190996b1c85f30175235b9b034d8cee5b0cbc8f20"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline_core._iter_nested_statement_bodies._add.txt",
+      "bytes": 413,
+      "sha256": "f860a96cef09a5c3ba8fdf7ee6ad38f6c6af79648020c6687bc10f765b688edb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline_core._iter_nested_statement_bodies.txt",
+      "bytes": 1832,
+      "sha256": "41cee730193d7c7a3279da0bbbf53b5f51925ebb81258d133601d3ade60aeab0"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline_core._should_map_python_assigned_name.txt",
+      "bytes": 597,
+      "sha256": "902983c45329d4778a44790962161f9473ae1847f9b9ef19617fa1da8d63db16"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline_core.txt",
+      "bytes": 13497,
+      "sha256": "e545df5586f7071b48e4cf718b0a4cb7c6eb8f96d3f6417774f45b23cfeb5c10"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_file_outline_core.walk_body.txt",
+      "bytes": 6878,
+      "sha256": "78d3e958ff092eb2cbe44b71927dd617ce2c10c4789273417446c42bcb6e6837"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_js_beacon_blocks._strip_js_comment_sugar.txt",
+      "bytes": 480,
+      "sha256": "237ee590179db0e482e7d66b12c454819c2a84e66e08a367d292b9791fc06bd1"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_js_beacon_blocks.txt",
+      "bytes": 7974,
+      "sha256": "cc1158f43400aa9fa1b9327978cac3744ff48c3ac3ab077b55d679e89ee064a3"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_js_ts_outline.txt",
+      "bytes": 1901,
+      "sha256": "2abb610ed39c5fb531252774e12841f389ea92361b867b90d5138deb4e92dca5"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_js_ts_outline_core.txt",
+      "bytes": 1062,
+      "sha256": "2c4b071ab47f01bfc26a4f9fc3f91c55bc1998e90654ecfa7c4315ab2125073f"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_markdown_beacon_blocks._fence_marker.txt",
+      "bytes": 336,
+      "sha256": "ae6777b2e99be747f866efd167b34ea54d0d525c202e70a08538a7d0bcdbb1e6"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_markdown_beacon_blocks._is_structural_beacon_close.txt",
+      "bytes": 391,
+      "sha256": "d9ce05ed8496243255d1c4a2a265808756888666146cc9545cad96c95e39e70c"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_markdown_beacon_blocks._is_structural_beacon_close_2.txt",
+      "bytes": 357,
+      "sha256": "b69c900d75b0762af20d6d643f593214323a6c0e6f216c3171c2659d286bf0d4"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_markdown_beacon_blocks._is_structural_beacon_open.txt",
+      "bytes": 564,
+      "sha256": "f2081aa8209b91bf9ac4fd292ad7b138a4f5fc206ca19ffe58cb3fc461878072"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_markdown_beacon_blocks.txt",
+      "bytes": 16475,
+      "sha256": "1fa9856ff3c0714b155bcd6287ed9eec94af03552c06b5cd88c9b5b296c1ab07"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_markdown_structure.txt",
+      "bytes": 7098,
+      "sha256": "f06d5ce75547fd0729371e8483e9e483013dcd8192a9b9a1e2c462ac07c8b533"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_python_beacon_blocks.txt",
+      "bytes": 7840,
+      "sha256": "e5e44ed4c5b3fcdebb2a26e147563f8bf96e20b7ba8ab507d0807133dcea16d8"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_sh_beacon_blocks.txt",
+      "bytes": 6946,
+      "sha256": "00c58a39042760fd8da21369c525be8c87569524513eec9ae1ddf595d5191aeb"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_sql_beacon_blocks.txt",
+      "bytes": 7274,
+      "sha256": "7e721b9404c092101ea26bd36e7b3f73dc7bdca5ccf2764d6dab3e8a9463a9e8"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_vue_outline.txt",
+      "bytes": 7856,
+      "sha256": "ab98a324d634584f926e7925bb2f89c5ff83eda1f215d11dc6a51092b17566ae"
+    },
+    {
+      "path": "nexus_base/bodies/nmc__parse_yaml_beacon_blocks.txt",
+      "bytes": 6930,
+      "sha256": "1c962bc8021663df27d453e80926bd1ebda2dcb470a9ee3419efdcada69e9c05"
+    },
+    {
+      "path": "nexus_base/callsites.json",
+      "bytes": 20799,
+      "sha256": "2594911aa41a5b53d3b28a2937815d90c8b3f4cf4fc3b9e4cac2ca6ea8c9d12b"
+    },
+    {
+      "path": "nexus_base/module_symbol_index.json",
+      "bytes": 137682,
+      "sha256": "e03c4408a83485dc2f2d2cdd86c99f1c559bc5f3dfa8896e0952758f62a105e5"
+    },
+    {
+      "path": "nexus_base/named_examples.json",
+      "bytes": 143781,
+      "sha256": "b12eb4edc0a51c7a37eafc6248362f9d7ce8b8bc3dc83fcb0b9f5042005a0944"
+    },
+    {
+      "path": "nexus_base/recon_comparison.json",
+      "bytes": 3207,
+      "sha256": "5584e9bd5e90e16e52a5d0209bb7f941880bda840141464b5df81c556449d1ec"
+    },
+    {
+      "path": "nexus_base/records.json",
+      "bytes": 6373846,
+      "sha256": "625f665145519841053dbf71f37142c6b40cc46fa0acf1096fa30c16fbb88673"
+    },
+    {
+      "path": "nexus_base/records_summary.json",
+      "bytes": 3213,
+      "sha256": "a4d896e0f57beb9e14ff85c6abea6c634ef3f2fd4b532202ac85782c90aa03b9"
+    },
+    {
+      "path": "nexus_base/sources/CONFIG_REFERENCE.md.txt",
+      "bytes": 7102,
+      "sha256": "016c37e8b7a6fb003cd019cfe2f90c9ea11af8cf20786437777e376cc70fb636"
+    },
+    {
+      "path": "nexus_base/sources/README.md.txt",
+      "bytes": 33831,
+      "sha256": "cc2b96bc2574e551f3cf4a53351fde15380511cdb9e0e980f60e1a864e94fb30"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/SKILL.md.txt",
+      "bytes": 7184,
+      "sha256": "250cfee7fb8feda270fe870b5045fef7e38dd7274b8ce71657695f05130d5393"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/assets/CATALOG.template.md.txt",
+      "bytes": 1009,
+      "sha256": "8169da5ebd017b26d9288f5f9e2602c1ad49f4b1a976e8d0be3d2988658bacb6"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/references/block-format.md.txt",
+      "bytes": 5347,
+      "sha256": "23bae90367ec942b79fbb4475bd3f5f1a5a8d4613a3823ae134c3002e7353d20"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/references/code-map-folder.md.txt",
+      "bytes": 6021,
+      "sha256": "00184a2287d0ebb0c5243b0c3b4dbf9b918a7e59c0b166216cb6a0ce07a5fd2c"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/references/commands.md.txt",
+      "bytes": 6038,
+      "sha256": "e918af53c334fa7f5faf2d4422289296604a384c0363f5eb960d70a87c99bdd2"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/references/upkeep.md.txt",
+      "bytes": 4592,
+      "sha256": "541d08bd0a6ffe72192e30464d89814f79fa2e61c8c81aadfa8d45d78a4fe36a"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/scripts/_engine.py.txt",
+      "bytes": 157202,
+      "sha256": "b08b57774e8fd6fd14c450b7e332379e69a80a73c4956f0dcb85f6d1ae74eb2f"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/.claude/skills/code-map/scripts/code_map.py.txt",
+      "bytes": 65243,
+      "sha256": "181e6d92def58044335db469e07065f04bc608f319ecb78351f48c2394879658"
+    },
+    {
+      "path": "nexus_base/sources/agent-kit/README.md.txt",
+      "bytes": 3878,
+      "sha256": "de7a0a7d592f7ebb620e5cfd9187e24de127f326d542b915da949b74cde7015c"
+    },
+    {
+      "path": "nexus_base/sources/beacon_mutation_contract.py.txt",
+      "bytes": 29670,
+      "sha256": "1de961b59db0ad4ff5425990c4414c774138f99bf7b3133c5394512812dcd462"
+    },
+    {
+      "path": "nexus_base/sources/beacon_obtain_code_snippet.py.txt",
+      "bytes": 123875,
+      "sha256": "3982b73f1ed084b2e0ac689043b446f07d23bfa0083206a3661572c37aff59dc"
+    },
+    {
+      "path": "nexus_base/sources/docs/BEACON-BATCH-PARTIAL-SUCCESS.md.txt",
+      "bytes": 7547,
+      "sha256": "8eb2e7bcc3f9d4baec780dca2299462fa6b6d06cba1369d6caea136d2aae9bb1"
+    },
+    {
+      "path": "nexus_base/sources/docs/BEACON-CHECK.md.txt",
+      "bytes": 17010,
+      "sha256": "b2f2d3bcc32992276280e4d56786790c8f6d3c353a241a7f2bec556588efa1ed"
+    },
+    {
+      "path": "nexus_base/sources/docs/SPEC-cartographer-safety-governance-v14.md.txt",
+      "bytes": 240461,
+      "sha256": "18c51b682cc9a39bd1d83da4df9a6106149a5d8861d4a16e382c6fbb5081a93a"
+    },
+    {
+      "path": "nexus_base/sources/docs/SPEC-cartographer-safety-governance-v4.md.txt",
+      "bytes": 53525,
+      "sha256": "c880c51d8641864800b47c04814933343211c83a039fb7878b3e0ce9eff4abdd"
+    },
+    {
+      "path": "nexus_base/sources/docs/SPEC-cartographer-safety-governance.md.txt",
+      "bytes": 35685,
+      "sha256": "7dfe4268ce867cfb69c26cd2c17968c5fe4ab0aec548db08d196dae00588bb32"
+    },
+    {
+      "path": "nexus_base/sources/glimpse_deploy_trampoline.py.txt",
+      "bytes": 20319,
+      "sha256": "78f1aefe51526f4547cfd2c2da0699104ba781531363405eb2ed156a0a3731eb"
+    },
+    {
+      "path": "nexus_base/sources/markdown_roundtrip.py.txt",
+      "bytes": 50169,
+      "sha256": "ef3254e6edc119717a6c2c2aa152e9f9851d33bef8f8eddbb29e88ed0c27dbb3"
+    },
+    {
+      "path": "nexus_base/sources/nexus_map_codebase.py.txt",
+      "bytes": 602348,
+      "sha256": "883e0f026a61f399a5b2f098077777b38a2a7541525ca044a6d2afae7ab23c00"
+    },
+    {
+      "path": "nexus_base/sources/scripts/build_agent_kit.py.txt",
+      "bytes": 46597,
+      "sha256": "d5100fc3bad161d518d028c98b37fef98053c57e6de6d27a49780e04e9074194"
+    },
+    {
+      "path": "nexus_base/sources/scripts/measure_tool_surface.py.txt",
+      "bytes": 449,
+      "sha256": "7c588d9c1af21efde75faa196097b7c0ad2a3831462565f45e62f26acbbf3937"
+    },
+    {
+      "path": "nexus_base/sources/scripts/run_tests.py.txt",
+      "bytes": 41664,
+      "sha256": "a6cb8036e79193c41c89c0a5142a63e8ee90004c46935d479e3224a0fcdb3535"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/__init__.py.txt",
+      "bytes": 1831,
+      "sha256": "bfd8bd7733784dcec3a0696566a0ec5f9083193312554e99dc1e1dd5c32ea7a0"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/__main__.py.txt",
+      "bytes": 3090,
+      "sha256": "41b93700271b6e3f2ec45677dfc7e6c8d9b5e8a0c10db44cc3400ef9c4801978"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/ancestor_path.py.txt",
+      "bytes": 12345,
+      "sha256": "29e731ed998c6925420404242f76166a96ec209a7bba0806d9586b512ac21699"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/anchor_dock_update_spec.py.txt",
+      "bytes": 8190,
+      "sha256": "892847bfa5a39703728c8e7489a7ac161a078163b60f8013707cdeacd1d4c195"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/archive_context.py.txt",
+      "bytes": 24596,
+      "sha256": "a21d15d62ba6c50c5a2dcc425fc7e9692061d6b91126b932ad9b6b9cc38e8539"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/archive_store.py.txt",
+      "bytes": 62731,
+      "sha256": "b29945724cf2ae71fb6f0b0a338a78a6af8c0eb58db13c1528da0b4bd0189161"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/archive_texts.py.txt",
+      "bytes": 18055,
+      "sha256": "120b0a8f4ee1d2a9d86f60ac450d49ca11d8fedc378d0624214fa1c143d1e9dc"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/beacon_integrity.py.txt",
+      "bytes": 27968,
+      "sha256": "9e051e46cdac77aaade79d803600f201541018e022d1f629bc99008f84d65c05"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/broker.py.txt",
+      "bytes": 110015,
+      "sha256": "51198c6112a16af0491e74eacd3a31efa98afe0eacaea0d91502ef285c443c02"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/broker_protocol.py.txt",
+      "bytes": 17692,
+      "sha256": "70231d9d32fee690bf53f57a5da71a1942e2a99f9eff09ea4044d983c9ecf3e0"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/cache_render_spec.py.txt",
+      "bytes": 83850,
+      "sha256": "fd9ef3e277160db6b207b7b987754b488daa0a331fa6591c4121203db0aab269"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/carto_job_governance.py.txt",
+      "bytes": 189935,
+      "sha256": "547ed6eb8cbbf1417cf0b333c7d29568bae797bba1688f12b05c8c0de93e1d20"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/carto_write_governor.py.txt",
+      "bytes": 26898,
+      "sha256": "a87b67aaad8071c2b16e6510463baf216dbc3f69ae6f303b0b07d8921437a043"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/__init__.py.txt",
+      "bytes": 300,
+      "sha256": "9982df03483838832f3a318d3fb0701a92c8b4b8a8626d550467b972895a10f1"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/api_client.py.txt",
+      "bytes": 1229,
+      "sha256": "77c680673e936b4610bce35dbbc03e018c20a42d0ee9a5141cfa6b95f2da23e4"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/api_client_core.py.txt",
+      "bytes": 188871,
+      "sha256": "3ffd0e1e6ec5ed4f70e48052f1faac6f12bf839003a3cdaf308fd85fe504dc6e"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/api_client_etch.py.txt",
+      "bytes": 73720,
+      "sha256": "7aa42717ad8fd7d132b841dcceb40c3e97c379ae96e64514308b47f101b28992"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/api_client_nexus.py.txt",
+      "bytes": 998909,
+      "sha256": "ad36cfeb40813c95fd8e92518fcaf3529ca09dbe0a03f83346b7be881299edd4"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/nexus_helper.py.txt",
+      "bytes": 12544,
+      "sha256": "fc8ee07fabe9840671b6b6f1693315446d9c31c37fe4af2abd5711519d2b06f6"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/rate_limit.py.txt",
+      "bytes": 6360,
+      "sha256": "995992e12fb15f0bfc5f7415df1b1e030e8d725bdc646ee2bf96ac0e770a5df7"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/retry.py.txt",
+      "bytes": 3735,
+      "sha256": "51c81df9820f2677556ce99041b3a1dcb2d381c46bb2231256069bf8e115d088"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/client/workflowy_move_reconcile.py.txt",
+      "bytes": 62587,
+      "sha256": "ff2602ca0f66bac8a12b91edaf456001fb559ea7976e317d2f8aec9ecb184605"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/__init__.py.txt",
+      "bytes": 9374,
+      "sha256": "c184a8632e825207378de1cf00833e52c31170a8ff15eaaa708234ef1aa8e338"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/admission.py.txt",
+      "bytes": 14725,
+      "sha256": "5869eae25c73087c7133a3ec9a340f9fae5ef5fe4d02c1fa3b88cc09b52b66df"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/adoption.py.txt",
+      "bytes": 32737,
+      "sha256": "4579d2c0e856ea9b5a6be497b2316a7f1ad6ac637c81b9c9c6f6024ded5e32d8"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/barrier.py.txt",
+      "bytes": 53940,
+      "sha256": "91c426ba40f04487a27a6628cfcf3c3a88af1f95c90cbe9bfac02651a213be36"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/cache_view.py.txt",
+      "bytes": 17922,
+      "sha256": "f364ff8d3423802352691c5843a49e8a2b9532602c989d90f9265d8cba6ae790"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/canonical_node.py.txt",
+      "bytes": 14827,
+      "sha256": "3a9767feb3c250712fd05dc6a4a14e4e2dbf53d263a4f76aa03537fd791eca7e"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/checkpoint.py.txt",
+      "bytes": 27116,
+      "sha256": "c6eee62d715bdf69d3da25cacd6504e05126747ffb894db49d33aee0c2aa548a"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/durable_io.py.txt",
+      "bytes": 2993,
+      "sha256": "cbf40c2071a12212fd188242acb5949d88ccafe8826e4d3efd5a3182ef5a5c33"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/effects.py.txt",
+      "bytes": 55162,
+      "sha256": "771c862ee875dfd8ab715e8f4b2f4d24f0da94ea3b18f8376051de7a067642ff"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/epoch_publisher.py.txt",
+      "bytes": 20489,
+      "sha256": "6ecb2046ac46e3058cdadf2c5928079aeb7038f7afcbc4d0a03fd707b82b23c1"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/errors.py.txt",
+      "bytes": 10025,
+      "sha256": "95b286023c817d10e799b34acb78342e3e18619bf35560ec9cd75baa7c313aa6"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/journal_store.py.txt",
+      "bytes": 30926,
+      "sha256": "93f36e1d6c4111e16f29724ae51c2222eba39edccb05a9cc82ed9a0f0f939d63"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/operation_cache.py.txt",
+      "bytes": 31935,
+      "sha256": "99e0bc10ad7f146cc52a6afa7b8bf8739e53c66344c914bc72fb3d44666e8bc6"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/paths.py.txt",
+      "bytes": 10680,
+      "sha256": "a66d01f4cb8e04b68328dc44d3eebcd2c02fd90cbf18dfdecf61b54f796d6e87"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/read_advisory.py.txt",
+      "bytes": 7982,
+      "sha256": "0383525d99c4dd3f647e1e773fa7dd5073d8ce47a27a1a417d36eeb5d0e232e9"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/refresh_authority.py.txt",
+      "bytes": 40812,
+      "sha256": "706a73349b0498efb6a6fe4028a780cb3b90257465a51b5c5ccc6223bba561f6"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/schema.py.txt",
+      "bytes": 75793,
+      "sha256": "6971617a9401940172e0c42dde58d6785e3ce4e9ab2502af769b7cbaa055f36e"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/snapshot_store.py.txt",
+      "bytes": 30015,
+      "sha256": "c4246f4bb17e611ae6bf87da335fbdc6d1ce4ada35cff00edc6bc88897c7a8fd"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/coherence/transition_effects.py.txt",
+      "bytes": 30907,
+      "sha256": "7486524413dc7dee0a2d728c74f8fdad2f767cef1969c366fd5d8cd4616a8f62"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/config.py.txt",
+      "bytes": 31082,
+      "sha256": "2e9b406461c22f61c92897d3bb2db5bafea4949439b6813d99f8f62ca2598858"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/daemon.py.txt",
+      "bytes": 12090,
+      "sha256": "1a2d626ee02c0781467d99e194944a7aae8cb2e0608538c083a124b53610f4c5"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/dock_peek_metrics.py.txt",
+      "bytes": 16212,
+      "sha256": "a45419d371983b0c0199c7a5bd1f82ab9c2fa5d7c18336f0adc3c78abea3310b"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/f8_slice_policy.py.txt",
+      "bytes": 284912,
+      "sha256": "4db563734e0cc1d03c82f452c7884ef050eaecb3ec8edc60699113e920f40d6a"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/glimpse_estate_payload.py.txt",
+      "bytes": 29861,
+      "sha256": "f5df6f1f79be16381f716f3b9c5bbdf335e85633d199f6e84457c9f1efc1263b"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/glimpse_since_policy.py.txt",
+      "bytes": 77824,
+      "sha256": "c2ea934f38f4b0657a92bebeda6b0246e68ea240172b6034e93b5c22d508e726"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/handle_corrections.py.txt",
+      "bytes": 5585,
+      "sha256": "0606914cbe5ed9704b47c3067740103fe0cd5a93316c0578de2e6721a935dbd6"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/job_status_view.py.txt",
+      "bytes": 6464,
+      "sha256": "3f8e30e922c0ff764855ddec93c2ed22c82e650d94a6600e8d312d06470b6267"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/legacy_tool_mapping.py.txt",
+      "bytes": 8072,
+      "sha256": "b67639ce72365c23a394c3c8b7aa750eed8a52f95c894a301e9ecaf33e8089da"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/lens_engine.py.txt",
+      "bytes": 27664,
+      "sha256": "2f414baaf9da8116e18a0498e612e7eebf80f23b2a1623f095b267ca1ac540f5"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/lens_spec.py.txt",
+      "bytes": 10166,
+      "sha256": "f69d31a08c0ac9a03a6c393651bb47a162abf97b7feadb8e1c23c7eaa0d1f583"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/lightning_rod_mutation_spec.py.txt",
+      "bytes": 19113,
+      "sha256": "dc3cd8fb23f2f95cedd08a2aa6ca23e92bab619660622337f90069ea86e56fcc"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/lightning_rod_search.py.txt",
+      "bytes": 15739,
+      "sha256": "ba945fcd7e33ee16b8245324fd8597546ca5633e7e2487b4e6849b11582b030e"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/lightning_rod_tag_mutation_spec.py.txt",
+      "bytes": 14813,
+      "sha256": "dfbc55ecb2dcc7a007113f6a0dac81d0335a0760d03dbbdc16234419809e26c2"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/managed_metadata.py.txt",
+      "bytes": 16633,
+      "sha256": "5f55887c5e40c844b59eae7e11abca68760130eafe115cb2674c19376f7e5de4"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/markdown_generate_pipeline.py.txt",
+      "bytes": 44651,
+      "sha256": "1d1248a102205ce878c186d62a966df163a14a1c24d95b5742dc2a7f97c0092e"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/mcp_api_registry.py.txt",
+      "bytes": 55974,
+      "sha256": "5355830221f82f5a0b6368cefebf9f5c00e43bac5d62a7da5ee84984916ec255"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/merge_slice_groups_policy.py.txt",
+      "bytes": 31077,
+      "sha256": "704430681e5083b569bcc8f4c0f184d9fa815d0477a68089f75cb7e1db164b7a"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/merge_slice_groups_spec.py.txt",
+      "bytes": 15284,
+      "sha256": "371ab73427152b011a3b0c7d7f47ef1832133f24418a7e751778d00103f66d41"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/models/__init__.py.txt",
+      "bytes": 1074,
+      "sha256": "e88896560ba4b4fcab8d7794606a06d57c2a5942685a52f9f86d6b34cf2f645a"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/models/config.py.txt",
+      "bytes": 13916,
+      "sha256": "8e6cbf8ab888769ab0daa078a433a85f4ae54e8a0c8c6b614b8c7bee6e270c95"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/models/errors.py.txt",
+      "bytes": 9589,
+      "sha256": "05ac02a03267e9a6a3e3b509c9abad8f3ccae91f3e16f0ce01c50de97b234dc7"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/models/node.py.txt",
+      "bytes": 4617,
+      "sha256": "20cb0f01d164edf5bc820655a7a17203b8529834c81909c71ea05100be2f1afa"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/models/requests.py.txt",
+      "bytes": 2550,
+      "sha256": "62aadb62d967638042393106d72df296331cbf7cb59b51591cb2b44a45f03f2f"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/mutation_lease_governance.py.txt",
+      "bytes": 19161,
+      "sha256": "e58450c9d7257117e9e1c9709558dcaf13fc0a294f8ca4ee2c2d0c4cb3a5a6ab"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/mutation_locks.py.txt",
+      "bytes": 19956,
+      "sha256": "7805b8e63eba1d421f18ed07c1bdafd77e351d260b86d0fe7b174a6ffe7c619a"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/node_archive.py.txt",
+      "bytes": 22384,
+      "sha256": "67d8a9a40160c9f76d99904e0acd5d170bf0c39b1513c98eb4a7efb02917443a"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/node_child_counts.py.txt",
+      "bytes": 1960,
+      "sha256": "779ee9227faf98088ea98bc2b0ce932337b10b3d2435cba5ef29f31ec17dd8a3"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/note_lines.py.txt",
+      "bytes": 33150,
+      "sha256": "6f284dbdae2fdf1e515d7091012cfb4fbcd139c36e6e72465518bf256e3affc6"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/server.py.txt",
+      "bytes": 2367654,
+      "sha256": "533767f81ccb2cb97013db64622da550d8e24de3838409b947fc6610333cbe83"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/shim.py.txt",
+      "bytes": 3682,
+      "sha256": "3d09250594f1445ebf664f78daef152156b9047b63c7be8aba5cb799ab891bfc"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/simple_form.py.txt",
+      "bytes": 23556,
+      "sha256": "19b6864d5f883674d7374026d95773933cee9d7c2739322e7ebfa578e4fccc9d"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/snippet_view.py.txt",
+      "bytes": 32071,
+      "sha256": "a231f8075c34adf0929feb0e2cfd3ac2a073f23308ba0a5f43c0c24e60a8c002"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/tag_purge_policy.py.txt",
+      "bytes": 14037,
+      "sha256": "dbd29e3ea537abfef3ee868c0243e45cc88ed2315a8d53d9ad9912d6cfc683cd"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/tool_path_resolution.py.txt",
+      "bytes": 22481,
+      "sha256": "b380081428ed69fd4179ccf219a1743593831f3a86b9084d6d6113dea944cc59"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/tool_surface_measurement.py.txt",
+      "bytes": 4711,
+      "sha256": "b290f0da699e0bde907004b683996e09e38a958e1d258ed3547be66a850c2bbc"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/transforms.py.txt",
+      "bytes": 13106,
+      "sha256": "8a9e6259500b6fc451bd7995f582418a87efd6ed25ab9173b2a40cc642db0c1b"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/transport.py.txt",
+      "bytes": 8486,
+      "sha256": "6c678aeed6b4981c4e55037e36776776f8245f0a247f632f1196c2c3b5f0145b"
+    },
+    {
+      "path": "nexus_base/sources/src/workflowy_mcp/weave_worker.py.txt",
+      "bytes": 62439,
+      "sha256": "7a751227d879f43c849f6a44ca63d2df4f6636f4768f770232702d9337d820ca"
+    },
+    {
+      "path": "nexus_base/sources/tests/beacon_check_fixtures.py.txt",
+      "bytes": 29717,
+      "sha256": "aca0c64bc1758d3d7bf328969f843964d12eb1baa8808c5da520b1b2b9012923"
+    },
+    {
+      "path": "nexus_base/sources/tests/beacon_seams_baseline.py.txt",
+      "bytes": 12969,
+      "sha256": "b4d4bc60d3f0708f167174e2b5484413ae0373cd48fc3806b5db453d46f7ce39"
+    },
+    {
+      "path": "nexus_base/sources/tests/coherence_harness.py.txt",
+      "bytes": 31089,
+      "sha256": "8f852c493d4ae4f536c79dd667d4d483c1799108d6472095e765f5d71c07ee4b"
+    },
+    {
+      "path": "nexus_base/sources/tests/coherence_s03_fence_scanner.py.txt",
+      "bytes": 37292,
+      "sha256": "7fcb6e010ef68422cfc3481d9c645c94585be7ca3ee3d3c2c737f0d66aad2f3d"
+    },
+    {
+      "path": "nexus_base/sources/tests/conftest.py.txt",
+      "bytes": 6373,
+      "sha256": "365183d6def72d8472ff5b6797977ac22b8462950b5a57d207ffa8a523db71f6"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/README.md.txt",
+      "bytes": 5802,
+      "sha256": "796a7c40edaaaa69232069a50234b58ad774dfb094873308be55ad2ae2e9e0c5"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_archive_folder_setting.js.txt",
+      "bytes": 8150,
+      "sha256": "638f045ece1b755a0301dccd9ca70a8d19310f04bad21ed7b41545427e8e45ae"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_carto_file_header_freshness.js.txt",
+      "bytes": 6305,
+      "sha256": "c5870a35d43d7fcb89f67fd2e06704cc6656e32f4a49ee5891738bb8158df017"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_carto_heartbeat_widget.js.txt",
+      "bytes": 3086,
+      "sha256": "48ee36fc33532cfc1a1b65aed42258845fe3fe7e1d53b1f19265824294424d83"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_dock_source_view.js.txt",
+      "bytes": 7080,
+      "sha256": "65dd00f63af0043f87c8e6ea7dfc98d4b77a86c903c75389e45108b3a1135777"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_f12_force_override_popup.js.txt",
+      "bytes": 9265,
+      "sha256": "7f9e346155e9e760875d8f2103a54e56425fb0f253191647f3ae039abf618780"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_favorite_postfix_settings.js.txt",
+      "bytes": 16162,
+      "sha256": "c843e442cf10fb5052ea60327349ef8fea8bf79244e6646354b5bd4c21b9765a"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_lens_modal_parity.js.txt",
+      "bytes": 5728,
+      "sha256": "a9a5e4f7f2cee798945caff65e352482206c25d7b0aea09b1a8aebcfaa72308f"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_saved_tabs_drive.js.txt",
+      "bytes": 87255,
+      "sha256": "9d143d3e2d3b2b17b538d851936ae22634ed7cfe745e88d86055f2a76b4824b4"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_saved_tabs_drive_ui.js.txt",
+      "bytes": 87556,
+      "sha256": "76d4416a7e96d1e7add8e775bd9fce22185daab65f988911cfb66e34ab75c5f3"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_saved_tabs_export_import.js.txt",
+      "bytes": 29294,
+      "sha256": "d9406a248766cddb9e704ec2a8d998391c664d6ee85cb689582592c7edffa0b9"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_saved_tabs_tier1.js.txt",
+      "bytes": 39949,
+      "sha256": "66613f862599be016a7d827a10ed4670c1e13554f1604a847c35ef0744da35fe"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_since_codec.js.txt",
+      "bytes": 8266,
+      "sha256": "0953983d325bfdfff3f4f0c51d7c22a9f3d8d1819d90dfad22bde425acfe8103"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_slice_group_durable_read.js.txt",
+      "bytes": 23631,
+      "sha256": "73486cbe073933656af021ed85142fa4346743ffdc0070e56acdd6c0ed3f92a4"
+    },
+    {
+      "path": "nexus_base/sources/tests/js/test_traversal_recursive.js.txt",
+      "bytes": 6110,
+      "sha256": "efa79bd1a4437034050d57c7505544d002dc413b5e35aea686d14230fa9550bb"
+    },
+    {
+      "path": "nexus_base/sources/tests/mutation_lease_harness.py.txt",
+      "bytes": 8477,
+      "sha256": "ef10582a21c91436721bbf777a0b0d0566d96f975537170c1c2d281572442fa5"
+    },
+    {
+      "path": "nexus_base/sources/tests/n01_copy_fixture.py.txt",
+      "bytes": 12263,
+      "sha256": "88de8742a1d87c7803da3a57c9da2aa00bbc4c72911d517c973d900dc4806b0f"
+    },
+    {
+      "path": "nexus_base/sources/tests/n01_reference.py.txt",
+      "bytes": 76628,
+      "sha256": "86085b4b375e18d1af18a43f809b726b890dc1c89794e2108426ba1bbeff83bf"
+    },
+    {
+      "path": "nexus_base/sources/tests/s06_reachability_inventory.md.txt",
+      "bytes": 21010,
+      "sha256": "8e3179a90b4ce613a95abc7ad8fe553a553a5fa1ade096e417ebac2ece08f83a"
+    },
+    {
+      "path": "nexus_base/sources/tests/stage2_harness.py.txt",
+      "bytes": 5264,
+      "sha256": "9342397f80135ed857d99b119aa7ba16ca8aca031e04b1e021d15baae47fa6ab"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_add_to_anchor_content.py.txt",
+      "bytes": 16417,
+      "sha256": "c15e6f53aef4c627aca7787f3e85dd6099460855c895328cc01fbd6d04516558"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_add_to_anchor_note_file.py.txt",
+      "bytes": 14496,
+      "sha256": "71b12cc21946fc0965be259ab0462f90b2cd315c12a80e90455b47b50eb2c33f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_add_to_anchor_tags.py.txt",
+      "bytes": 9487,
+      "sha256": "ab7a30371da644bc01b0a0a67983d74446b529f6bcf170fe95a42ed174831654"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_agent_kit_build.py.txt",
+      "bytes": 39351,
+      "sha256": "a1efdeecf1f01432d76dcf4c82e223c40c74046b840718f12796b8c8484db602"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_agent_kit_commands.py.txt",
+      "bytes": 31322,
+      "sha256": "b6a61436e8e3a1ed41f571cae090d2cf9dcb74a10108565a8a877c57e80395e2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_agent_kit_parity.py.txt",
+      "bytes": 16884,
+      "sha256": "a477e82cedce34024afac343a1821631e0eb35ed1155dca33410ab21fa6b624d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_agent_kit_tag.py.txt",
+      "bytes": 28734,
+      "sha256": "420eb58573c65c19d24bbb36adc9b3b49c42e5c8c1b22e56689d27dcd1cbfa8b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_dock_get_description.py.txt",
+      "bytes": 4207,
+      "sha256": "157f610d7b408d69ed66584e13334acede00e8895d27dd3868ea8a7cf95f5101"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_dock_root_guard.py.txt",
+      "bytes": 14630,
+      "sha256": "3d04bcb5532175375bb39c6eef1f0a720e48b83bfa8b27d6a835a448d53f3739"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_dock_update_spec.py.txt",
+      "bytes": 6095,
+      "sha256": "44a7d99afd58eb96f514124fd2ce2cbc3364491275cd2e77eae9c276b0e65410"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_dock_update_wire.py.txt",
+      "bytes": 9465,
+      "sha256": "b9ec344a9d1c5eff4238215e9287d2eec010427e4801de9d777928cc13d8aa51"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_point_extract.py.txt",
+      "bytes": 21293,
+      "sha256": "0f75b821b57a2d60b5f8f6037cdb9fb7daa0c3f40d38f9d35c88a7aa485ddf22"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_point_promote.py.txt",
+      "bytes": 50770,
+      "sha256": "1c51b7aea04d5d727b87d0b7e3218cdc241bc04c2af3839c71042d499a0009cb"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_point_read.py.txt",
+      "bytes": 15297,
+      "sha256": "1fe0e9aca865b8bc01fd283e51f1c380d1774506a46140635792726dab193287"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_point_touch.py.txt",
+      "bytes": 26362,
+      "sha256": "0cf14904df26e4ced1d16241464e91d8064f5feaf984ba8e9c7c66f6bc76982f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_popup_render.py.txt",
+      "bytes": 5494,
+      "sha256": "4d6c5ba2411e12698a345e32b1b3bade2afd35b0dd73d414815becb8ef056449"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_anchor_search.py.txt",
+      "bytes": 15215,
+      "sha256": "8a879f3f1424e39b81487f01ecb6200776937323e0fa7ac3898c8c52efe0fc52"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_ap_allocation.py.txt",
+      "bytes": 6442,
+      "sha256": "b2b296679af1160337314ac312226c49537ad328c81e2ecbdfeab2bffcbd6aba"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_chain1_mount_parent.py.txt",
+      "bytes": 7412,
+      "sha256": "c2addcad595ac6eb550cfdf10b062404fc972e13f8c295f4eb7609cc54f616dd"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_derivative_copy.py.txt",
+      "bytes": 11832,
+      "sha256": "7f88c7d1bc08bb1f560ce64893efc393f50997b28625099b98e4965e16ed0432"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_describe_texts.py.txt",
+      "bytes": 6784,
+      "sha256": "1c32e177b9f6656cc285eb7730dda13baa9e6e6c720570f54ec75b09f526657b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_dispatch_invoker.py.txt",
+      "bytes": 19946,
+      "sha256": "a5bd19c51f67ec827937d13dc09b60b744d232465e5fe337cfb472e52b1b8c04"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_fallback_reads.py.txt",
+      "bytes": 18102,
+      "sha256": "8b5a86646680504d3e5d311841c7eac6a60a7adb0f3f943a776b01c30f51ccc0"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_folder_setting.py.txt",
+      "bytes": 4499,
+      "sha256": "e33ad84c0b566719dc5547f94f47f9e1955f6aa57515289cc35366e7e98dba1d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_group_root_service.py.txt",
+      "bytes": 28686,
+      "sha256": "95b0534a8cc54058449c7a181851214844ae7a0e0f4694dd0a90700344c9eaaa"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_hint.py.txt",
+      "bytes": 10260,
+      "sha256": "0757c4440a783bf6c1f27bbcee09c45f4ef98d7768f521ac70faf8314d32b183"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_include_flag.py.txt",
+      "bytes": 18667,
+      "sha256": "8f71522988c84ff4b4ea3b9df51b65aa1d8a52cbae4c586af09f6c6d7ae38800"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_inherited_root_identity.py.txt",
+      "bytes": 24006,
+      "sha256": "f9c5fbb7858646bef2df2bd782afa45b1d8ea135979e02cd95eeea1747e8d3e0"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_inventory_verbs.py.txt",
+      "bytes": 14443,
+      "sha256": "d2dba1c7ebd76ec70534feba158f240ee223012c00d8bbd68ec955957a973dd4"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_overlay_view.py.txt",
+      "bytes": 10004,
+      "sha256": "57223848f4b3840f15a301d455f705be399a55664ee7b913c0dd96d3fd00d96f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_sink_refusals.py.txt",
+      "bytes": 29014,
+      "sha256": "6c12e8bdec12e8b677d54b47e86edc633f1d9f6f3eb4089f3e8f47ed21061b07"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_store.py.txt",
+      "bytes": 22764,
+      "sha256": "02f371927582077e6a36e78a22619a4929f783e097338c907e76c44e8cf4641f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_symbol_isolation.py.txt",
+      "bytes": 5847,
+      "sha256": "b73e807e97db426b5de0ea7a46f5ba2ebdd83de18d78e39ae430944439b65c88"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_two_phase_resolution.py.txt",
+      "bytes": 25112,
+      "sha256": "2fd7795d172c500d6b8f92c80ea417cf79e3e5bc3117445921feb1fc58e2d57a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_write_guards.py.txt",
+      "bytes": 7095,
+      "sha256": "11f5c218a45b94c24202686612fd7288190883e287fb56a8c9ef423edb4860d7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_archive_write_refusals.py.txt",
+      "bytes": 22399,
+      "sha256": "b5cfd19c2751b922e37b640ed75e007fbd16720aca4eaaf2e15a5b6ed81d143b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_atomic_writer.py.txt",
+      "bytes": 6778,
+      "sha256": "3acd6d58962e517ab4e3be9d5e30b9ff443b38d359d552349ab853dc64a69a44"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_check_engine.py.txt",
+      "bytes": 24177,
+      "sha256": "481b99e991cbd192381d41a36647b1af215b89dc4c74cdbc2b89652ef93ca973"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_check_verb.py.txt",
+      "bytes": 23068,
+      "sha256": "d203c44d36f7c2ed5a412f6e05ca8613f9be953e559cb680966aafefd1fcfbd2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_multiline_fields.py.txt",
+      "bytes": 9527,
+      "sha256": "39e26dfa4b504b1dc750a30d405bc8f6579814a7fcb3abd5fc2367e4c28fcfde"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_multiline_roundtrip.py.txt",
+      "bytes": 12879,
+      "sha256": "293f705e89aead07eb1a25f312644469f35d51a0b1bb69f1779423b06ec2909a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_mutation_commit_seam.py.txt",
+      "bytes": 14847,
+      "sha256": "5f31f472b8687ed3cb69bf720efce3df18eb9aff8b706e581c836cfe4ae14a13"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_mutation_plan_seam.py.txt",
+      "bytes": 22631,
+      "sha256": "62eb528a783bb1c39446630939d9d432b48f143314f1051ed7adc535e3919007"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_nonblocking_and_suppression.py.txt",
+      "bytes": 37470,
+      "sha256": "ac5d43bced11a8bd239c884bbada248c21089365fc86857f2dd7531a053b85a2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_python_decorator_anchors.py.txt",
+      "bytes": 17474,
+      "sha256": "1849b7b09618145cea7170877a09b7e5a9248eb52cbb862a97875865af80c1a5"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_shared_seams.py.txt",
+      "bytes": 22041,
+      "sha256": "5fbbcabf259583899f3f988b1d155617f1b11db7242ed30213f45965125e53e0"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_beacon_writer_reconciliation.py.txt",
+      "bytes": 12401,
+      "sha256": "6854d6240cde057f917e1033177599c395075547c4585fe7cfc9131962a8bf0b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_bracketed_uuid_handle_leniency.py.txt",
+      "bytes": 8109,
+      "sha256": "cbee65930e56a880d75132cc0a97c5f1df7d71334b25a5a65bda8e2f20b9efff"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_broker_observability_and_log_gc.py.txt",
+      "bytes": 7330,
+      "sha256": "197b6f5b0b80bf2a2d935e2a8e459293940cd15fdfdf42722cbc812a7cddfb18"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_broker_single_tab_autoselect.py.txt",
+      "bytes": 18305,
+      "sha256": "923e88b767ea23d0418b12e1111647c95f6ca2bec73c1f6afe582a12fdb46c53"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_admission_held_key_consult.py.txt",
+      "bytes": 29208,
+      "sha256": "9b600421031e17f35229956368ee23c5aeb98dd094571215fbc16b73d0d749c9"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_dry_run_byte_purity.py.txt",
+      "bytes": 6662,
+      "sha256": "6706327eb875c873804c3f1d676244747a12f3c7cc20689b544505a3961467ab"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_file_header_freshness.py.txt",
+      "bytes": 32504,
+      "sha256": "e28b52c0b7023cd2a4ad229beaf3300da064a3a87b89c8617960f99841bb5dca"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_final_cache_publication.py.txt",
+      "bytes": 41873,
+      "sha256": "bb2d4990ab6ed93c49bf2204f26bf6f97ac35b8e40ba853bd15d106b8ef602b6"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_finalization_caller_closure.py.txt",
+      "bytes": 26478,
+      "sha256": "ad5dd4cbfa3212e5475f02cf2b60003924b607df74c8ea40eb6b8c321aa08e47"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_gov01.py.txt",
+      "bytes": 9385,
+      "sha256": "c83246f22d5450535a2158fb095bd12d7eb13be04ef2bfcad8ea2c97c8100d5b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_gov02.py.txt",
+      "bytes": 6961,
+      "sha256": "776bd47ae7cea8374d2732185429fd00868bf31f2215b080e671a3ad715a794b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_gov03.py.txt",
+      "bytes": 4581,
+      "sha256": "c6c6ea51115a546c90ab25cc8f0c22fc4aa1b691cbc651f4753a75a97148260e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_gov04.py.txt",
+      "bytes": 6776,
+      "sha256": "5366785d52ca557ef99e1f334e7fc05b80e4df1a40fe5842d6645ff2b98b3b97"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_gov04_recovery.py.txt",
+      "bytes": 25056,
+      "sha256": "fc7511d01e60222636b95957483c4eebb1ee59536e4d2fcef3a0f757643305dc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_live_launcher_cleanup.py.txt",
+      "bytes": 33580,
+      "sha256": "6408e076995d65e209ac425e272c4707dc628c5839f02de962d5ddb3a2a3cdf7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_phase_c.py.txt",
+      "bytes": 21954,
+      "sha256": "170f309eac4419d9c21238152192247ea014e6894855bbc897ba9bad05a37d5d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_phase_d.py.txt",
+      "bytes": 34284,
+      "sha256": "480aaa6f7065071a64e708d6d6a969a28c250ded8896447f1f73167a64df7665"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_governance_phase_f.py.txt",
+      "bytes": 15207,
+      "sha256": "9257747bcadb97a2d563fc713ee9ac57d506705fb326dbcfe891e1e2bdbefe59"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_job_gc.py.txt",
+      "bytes": 13141,
+      "sha256": "1eb0edfe9a8c92e94c5cc99167b27c19268704832960bc7550d6739e395cce73"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_job_governance_a1.py.txt",
+      "bytes": 24778,
+      "sha256": "6604cbde2fd7bf3375c9f5b4b18c4326e35054213a260c04ff77bdb9c83a296c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_launch_feedback_client.py.txt",
+      "bytes": 2251,
+      "sha256": "ffa7aa418f913c5519c2c4b909036ca875808c7ee19e98d9676c953642025ad7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_progress_atomic_publication.py.txt",
+      "bytes": 5478,
+      "sha256": "ac6ced76b4a0d49adee3bf05922ccb1a73a633eeacbb09d098cabd0f2c41f7dd"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_refresh_fail_closed.py.txt",
+      "bytes": 33546,
+      "sha256": "14067450c7974e6ebc792106b2edcd74d51be242f31774becd1ea0b7c0265515"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_safety_phase0.py.txt",
+      "bytes": 12511,
+      "sha256": "46a30f507c09434d19b02acbe6cc9b37bd0f9e3a0ebc11ea0a1b6ab901dccfc2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_virtual_group_guard.py.txt",
+      "bytes": 5788,
+      "sha256": "96ae40af02e7ac93a00ac97d89ce9a13b257fb5d7ab549f97784ba51eb4306bd"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_virtual_groups.py.txt",
+      "bytes": 6820,
+      "sha256": "043719a35f4fe42ca352a94624b0f1382132a3505c2118b488dbd60462fded20"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_write_governor_a2.py.txt",
+      "bytes": 26699,
+      "sha256": "9784d701ee3e9021543ddcbf9411d20bbd6bd07fc8f6cb13b6618550b5115d81"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_carto_write_governor_phase_b.py.txt",
+      "bytes": 32406,
+      "sha256": "3d98186e0620d03fe38ce5c3b26595caeeb24fb48785524dce88423e9523ad8c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_chain4_context_max_nodes.py.txt",
+      "bytes": 3484,
+      "sha256": "a8de1fc8ca410cea3d8fea01db2a738bfff1c1ac259eb79a842a9c3a79aa131a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_chain4_lens_scaffold.py.txt",
+      "bytes": 3337,
+      "sha256": "75a35b13ce81cde16cd97e5b826ed4476fdbc7eb0b702ed6e3d5733ddda49eee"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_chronological_ancestor_notes.py.txt",
+      "bytes": 26429,
+      "sha256": "9d2d1c6498ad3b58f5aa687b72f67ac6ce330ebb0d03f930ee6a14f2d1e24d15"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_n01_copy_costs.py.txt",
+      "bytes": 28733,
+      "sha256": "fe48339114341d48812ebe373c3261922fec99fe8edb237e6439f9f95b4cc586"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s01_cache_view.py.txt",
+      "bytes": 10280,
+      "sha256": "1a55e00c9217f248e0faa3a688adf6b5c6f76e649791e98081687891f92b22ee"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s01_canonical_node.py.txt",
+      "bytes": 11978,
+      "sha256": "80c10044cfdfad58694d4b73c1fbd3c47a89e4740c3cd9c715ad0148fc2f53f4"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s01_effects.py.txt",
+      "bytes": 28408,
+      "sha256": "74c7e3dc1c14fd81ae3b08114a7fa643223173f3288416aa43af46352c790543"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s01_journal_protocol.py.txt",
+      "bytes": 18384,
+      "sha256": "aa51cdca657a8f830260ccacb620287e80d2778d7a3018fa004ccc5669d94b13"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s01_multiprocess_faults.py.txt",
+      "bytes": 6329,
+      "sha256": "e21158dd3aabf41f00314cd89369e159e9e5bfad1022530b92534d68ac7acc47"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s01_schema_paths.py.txt",
+      "bytes": 27999,
+      "sha256": "69cade55e82a9ed7c8e68d431fe98c480ad49632bb7555a42d69cc5f66f22560"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s02_bootstrap_gc.py.txt",
+      "bytes": 24273,
+      "sha256": "563c98f8be0e4f4514311f7a186c8f7cedf4d35c6358862762ff47b456e61d4e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s02_carto_lineage.py.txt",
+      "bytes": 20787,
+      "sha256": "9f6af075cb0d66bcfbdb1ad9512df1e57394c68715ad4597bc7bea986d117db4"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s02_compat_patch.py.txt",
+      "bytes": 9785,
+      "sha256": "0218fd9b621d67277e644687edbc1fa0ee3826f4e93710039917890809cc8388"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s02_epoch_publication.py.txt",
+      "bytes": 36589,
+      "sha256": "4fbff98b59bea218c411cebdf75f9de06fafd751928ce84ef2b1c66f182d554b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s02_multiprocess_faults.py.txt",
+      "bytes": 10927,
+      "sha256": "78b9c73a7bbe86cee2e686757c53dba2dac783f62c43bcd9c02eaec828353fb8"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s02_refresh_claim.py.txt",
+      "bytes": 21178,
+      "sha256": "4e4209076efcac8a6964ddaf45cc02144a1bb349f005028dadd0b6acc36bec79"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s02_refresh_cut.py.txt",
+      "bytes": 7431,
+      "sha256": "5b8712df30c4e0d396a3f5ac8e617cfcc37d33c367fa2d75055432bd7d10460e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_adoption.py.txt",
+      "bytes": 37630,
+      "sha256": "be12f198190c0380f4be98c59642e3ab1c93400360bae8fd9bdf43ebc8a60091"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_alias_fences.py.txt",
+      "bytes": 47314,
+      "sha256": "d0924ab3deacb9e6e5c21d4beb20ca005aa899cca476b4000b182f2fbfff0f18"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_closure_repairs.py.txt",
+      "bytes": 29668,
+      "sha256": "ddbffd3de1016f677483d5e4b087fb58744ed29ee41c58175d82d1bdac122bcc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_consumer_migration.py.txt",
+      "bytes": 31493,
+      "sha256": "b47efea7ca5229d98604f7dbabff6326de02c1ad8ac2d76eb7c41ecef225a9d2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_cr02_sparse_effects.py.txt",
+      "bytes": 59171,
+      "sha256": "83b8aed8716278338286a67bb446266f0990dbc05a4537ce651d2a71941101b5"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_epoch_reload.py.txt",
+      "bytes": 15307,
+      "sha256": "de89506664d842bb301e8820c4bc6792956e067db280dce9a07af3034cd433d7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_multiprocess.py.txt",
+      "bytes": 29387,
+      "sha256": "9e3599108a008366b727dd37b2f73a6b93dc111d8f6e3a30e0b3c0bb8ae7ea3b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_operation_boundary.py.txt",
+      "bytes": 22105,
+      "sha256": "a1ff98d101e230013c47b3153600e0c0f6486b288f6efe0fd54b6e6455c2c948"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_prepared_boundary.py.txt",
+      "bytes": 26871,
+      "sha256": "f4230a392657715996c2f495ac78facd9de48a8975395b508aac6d586ae1a54f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_transition_cow.py.txt",
+      "bytes": 43652,
+      "sha256": "c26a754a1957d5e7d041d6dcbc24319e2622b92133d7715783d33e18d2e1157b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s03_worker_bootstrap.py.txt",
+      "bytes": 34438,
+      "sha256": "2a8b3d62cdb6640d12a2fb2b3d60120cd4feaaaee61eecae5e55e9138ddedccc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_admission_inventory.py.txt",
+      "bytes": 17173,
+      "sha256": "d17b3aaa673b0dffe2fbdee11132f984cc8d06a820ad0f062f9034639604e8f6"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_admission_policy.py.txt",
+      "bytes": 7384,
+      "sha256": "71f33f550fa8e58bb56aefd8609af89f416c619a753e75084a968149e95dc8ec"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_async_job_refusal.py.txt",
+      "bytes": 7168,
+      "sha256": "5fe079ba9bcf71be723d0c7b8c1044193d6bb364f0c17334b6e2eade69dc8d38"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_barrier.py.txt",
+      "bytes": 14579,
+      "sha256": "dc069d3acd3fb534987f8b7b4b30dedc642d5d962d4e138042619ce21c7c1a77"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_bytes_written_accounting.py.txt",
+      "bytes": 16789,
+      "sha256": "93c6f2326772ba8b09a715535dea729bc9884a1aef339a1ab38dcf8b3eee45b4"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_carto_job_status_refusal.py.txt",
+      "bytes": 30298,
+      "sha256": "f7316ad3b79bd479451d796e7da4f27bdea60fb8593c13f489b1e43802a84409"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_checkpoint_rotation.py.txt",
+      "bytes": 22336,
+      "sha256": "96ca68af5a325c257b2997a7ceb15cfdd5eeec9d54128dccf2948afc26440c7b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_checkpoint_stats.py.txt",
+      "bytes": 6923,
+      "sha256": "e4bddc63d387b19379075e2a2b06be5c55d9481d9e5b5f157d39cc9e546c1e04"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_checkpoint_trigger.py.txt",
+      "bytes": 6652,
+      "sha256": "2decffcbfc7ddd2d4f362f43ea4fbe54d56a0399fdde6ee30d7584ce861c4c84"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_commutativity.py.txt",
+      "bytes": 6110,
+      "sha256": "619f7466b399e3ffb8074ada505b025dc77fcdcd0da05c032e9d22f474ac510e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_dirty_barrier_error_context.py.txt",
+      "bytes": 8088,
+      "sha256": "dc6dc80cd0cad53e4f0c1fab055faf3ac530bc9ae617b5535df738435a41eebd"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_dom_capture_advisory.py.txt",
+      "bytes": 13471,
+      "sha256": "911b904e256cfb1d5b3b3bd001cf17534593d6aafa3bfedaac92b44c884a1c63"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_epoch_rollover.py.txt",
+      "bytes": 5277,
+      "sha256": "96864aeea85228312dcfd006530c71fa558d7749eb1d4744b736f129cbf3defc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_fences.py.txt",
+      "bytes": 17061,
+      "sha256": "dfc302cc3165f66b01b11323c6002290c0a714f094788e72bb08061b18c7f8c2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_journal_sealing.py.txt",
+      "bytes": 8687,
+      "sha256": "723186b93f443b790af0ff9b7bbed5de0afbd4e8b2b05c6d5503741635cf5115"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_legacy_wrapper_provenance.py.txt",
+      "bytes": 15506,
+      "sha256": "5bb8c0af2fdc5719a7ef4cdcef3722d6350e362e44e8323229960ea15c839e47"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_lens_empty_bytes.py.txt",
+      "bytes": 3608,
+      "sha256": "b669304e0926fa5a7c41b4a5701ec4682f85adc9072932f8a82b916ab1ad4117"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_lock_failure_sealing.py.txt",
+      "bytes": 19317,
+      "sha256": "39d99d5414ed6f36aa7b2bd95614333153fef2902c50335eb9c49d59b004720b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_multiprocess_acceptance.py.txt",
+      "bytes": 37268,
+      "sha256": "646ae39ea01b7550ef99caaad8f3d5e816cf9fe1a992112c9d550d763d4d8e97"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_multiprocess_faults.py.txt",
+      "bytes": 25400,
+      "sha256": "6b3e31c0cd35cc327ad153d64f438cffaa03604ede9cd5aed8fd66ea5d07f08c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_prepared_barrier_recheck.py.txt",
+      "bytes": 16061,
+      "sha256": "c09cbeb771537555098626f29b76f93fbfbb2f1f2cba172c51b02f86a83e265f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_read_advisory.py.txt",
+      "bytes": 24587,
+      "sha256": "65bf1ad1b1b114e40e968001ea528572637f91f4f11c65e566ea82545af6cd03"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_scoped_advisory_provenance.py.txt",
+      "bytes": 11179,
+      "sha256": "ea06e6435af87c858fa8698b6d0a273f13f75617079a6e1fc3abeab59d5e9ca3"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_seal_recovery_identity.py.txt",
+      "bytes": 29723,
+      "sha256": "75651e7530e9f6852a9a48487ec7d29c7e1ea8a79797b734b340b4f8a57aa9f1"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_seal_validation_barrier.py.txt",
+      "bytes": 8266,
+      "sha256": "be63196345329e5f36e7eb225b1dc5b6dc42a02388684acb339e9de12b20db33"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_coherence_s04_worker_barrier_recheck.py.txt",
+      "bytes": 9841,
+      "sha256": "98c5166258a88df8bd39e85bfc1cee46dfc74712ba7bb8d1a6c62733e838e7e1"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_compact_inventory_views.py.txt",
+      "bytes": 23634,
+      "sha256": "1568dce10c48dedbffdc7cf5f06ae7191b3e45fbcf74c75e8b4ccee8ac39038b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_compose_markdown_modal_rows.py.txt",
+      "bytes": 7179,
+      "sha256": "aa23cc65dc596d83c075d40f4f2fc0bbf17ef099b4e68849da1a34c5fef049cd"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_config_transport.py.txt",
+      "bytes": 4640,
+      "sha256": "24370b6d88f846f45fb433cd10a159f19c569a4779c4bc663e423c2d1ad2b813"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_conftest_state_fence.py.txt",
+      "bytes": 2162,
+      "sha256": "32c3888dc52040209be5ed97e436e206802930a6d28bbbb3552320028409799a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_curated_cursor_postfix.py.txt",
+      "bytes": 6618,
+      "sha256": "c491e1335e25b5e3d5e60f6a9a4d80d944f6449c7c5eb1b621819ea2797f0d78"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_curated_match_scope.py.txt",
+      "bytes": 15643,
+      "sha256": "999f57933919f4b97df581b131cdaa7f05ad5b995aff4558f82be0abccbf00f1"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_deprecated_body_suppression.py.txt",
+      "bytes": 15410,
+      "sha256": "0b74b28e00306b5da01ef95612ddeae4ecd5ec48dce68bbc733a145ca9b9a945"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_dock_favorites.py.txt",
+      "bytes": 58990,
+      "sha256": "a84a88dae625fd75c2c6755fcd514ab9766f3341215f09dd54b3a1f83bcdc5f8"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_dock_peek_budget_completed.py.txt",
+      "bytes": 23930,
+      "sha256": "f2fccc5e50f99067f307edddaefc683c1abd0d79514d8bba011a9440d40fc9b7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_dock_peek_layout.py.txt",
+      "bytes": 8892,
+      "sha256": "8d388bc333e02c58be160b2c55d4dc4932cc69fcc024298fed61fa86459b38f7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_dock_peek_metrics.py.txt",
+      "bytes": 14303,
+      "sha256": "2c6d335d647576aebabd924850bea8cda0ffdb1a6eb27449e4059469215157cc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_dock_peek_recency.py.txt",
+      "bytes": 28730,
+      "sha256": "a6be1b2bdc8ac3791c86ecf9953764003cccc1b8813e175354882e16ed737bff"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_edit_node_name_tag_guard.py.txt",
+      "bytes": 39371,
+      "sha256": "9366de2430c516c52007e2a6f4cb7946a02a78db85313e723cddea92fd6a4b58"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_edit_node_note_search_replace.py.txt",
+      "bytes": 43548,
+      "sha256": "67c8fe5730d12d9d9cfe941b3c853f02bf78eabf90a18fe534b0477489e9617f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_estate_simple_forms.py.txt",
+      "bytes": 27111,
+      "sha256": "b484c07900dd8de609ec5031dff97fe433a618f075dbb947c9a01d97bc9689f4"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_estate_skill_table.py.txt",
+      "bytes": 16764,
+      "sha256": "92f2cbe0fa9257cf41dbfdb74c65cae8a557c58c9537e3481855984d18beec84"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_etch_forest_preflight.py.txt",
+      "bytes": 14895,
+      "sha256": "899216813c0b541f9b414db0f5ad55f2a2f4f0674f0a623b9ec35b86446ffa5b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_explorer_slice_apply_keyboard.py.txt",
+      "bytes": 5310,
+      "sha256": "b14b4a68d95d9f6f2a6f130815304b2b8e09c78366381675173d6d1a42e9f8ea"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_export_nodes_selection_index.py.txt",
+      "bytes": 8562,
+      "sha256": "6da6e3695b17ebc492d12acb5455f6afa609433476c2aa0139cd5d83a29c23fc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_f12_failure_hardening.py.txt",
+      "bytes": 4552,
+      "sha256": "d1cba88b4256963fcc6ff84fd87d9f13941616400e864cad27450e9f5f43f7c0"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_f8_slice_policy_anchor_boundary.py.txt",
+      "bytes": 12918,
+      "sha256": "bcf7bb437c04d51276333b667aa8eaadbe2885920257297b6702121b41b2205e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_f8_slice_policy_middle_segments.py.txt",
+      "bytes": 15225,
+      "sha256": "cdcc13353d9e7495d2f4c9b0307a09b2eabcf404131b87e984de18091c6b65b8"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_anchor_dispatch.py.txt",
+      "bytes": 45710,
+      "sha256": "af942c4277055f381e3a296546e82e70575907a3e40e3a983caf2c6eada055cb"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_beacon_dispatch.py.txt",
+      "bytes": 36388,
+      "sha256": "2ff21e75ac958f59b3ef8f9798f02d8c04be71da43ebfbc6b1b604874e62a4f9"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_glimpse_dispatch.py.txt",
+      "bytes": 7197,
+      "sha256": "dbb8d9a16c9233e3f0580e8243fb5e5efeca0f4be4120d56179592e17ae00bd7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_lightning_dispatch.py.txt",
+      "bytes": 9634,
+      "sha256": "33adae4ba7b62404ca1147d195153d18f6d01c2b23a95eb6f8a1722b9ffbb08a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_node_dispatch.py.txt",
+      "bytes": 16661,
+      "sha256": "222b91ddad8496f045a1113e42dac1c8695a836dc7fb02accb9e47ddc562385d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_slice_group_dispatch.py.txt",
+      "bytes": 11557,
+      "sha256": "58f81fd41b31f89e0f032b7e7c35d7e951f6c23db3bef2c20c1cf1b3f2939daa"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_system_dispatch.py.txt",
+      "bytes": 7194,
+      "sha256": "3b183834e2875cd848950543f1f1758da09d2bd883d38479290894811896c437"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_family_tag_dispatch.py.txt",
+      "bytes": 6245,
+      "sha256": "164115c9aaa4e1196a8b9079c7b35d0fd9544c33f69692fde848a4bd17bdf353"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_estate.py.txt",
+      "bytes": 40180,
+      "sha256": "b96f56a497be4b80d7271ee810ca03b3ff68150429d42059ca27e239dc2b65a7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_family_return_contract.py.txt",
+      "bytes": 18330,
+      "sha256": "ee75628b587828945cf60e83939bbef5d5f2c000da883bbadea69a0fa0056fd8"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_focus_feature2.py.txt",
+      "bytes": 7976,
+      "sha256": "acfa54ea42ebd36e142080ac91d14c867dc653f3e1ca892ed17003fb8baad429"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_focus_node_count.py.txt",
+      "bytes": 6111,
+      "sha256": "7e7379be432a696bf45900dc0c0731c7a57b99a5676afb24518a9f61f97ab63d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_modal_view_overrides.py.txt",
+      "bytes": 11207,
+      "sha256": "2ae0a77b8651f0d1a47e6c33f54a857249a7f87735adb696e748d81c56bf6367"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_render_spec_blob_push.py.txt",
+      "bytes": 13353,
+      "sha256": "9c6e31bde779bb77af5d291e958a8cc5b07be70f902ba92dad0dbf19b39f3275"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_render_spec_modal.py.txt",
+      "bytes": 12336,
+      "sha256": "55476df74170d8ce6fa1bda47d891aaff1e4e236ffb7ef515af3113b3474d3d1"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_render_spec_modal_dom_capture.py.txt",
+      "bytes": 16698,
+      "sha256": "4e8bd846c0642b83f59adaf5b9168b844bd6e68ffcf464ae3be1b840cf02b93c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_glimpse_render_spec_modal_lightning.py.txt",
+      "bytes": 8091,
+      "sha256": "c65bd4d540d6fd19f44c3664049961c80b9a6331671855f294e73aa4c881e6eb"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_grep_parameter_contract.py.txt",
+      "bytes": 2770,
+      "sha256": "c6c7f25d3dc3af7a970d9b8ad61fbc32086cfddc83dade6c61d43c61fd0bd586"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_handle_correction_echo.py.txt",
+      "bytes": 12521,
+      "sha256": "af0a76203aa1323ac20a029f4156f084ef6e09fddecdd78c1a7754b79943734d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_headings_child_counts.py.txt",
+      "bytes": 16935,
+      "sha256": "c3e166bb384fb2e1a6448e18a5d269934efa460c6bc2d09ae2660e06bb53ab0d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_headings_end_of_line_metadata.py.txt",
+      "bytes": 11397,
+      "sha256": "091f27641dac012934e8a5668d5756ba4543bcc834995185967ca5ca234f55dc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_job_status_inventory.py.txt",
+      "bytes": 9660,
+      "sha256": "69b21f837fba21a33c84e8e43a6767a54d45fc889e067eb5723df2ecc500191e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_l4_snippet_extraction.py.txt",
+      "bytes": 10611,
+      "sha256": "b8c101bdae952095db5590a1a5f0c88cc3bf35360d8957bca8dc55b8b2d730aa"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_leaf_count_from_row.py.txt",
+      "bytes": 5169,
+      "sha256": "6488a86e573437f897ff0c81d2a2ebd08925afb6e312dccfa0f354ff66ee7756"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_legacy_tool_mapping.py.txt",
+      "bytes": 3280,
+      "sha256": "0a0fd43bf3e278253c024e1d41b5227254febe97a60a6baf20ce4d30ada06d94"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lens_engine.py.txt",
+      "bytes": 11370,
+      "sha256": "cc9f016ffc09cd5f4ff03e180dfef03e49f38b974f7016be88c9f6c74ef16d85"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lens_modal_parity.py.txt",
+      "bytes": 14244,
+      "sha256": "935aa7fc436793c5c681a5b9524c2497e8d8e52264ffb622248fff24d97fc42f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lens_scaffold_ancestor_notes.py.txt",
+      "bytes": 21914,
+      "sha256": "e5d1df3659edb89316b6bb938a6868ae7167130b99e44c2a1cb2623a372c83d6"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lens_spec.py.txt",
+      "bytes": 4727,
+      "sha256": "9f40d6a287f9da98b1c5344214827fc44ee5920243d584e7e9535d828646245b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod.py.txt",
+      "bytes": 21405,
+      "sha256": "6dc4e5288183e9e07e961de59bfd7fcf007cbf860128a0cb49be9156f0ab1b90"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_boundary_orchestrator.py.txt",
+      "bytes": 8958,
+      "sha256": "fa269d3251ef6d758b6b3cb0d69a31abc5d0652b43c68acec2fd61d17a960f6d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_mutation_modes.py.txt",
+      "bytes": 73927,
+      "sha256": "bdcae0900848c7996f7ab95b08e4f66ee2bcfd193557213c2369f2697aca870b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_postfix_policy.py.txt",
+      "bytes": 38486,
+      "sha256": "dfff8e2f33c1c3a7a916ec1948a30293fbe23551d8c48ae2524d22e272723893"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_render_lens.py.txt",
+      "bytes": 29199,
+      "sha256": "6b8849eca5bd3a0e85cb1139d012e0672bbd994b82dcaea970d19aed9d7c54cb"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_render_nodes.py.txt",
+      "bytes": 12667,
+      "sha256": "4e0e5f95034cbad08695496c07886c1af6850a523b16d81ebc2f974d253df874"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_render_symbols_resolves.py.txt",
+      "bytes": 10490,
+      "sha256": "5c445805671ff2785de8fcd328dba2fccfe47299eabbd16e9da189832918714e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_tag_mutation_modes.py.txt",
+      "bytes": 26693,
+      "sha256": "d6b15c54ebdb16b21af4c7cc9e1e0e3c3cc89b23d55ad0b624da904ee4ec1a2c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_lightning_rod_tag_mutation_spec.py.txt",
+      "bytes": 14115,
+      "sha256": "b841f7f3f71de45a971470ff30861daae1980b74d587e8985c8abb9a8787597a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_live_dom_glimpse_materializer_parity.py.txt",
+      "bytes": 28961,
+      "sha256": "8032ad056aa8c97f702fe02b1be66c7925a0d1ee8b77211c754e46bdf0d5eaa3"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_local_anchor_postfix.py.txt",
+      "bytes": 20939,
+      "sha256": "5713352e7c70b3fea0231311674a0c271f5307f5b51c85d8ccded8e18f708819"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_managed_metadata.py.txt",
+      "bytes": 7088,
+      "sha256": "529cdd45a94d9950eb449a7d72413ef44e1c1d2ab5aec5b310550430e62d7d71"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_markdown_preview_breadcrumb_delimiter.py.txt",
+      "bytes": 12281,
+      "sha256": "c8ad5a12ff43a764b29386f9c56c9ca9df3d5bdbd282b7af44fe1b942a795e67"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_markdown_preview_headings_only_sentinel.py.txt",
+      "bytes": 6126,
+      "sha256": "15f99829a167f269f4f95eddf19d6f261a1e4d3097a3077b0692ae29db26b5a6"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_markdown_preview_occurrence_exact_focus.py.txt",
+      "bytes": 7965,
+      "sha256": "15b7cab57bbdb6413f5b3fa50c00137bcc0e23011167c88312bce4c3c5ef2922"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_markdown_preview_root_regime_seed.py.txt",
+      "bytes": 16904,
+      "sha256": "02d7f4f02e47b3d9f565fbbf85edd4c2acb4319accb2fb7870173a6cca51173c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mcp_api_registry.py.txt",
+      "bytes": 21934,
+      "sha256": "01d183a1732c0199d9073943feb67b905f389ad121f48df5debcf795008be786"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mcp_registration_profile_config.py.txt",
+      "bytes": 2975,
+      "sha256": "fa136cdc5ff5de7ac4377cf5e43f300549c0523f5f3d12fd0f630d4ca07752a4"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_merge_lens_persist.py.txt",
+      "bytes": 16577,
+      "sha256": "3b7299009fbcb3f2bdb6bd20c7ca0a06ed6016f2463d234e019d34d857bfac4a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_merge_slice_groups.py.txt",
+      "bytes": 56019,
+      "sha256": "28bb249fe7c721a1d55305aeb8a89a6ddeacf7a185006042434becd91be59da5"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_multiselect_materializer_sets_connected_mode.py.txt",
+      "bytes": 3051,
+      "sha256": "d34e4a69c937869261f6ed64abad64c559cd8e24c39f5cf40b94389b309482e2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutation_leases_s05_async_mutex_safety.py.txt",
+      "bytes": 4073,
+      "sha256": "a291edac8037ad106aee2676186b54ea8321d009af6e7112c002aa24743f69e2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutation_leases_s05_coverage_warning.py.txt",
+      "bytes": 10603,
+      "sha256": "257be2eb873f0bdfb183427bee4c2526454c026c7b3499206c74b36cd78e7888"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutation_leases_s05_fences.py.txt",
+      "bytes": 15878,
+      "sha256": "e8b75774f62132823c5bed6ebfaea63b5cf4a0b89e5b252f30901436d501ec18"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutation_leases_s05_refresh_cut.py.txt",
+      "bytes": 3798,
+      "sha256": "ae8de5c76599a197a5026e429083e869ee96a231bd15a6f640a59d1c060a2174"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutation_leases_s05_schema_regions.py.txt",
+      "bytes": 11772,
+      "sha256": "3bc7f00a04081ed60b0b1017176a6a7f4f7f2f61d351ad646321ecf5f1ee1925"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutation_locks.py.txt",
+      "bytes": 24368,
+      "sha256": "4d4d62f07b794e33974a4d2173d4f05e4ce6ab1f1f03a5ef756069e2e7975a6a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutation_serialization.py.txt",
+      "bytes": 44518,
+      "sha256": "2538a5142f364042dafcd4bb95316a692f3270f2e4d5fe0c99f6a1532d69e07d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_mutator_node_id_resolution.py.txt",
+      "bytes": 5230,
+      "sha256": "bd12aa764be668fe25b498df3da3bfd76d6a7b4f7123f10d4d1bdc36f198e5d8"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_ancestors.py.txt",
+      "bytes": 22388,
+      "sha256": "11c978f1505d6e3e4aad84670d08111efe0c767b8b2aaff7ec8018735c1ea2f9"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_append_note.py.txt",
+      "bytes": 9906,
+      "sha256": "088951d015fb9e8f9f4c6f975da764d8ef1e7f807750195cc3802f7ee21ab354"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_archive_format.py.txt",
+      "bytes": 25442,
+      "sha256": "54ece14e8356f7056e89973718bad20c7e83dcb8ab6fd419d9d4d8d7dafa3caa"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_archive_writer.py.txt",
+      "bytes": 5427,
+      "sha256": "4077d22fb5b73e890177e7235b878003ba0cbb227a3c28d46b3dda9265e6079a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_edit_note_file.py.txt",
+      "bytes": 11417,
+      "sha256": "af1f8406fc3e967945e44a9c01d5805587e3675f102282ca3bcc804d5e8d8d7b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_edit_replace_all.py.txt",
+      "bytes": 11601,
+      "sha256": "6f2090d04d7ee6f5f932fa52b8471c3038b7705625efcc05c2bf41b2d295c3db"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_edit_return_diff.py.txt",
+      "bytes": 22886,
+      "sha256": "775dbd4132899734c720b161e31c7f8ffaccea3030d8c4bbf75aa847ae34604a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_export_archive.py.txt",
+      "bytes": 22821,
+      "sha256": "244aaa17eb0146e012a7c904d1126a6604ab8e3b892670e566124a35af73e96f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_lines.py.txt",
+      "bytes": 40800,
+      "sha256": "fb48466fd817e39e179b57ffe2540d1400f185216276e2b91fe376183e453790"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_node_read_output_file.py.txt",
+      "bytes": 10856,
+      "sha256": "77e48cee6872f5fc769230be6f1b0fc8b53d0e002cd7e251700cfbe30d47ce52"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_operation_failure_docs.py.txt",
+      "bytes": 12527,
+      "sha256": "a4a56cdc67577d0714b72e0ccddc2c04ffd20853eca2e4d8dc98fdfdbd36417a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_owner_identity_clock_step.py.txt",
+      "bytes": 19302,
+      "sha256": "18644ca79cadb1d47a71561ee1a6ef846591c8cbb15a27cd081f17264df8078b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_params_schema_mode.py.txt",
+      "bytes": 24980,
+      "sha256": "6054c08f1834e66b88714bf2305f2db6521b688ad3118439a8feaa043c8ce0d5"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_parse_slice_group_name.py.txt",
+      "bytes": 4210,
+      "sha256": "36a82bdffa76e5ee4b0de75957b315af2155b40540783dfdb3e62620b3659428"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_golden_baseline.py.txt",
+      "bytes": 24931,
+      "sha256": "349813049cf2bf89fd3c15daadedfd100f9b2c0f8c51d72620c82559dd038425"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step12b_exact_or_error_everywhere.py.txt",
+      "bytes": 6411,
+      "sha256": "7c7c09e94337e1d0abd38b31d5d95cebcf0b518ae31d07e335dd1e503c019ee0"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step12b_modal_view_materializer.py.txt",
+      "bytes": 12216,
+      "sha256": "f0b250809e99fcb4ec8d814a0a150da42fb8f300281a4bf6f2225b524f593d12"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step12b_slice_row_materializer.py.txt",
+      "bytes": 6217,
+      "sha256": "7bd5ba0b6410424ab8167c68f2ef9e925495b8b54f0098360d938e562e1905ec"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step4_rebase_policy.py.txt",
+      "bytes": 17701,
+      "sha256": "ff391ccc769410202e3b0d4624d31155778dd5d694e2c1bb3a5ae41b447aaccf"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step5_materializer.py.txt",
+      "bytes": 13849,
+      "sha256": "c8bf001c359ccb38dc4b1818a2e90c020ed2e36c01cbd6395b405b7e2c603300"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step6_markdown_materializer.py.txt",
+      "bytes": 14287,
+      "sha256": "d41ba4a39fa9e827902c3b554682b3ca7c7c86844585b0db77b80151632b13a3"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step7_full_uuid_policy_aware.py.txt",
+      "bytes": 22105,
+      "sha256": "4ce3c153f2fdddf4065386726a114bc3f959cf4a365e794631d4b44eb8b401b7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step8_dom_capture_markdown_materializer.py.txt",
+      "bytes": 14303,
+      "sha256": "130b6c5d1cef2ce8a5c1abb62f75e43c273239e28a66a5c85d9adb2ebab98465"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase05_step9_dom_scalar_focus_bridge.py.txt",
+      "bytes": 10561,
+      "sha256": "3a6a9d735e66d712bda9f4b6ed6488884a0fb57107d9a369a51f54d1d332554c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase0_row_identity_baseline.py.txt",
+      "bytes": 18135,
+      "sha256": "92504fb5dd3bc0f32acbca5e193f2da583e3ebf699052352668e7b9e67799aa7"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase1_multiselect_file_boundary.py.txt",
+      "bytes": 25427,
+      "sha256": "344e661ae7868e94a95cbe51d8cce1e4a2a77217d5e2b6c997ca475d08764729"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase1_multiselect_handler.py.txt",
+      "bytes": 11919,
+      "sha256": "808d823f9c66c9c1881fbc37cf6d472f0445579e2ad7b9e18d05e46ed1a942b6"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase1_multiselect_materializer.py.txt",
+      "bytes": 16825,
+      "sha256": "135ae079b0018635df11788dc5e742268d4265317b28a2876235ef88b1636e67"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_phase3_hydration_suppression.py.txt",
+      "bytes": 16945,
+      "sha256": "40a60847b00cb7606cf9fc8479909b50740a522aad58c1acd29ed0accc7b0ef9"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_prepare_stage2_render_forest.py.txt",
+      "bytes": 7803,
+      "sha256": "f074c9e46eb993b9b22d98bebc4ce8e290a3e9626c31123cc8f1987bc5924cc8"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_read_guard.py.txt",
+      "bytes": 10720,
+      "sha256": "77c3ec326bc9567c618c0549f7c73ba55382b75c6654e0af7164568abb42773d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_recency_header.py.txt",
+      "bytes": 13942,
+      "sha256": "f7fc1d23a9615d49f77f612420e1345743865d63ab5d6c71b6e72cf0d332ed1a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_recency_selection.py.txt",
+      "bytes": 24237,
+      "sha256": "840be176c2cd320d5c9453b98f36303d86fdb0f5ad65678e5daec961b5e7eb82"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_registration_profiles.py.txt",
+      "bytes": 4775,
+      "sha256": "315af60a3a8ca1ac21ed5eb9f5e1c7aadbde82d4d52822759d48a222e7db4188"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_render_policy_file_boundary_mode.py.txt",
+      "bytes": 2519,
+      "sha256": "5ae6cbcdaf2c082bf76a5ef064fd987f8a31b674c9050824dafe19a9ec956b8e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_render_policy_phase05_step3.py.txt",
+      "bytes": 8729,
+      "sha256": "121e9a98b947d7bc58ede47a2fed7d6db6f5b046c9726fe57c9f58eff29f7c7a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_render_projection_spec_phaseA.py.txt",
+      "bytes": 13671,
+      "sha256": "4bb23dea0165e92444b0404ceaae4e2e5a80b864538d5a14e653a12093eed574"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_render_search_sift_parity.py.txt",
+      "bytes": 21341,
+      "sha256": "7f355c61b3ec3e9117dfe8736bf0ee6a27df15b276500da8c3e8b5c30e813713"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_render_slice_modal_spec_e3.py.txt",
+      "bytes": 28983,
+      "sha256": "e5beaf77a14b547ba0104498f1e56b6e5d84b380248081a161639b6b42a59a86"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_render_symbols_expand.py.txt",
+      "bytes": 36904,
+      "sha256": "18e6dd96280513b5aa5c52480695c36d83acd8888f7f3d6987d7632d954dc483"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_render_symbols_tier.py.txt",
+      "bytes": 15568,
+      "sha256": "ad75018065cc754ba9fd8ab605fc51916c8c1e1911a72846f098a3ded1284873"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_repository_view.py.txt",
+      "bytes": 62748,
+      "sha256": "acc29bdb1dec894c4e50ebe1c6f7158298504f9662f704c313b355826a791a92"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_repository_view_source_fidelity.py.txt",
+      "bytes": 31618,
+      "sha256": "2d23aef745aa041bedadbc074e8f02ff1ac9500b528e782090392732f665bbf6"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_repository_view_stripper_characterization.py.txt",
+      "bytes": 8964,
+      "sha256": "d78c15bb657ac13c489c01fa6b0fee34d695a51f9f9d297c142839c29765d96e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_resolve_node_handle.py.txt",
+      "bytes": 9482,
+      "sha256": "46e004a1bcddbb942092c54fb661f5fa5692c65b23f97a743103566c2ae193ba"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_resolve_slice_group_handle.py.txt",
+      "bytes": 6694,
+      "sha256": "f63a11ed911c75cb5a8f7ffff5cfd2ebdc83e39ec369634a8b4f0e4a8d1c3bc1"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_resolve_slice_group_handle_names.py.txt",
+      "bytes": 7425,
+      "sha256": "77af9146537a5bfdea239182b4aa8f486f82a9661f965da11a597e315823aa71"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_reverse_map_ghost_heal.py.txt",
+      "bytes": 12078,
+      "sha256": "b4e58ff4da0b8eae10b77133bf6771c07b088def8a03b486116f0b027c6d225d"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_run_tests_wrapper.py.txt",
+      "bytes": 26542,
+      "sha256": "ebc63eddb2a3c08a8588304fe49af2f78edd6cbe5537cf81af7028f4b38746dc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_s06_cleanup_fences.py.txt",
+      "bytes": 5210,
+      "sha256": "b4f8fbae9d28fad05ab1a06bc8399f22505d1fa2e884bd4d86cc56c76ceb8daa"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_s06_folder_refresh_cleanup.py.txt",
+      "bytes": 7406,
+      "sha256": "9723b776f2a21bee23eabfa60625bce7c22354e70ac0f5694b8727e389f2df61"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_s06_path_behavior_parity.py.txt",
+      "bytes": 6155,
+      "sha256": "962582874d91b947e27845279860111ab88d114465ee5bcbb5d5b54faff5dbbc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_s06_reconcile_jewel_cleanup.py.txt",
+      "bytes": 11414,
+      "sha256": "f9810aae19f9c14509b628f7c21609cd1af2400057b163c3b693c73b969fc092"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_s06_s03b_inventory.py.txt",
+      "bytes": 9096,
+      "sha256": "3328561ec11ddfa3b22964e08c5ac60f1f3ffa3b7f8774630f599b3eab3236c9"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_s06_salvage_retirement.py.txt",
+      "bytes": 10914,
+      "sha256": "824c9e1ce0f80890c37d393ec8f372b71c253a8aa5fe3858f8008997a8bbb806"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_s06_worker_mode_cleanup.py.txt",
+      "bytes": 7774,
+      "sha256": "c3047e315458767028f0a1e5fef229905cb0f2480c45db32f21d360fe313a344"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_scoped_lightning_rod.py.txt",
+      "bytes": 43933,
+      "sha256": "7e423dbea356aa545129388b50b636ac5bdb7326b92336ff74b4145bc4a6769b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_scry_root_note.py.txt",
+      "bytes": 6207,
+      "sha256": "885d43bc35119be954ad05d779658cf0ae4c4cc48b64dedc44ba5543df8f6897"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_search_match_controls.py.txt",
+      "bytes": 16287,
+      "sha256": "3f1579accd0dde8d889009323aabd309f9c49456fecc20b8b3f803696be3ce9f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_sgsort_default_sort.py.txt",
+      "bytes": 13409,
+      "sha256": "ad6e1e26877b6ca502ad824603be09bdc7786ed5f064d2b81a9ef5d406db252c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_short_heading_uuids.py.txt",
+      "bytes": 6658,
+      "sha256": "04ce0242a78dd8db9c9945d0834d8487750ea6cb72ca2db78273832090d572e9"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_simple_form.py.txt",
+      "bytes": 14372,
+      "sha256": "aa4dadc7654c09259497873e42ff0b6d9f560d453121870dbd55bf26ddda2ad2"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_since_object_only.py.txt",
+      "bytes": 7201,
+      "sha256": "5214559d07b465e7c6f48f09f010686fcb227b4d94aa35ba686c71c99d612768"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_slice_group_markdown_return.py.txt",
+      "bytes": 5748,
+      "sha256": "12e9084a90648f612a4808c416974084241ee4642814f7aa4e9747f80a6e9534"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_slice_group_root_handles.py.txt",
+      "bytes": 25470,
+      "sha256": "9915d15f964a812073b79e74a092d5e491ce98c8e1578463f2078311a9cb52cd"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_slice_group_update_rmw.py.txt",
+      "bytes": 21683,
+      "sha256": "f56c98818061c52e8ee13ffde44caa6d9d78efb0dd1fe1df4ae609421db1256c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_snippet_view.py.txt",
+      "bytes": 16004,
+      "sha256": "9013438a28e243baaca2459c1af6d2309e0147415c0dcc8add506607232d1423"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_03_epoch_cut_composition.py.txt",
+      "bytes": 20543,
+      "sha256": "152bd8d680ee3d23e66326d1f6232cf8a9cb421dcf1f48f3384c10308172cecf"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_06_refresh_compat_contention.py.txt",
+      "bytes": 18332,
+      "sha256": "b7c788065638254c484f9d003180ab5dc855c3bda2b2b4c94100107193b194e5"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_07_checkpoint_compat_contention.py.txt",
+      "bytes": 16960,
+      "sha256": "791c9b2ca348f72d4c10e09933064321f4ecb9207545a1b49e0a7ee0df719bc6"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_08_cow_adoption_epoch_offer.py.txt",
+      "bytes": 15674,
+      "sha256": "bfadd9db1f75d63b01b08fefad35625d2b164ea83ed6834f672936f4f3d41a62"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_09_gc_publisher_job_basis.py.txt",
+      "bytes": 17509,
+      "sha256": "8a03a45a6ac1d68dcdf2135351f75ed16da154fc8ef9e4c796d5933ea35bcdb1"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_10_write_governor_triple.py.txt",
+      "bytes": 7451,
+      "sha256": "601f5f9d2c15d0808eb06b686deed67e872afba4a472533e3becd4c48061424c"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_12_claim_adopter_finalizer_canceller.py.txt",
+      "bytes": 19049,
+      "sha256": "46efebee76f395c627eec7c3e1601a1a712e1868a7c3a7441e0a6c8549c8d475"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_13_q3_gate_closure.py.txt",
+      "bytes": 11811,
+      "sha256": "feb2dc8d4ea1936f857adf2631a38fb9dfdbea568373b8dce25a79002ce2a602"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_14_token_clear_fault_seam.py.txt",
+      "bytes": 4996,
+      "sha256": "d497ff4ac62c88ed325ffc60b6c8e51eee8c1f9c26efd7c655fbadf21c2a7bf3"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_15_deep_freeze.py.txt",
+      "bytes": 13960,
+      "sha256": "05e18a1a169d2e5ea55035150ee98a70b37d2bab29e04ba0579b5a02e133fe91"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_16_candidate_validation_span.py.txt",
+      "bytes": 20733,
+      "sha256": "cca40555be23f8e7f79cae188d7fee5a027a5bcb0609956ae2ad698af879aaee"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_stage2_17_claim_schema_fences.py.txt",
+      "bytes": 6812,
+      "sha256": "27dbef6ce6dd7744fbdd78bd2ee3eb90013ddbe25e6c5f7a2074dacedc1066ad"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_symbol_resolution_index.py.txt",
+      "bytes": 9262,
+      "sha256": "2108079fdf909eec7ac0989dac3787b06da5844ec0c8319d065d0db490db3185"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tag_node_id_resolution.py.txt",
+      "bytes": 5074,
+      "sha256": "703bb1ffd573e3f8cd3dcfb0fd52928ec8d9d774769e04435bf1e4bb9fee8cca"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tag_purge.py.txt",
+      "bytes": 10676,
+      "sha256": "75a7e325dbb8b4a30b43f0dca649ba89ed1adcb7d97efa3a6b2a6ad100dd118f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tag_scope_trailing_only.py.txt",
+      "bytes": 21800,
+      "sha256": "8be142d8727bbcee6446e9c87f0a42c419de37d6c5822c46c3eec0614d13a990"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tag_tools_semantic_names.py.txt",
+      "bytes": 10502,
+      "sha256": "ffca33145c28c2876e011b68a189d8a97999ead87cd62aab3e2ce90fc88999e0"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tolerated_key_slips.py.txt",
+      "bytes": 20406,
+      "sha256": "06ae32fbc2043b024a1dfa39fec399da4a01dd146ac75c6ae670928f2b578340"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tool_path_resolution.py.txt",
+      "bytes": 18963,
+      "sha256": "12660ef25958c3e94a2c32584d249a6b88992f32dfa747f5a11a3b6def16f0cb"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tool_path_surfaces.py.txt",
+      "bytes": 52373,
+      "sha256": "82cac19f809eb1d6eacb148f3fa5e429dc1b0915e056cf55081834750f55d939"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tool_result_metadata.py.txt",
+      "bytes": 4383,
+      "sha256": "8b44ba7e6a41f087cda59ee1937cc436f7e90e9cdd894a59b2d297b1a2a6015f"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_tool_surface_measurement.py.txt",
+      "bytes": 4234,
+      "sha256": "afef67e5ee0fcff46b708ac8aef950e42593615c86aa097f6038af2e1052ff0b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_traversal_flags_recursive.py.txt",
+      "bytes": 23987,
+      "sha256": "d7f8ca1f1d1b41e24353bd1f3907a8199e964b6ae0b1a46aadba276e825cc9ba"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_traversal_flags_walking_verbs.py.txt",
+      "bytes": 13631,
+      "sha256": "9c00f74778a31067377dd0402049761299ab9d725c564522c3162bcca19a87a1"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_unified_resolve.py.txt",
+      "bytes": 18182,
+      "sha256": "6d4744d8084cd636bb4831baab1c77d6a0bb431568f25a9d6f2c41549770c3f4"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_uuid_handle_resolver.py.txt",
+      "bytes": 14065,
+      "sha256": "66c8b0f3b9747b3d82d6c893b57b960436aa785d62aa00042455ffeb60449752"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_ws_reader_nonblocking_carto_list_jobs.py.txt",
+      "bytes": 12853,
+      "sha256": "3ffa81af8fd1245ef228faa3e95e1013bd576a0a9d8d35845314645b68ede9d8"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_ws_reader_nonblocking_coherence_replay.py.txt",
+      "bytes": 24556,
+      "sha256": "949b91c2d433ecfc9a090d6801cb34e060b55a5835c66da686e690097ff568bc"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_ws_reader_nonblocking_long_handlers.py.txt",
+      "bytes": 28862,
+      "sha256": "9bd91f589f4b0c2b63f8e52cef4354860e1dd660cc7af9103791290bbaa7f925"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_ws_reader_nonblocking_refresh.py.txt",
+      "bytes": 20495,
+      "sha256": "fa8a0f4a8d745f165ccdc5515d59112137283ea8a2458f1bc0f2041e98134536"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_wslive2_caller_intent_routing.py.txt",
+      "bytes": 11371,
+      "sha256": "7bb1a825e86ce4367490de32a00475e9f9a1c90cdfd459b73dda1365af78af7a"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_wslive2_stop_at_child_anchors_tab_agnostic.py.txt",
+      "bytes": 5729,
+      "sha256": "b46f96b479c17d55617dd620bb1baba785ed864b91041b0d8799fb216ed2ff0e"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_wslive_broker_endpoint_liveness.py.txt",
+      "bytes": 14355,
+      "sha256": "b52695d8ee5e4bb2a1aefa06064ede1dbe77990ca3278e163a3ad1e5580d976b"
+    },
+    {
+      "path": "nexus_base/sources/tests/test_wslive_mcp_unknown_endpoint.py.txt",
+      "bytes": 5891,
+      "sha256": "2817e5274622b7f1a985082e678738dba6d4a37a152b8c2a869ded10f875085e"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/DEPLOYMENT.md.txt",
+      "bytes": 6131,
+      "sha256": "de7c5466ed06f78d1fa84540fe8fae95e02231d5e1c5f6df86dbb12e17939c70"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/INSTALL.md.txt",
+      "bytes": 3624,
+      "sha256": "4c33370471c3299bb29cc3f8566a8f364570d265af276712c8c1d7910833f1f7"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/README.md.txt",
+      "bytes": 3186,
+      "sha256": "22e5009877f60fc063e58a805087db210ff9f84ce4ad7557eaed9332c741bbd1"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/SCOPED_LIGHTNING_ROD.md.txt",
+      "bytes": 3769,
+      "sha256": "830a072d9cd6fedc48983df3c49eb112f6829aea98be8fe369093727affb88a7"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/background.js.txt",
+      "bytes": 97347,
+      "sha256": "24cd4a7f3b656e7f6393b7cd26653d76d50cab75600d00644400e09020ff497e"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/content-bridge.js.txt",
+      "bytes": 5307,
+      "sha256": "6ac7173fe1e0d46a6b30a394ff2f910cb24434945347fa2c7a5b4b3b2e5fbc53"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/glimpse-cache-client.js.txt",
+      "bytes": 1349090,
+      "sha256": "cf8635c33cc59350bee2dc4fa8df7ad84cfee3868382d77bbdb512c577eeee64"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/hotkeys-shared.js.txt",
+      "bytes": 69234,
+      "sha256": "15e7440778db720bebc13a5ee6ebc5a56f84d5e135f1ccb610f1455f20db4c5c"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/katex/katex.min.js.txt",
+      "bytes": 272179,
+      "sha256": "2ec5916941ef4383e0314eaabcc712301b06001d9fb68e08d751d2bae5a27a1a"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/marked-katex-init.js.txt",
+      "bytes": 6237,
+      "sha256": "d32a49086f433cea2754914100785f539402421e2515a193ab9566d9b7ffd86c"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/marked.min.js.txt",
+      "bytes": 39903,
+      "sha256": "3e7e7d7feb3e5d58cb6c804f68ab5c24cc7e5eb6270fd6e5cbb9124739217d0c"
+    },
+    {
+      "path": "nexus_base/sources/workflowy-glimpse-cache/options.js.txt",
+      "bytes": 33226,
+      "sha256": "c372c03266f927a42416ee9b295a82cb303762acd5ae72c27bc152f118f295c5"
+    },
+    {
+      "path": "nexus_base/sources_manifest.json",
+      "bytes": 230879,
+      "sha256": "48ddba3bdaa400134e8df0c451aa5ee310798b0530b9c0cd4f1b921b5a156591"
+    },
+    {
+      "path": "nexus_base/symbol_inventory.json",
+      "bytes": 27940,
+      "sha256": "1b54522d8ce4278d7c0b804f1d48f3e7f34c32e244e43a28e08f61c138992550"
+    },
+    {
+      "path": "nexus_base/verify_base.json",
+      "bytes": 984,
+      "sha256": "875aac4317cd603fd92988136ba8c923f7bf447c49e40202d7910983a2e8dc1c"
+    }
+  ],
+  "total_bytes": 25087996,
+  "counts": {
+    "nexus_inputs": 450,
+    "nexus_block_diagnostics": 1607,
+    "nexus_kept_records": 1604,
+    "nexus_span_kind_records": 104,
+    "nexus_id_carrying_spans": 103,
+    "stop_rule_keys": 20,
+    "stop_rule_changed_records": 575,
+    "area6_duplicate_cases": 44,
+    "area6_other_cases": 26,
+    "area10_windows": 1603,
+    "area10_wrong_windows": 261,
+    "area10_non_test_corrections": 258,
+    "area1_historical_corruption_cases": 85
+  },
+  "notes": [
+    "104 span-kind records includes the id-less JS pseudo-block; Area 10 lists the 103 spans with IDs.",
+    "The historical Area 1 matrix has 85 cases, not the required final 15 x 6 = 90; final after-state tests must supply the missing cases.",
+    "20 means source/parser keys, containing 575 changed records: 549 surfaced and 26 anomalous; 0 clean records changed.",
+    "All paths to /mnt/c/tmp in quoted provenance are historical descriptions, not runtime dependencies.",
+    "Area 6 sp/spg outputs are recon experiments, not accepted final U04 expectations.",
+    "Area 10 shares the complete base corpus to preserve both corrected and unaffected windows without duplicate source copies."
+  ]
+}

@@ -1,0 +1,372 @@
+def parse_markdown_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    """Parse @beacon[...] HTML comment blocks from Markdown source.
+
+    Expected form (we control this schema):
+
+        <!--
+        @beacon[
+          id=docs:intro@1234,
+          role=doc:intro,
+          slice_labels=DOC,
+          kind=span,
+          start_snippet="# Heading text",
+          comment=One-line human note,
+        ]
+        -->
+
+    Returns a list of dicts with keys:
+        id, role, slice_labels, kind, start_snippet, end_snippet,
+        comment, comment_line, span_lineno_start, span_lineno_end,
+        kind_explicit.
+
+    ``diagnostics``, when a list, receives the parser's own decisions in
+    discovery order: one ``block`` record per opener (outcome ``kept``,
+    ``skipped_unknown_kind`` or ``skipped_empty_id``), one ``close`` record
+    per close candidate the second pass examines, one ``close_match`` per
+    close it matches. The return value is the same with or without it.
+    """
+    beacons: list[dict[str, Any]] = []
+    n = len(lines)
+    i = 0
+
+    # Fence-aware + grammar-strict opener detection (Dan, May 2026).
+    #
+    # Root cause of the "zombie span beacon" bug: the old loop started a
+    # beacon block on ANY line containing the substring '@beacon[', with no
+    # awareness of Markdown fenced code blocks or inline backtick code. Files
+    # that *document* the beacon syntax (e.g. the SPINE METHODOLOGY 99 file)
+    # contain literal mentions like `@beacon[...]` inside a table cell, and
+    # full beacon examples inside ```markdown fenced blocks. Each such mention
+    # was mis-parsed into a phantom beacon: empty id/role/slice_labels, default
+    # kind=span, rendered as a junk '🔱 md-span-beacon #-' node on every F12+1.
+    #
+    # Fix: only treat '@beacon[' / '@beacon-close[' as a structural marker when
+    #   (a) we are NOT inside a fenced code block (``` or ~~~, up to 3 leading
+    #       spaces, closing on a matching-or-longer fence of the same char), and
+    #   (b) the marker is the FIRST significant token on its line after
+    #       stripping an optional comment prefix ('#' for shell/python-style or
+    #       leading whitespace) and the HTML-comment opener ('<!--'). In other
+    #       words the stripped line must START with '@beacon[' (real beacons
+    #       always put the marker alone on its line); prose/table-cell mentions
+    #       like "... `@beacon[...]` ..." do not and are ignored.
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+
+    def _fence_marker(raw_line: str):
+        # Return (char, run_length) if this line opens/closes a code fence,
+        # else None. Allows up to 3 leading spaces per CommonMark.
+        m = re.match(r"^ {0,3}(`{3,}|~{3,})", raw_line)
+        if not m:
+            return None
+        run = m.group(1)
+        return run[0], len(run)
+
+    def _is_structural_beacon_open(raw_line: str) -> bool:
+        text = raw_line.strip()
+        # Strip an HTML-comment opener if the marker shares its line.
+        if text.startswith("<!--"):
+            text = text[4:].lstrip()
+        # Strip a leading comment prefix used by non-MD languages reusing this
+        # parser pattern (harmless for MD): '#' or '//'.
+        if text.startswith("#"):
+            text = text.lstrip("#").lstrip()
+        elif text.startswith("//"):
+            text = text[2:].lstrip()
+        return text.startswith("@beacon[")
+
+    while i < n:
+        line = lines[i]
+
+        # Track fenced code state. A fence line toggles in/out; while inside a
+        # fence we never start a beacon block.
+        fm = _fence_marker(line)
+        if fm is not None:
+            f_char, f_len = fm
+            if not in_fence:
+                in_fence = True
+                fence_char = f_char
+                fence_len = f_len
+            elif f_char == fence_char and f_len >= fence_len:
+                in_fence = False
+                fence_char = ""
+                fence_len = 0
+            i += 1
+            continue
+        if in_fence:
+            i += 1
+            continue
+
+        if _is_structural_beacon_open(line):
+            comment_line = i + 1  # 1-based
+            block_lines = [line]
+            i += 1
+            # Collect until the STRUCTURAL closing ']' line (inclusive).
+            #
+            # Bug fix (Dan, June 2026): the previous terminator stopped at the
+            # first line *containing* a ']' anywhere. That is wrong: the
+            # role= / comment= fields carry free text derived from heading /
+            # prose, which legitimately contains ']' (e.g. a heading ending in
+            # a bracketed capsule id like '... [cc-vac-7m3k]'). A ']' inside
+            # such a value truncated the block early, so later lines
+            # (slice_labels=, kind=) were never read -> kind silently defaulted
+            # to 'span' and slice_labels were dropped. The symptom: F12+2 wrote
+            # a correct kind=ast block to disk, but F12+1 ingest re-read it as a
+            # degenerate span, never decorated the heading with the trident +
+            # tags, and the user's tags were reconciled away (disk-as-truth).
+            #
+            # The real closer is a line whose FIRST significant token is ']'
+            # (after stripping an optional comment prefix), mirroring the
+            # @beacon-close[ detection idiom used in the second pass below.
+            def _is_structural_beacon_close(raw_line: str) -> bool:
+                t = raw_line.strip()
+                if t.startswith("<!--"):
+                    t = t[4:].lstrip()
+                if t.startswith("#"):
+                    t = t.lstrip("#").lstrip()
+                elif t.startswith("//"):
+                    t = t[2:].lstrip()
+                return t.startswith("]")
+            block_end_line = None
+            while i < n:
+                block_lines.append(lines[i])
+                if _is_structural_beacon_close(lines[i]):
+                    block_end_line = i + 1
+                    i += 1
+                    break
+                i += 1
+
+            # Parse block_lines into key/value pairs (skip first/last structural lines)
+            field_texts: list[str] = []
+            inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+            for raw in inner_lines:
+                text = raw.strip()
+                if not text or text.startswith("@beacon"):
+                    continue
+                if text.startswith("<!--") or text.startswith("-->"):
+                    continue
+                field_texts.append(text)
+            # THE ONE shared field parser (beacon_mutation_contract): a line
+            # starts a field only with a known key + '='; others continue it.
+            fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+            kind_raw = fields.get("kind")
+            kind = (kind_raw or "span").strip().lower() or "span"
+            if kind not in {"ast", "span"}:
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                    ))
+                continue
+
+            show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+            start_snippet = fields.get("start_snippet")
+            end_snippet = fields.get("end_snippet")
+
+            span_start: Optional[int] = None
+            span_end: Optional[int] = None
+
+            if kind == "span" and start_snippet:
+                norm_snip = normalize_for_match(start_snippet)
+                if norm_snip:
+                    # Find candidate start lines (global search), but IGNORE
+                    # lines that are clearly part of the beacon metadata
+                    # itself (the @beacon block and its key/value lines).
+                    start_candidates: list[int] = []
+                    for idx, src_line in enumerate(lines, start=1):
+                        # Skip any line that looks like part of a @beacon
+                        # comment block so we never anchor spans to their
+                        # own metadata.
+                        if "@beacon[" in src_line or "start_snippet=" in src_line or "end_snippet=" in src_line:
+                            continue
+                        if norm_snip in normalize_for_match(src_line):
+                            start_candidates.append(idx)
+
+                    if start_candidates:
+                        if len(start_candidates) == 1:
+                            span_start = start_candidates[0]
+                        else:
+                            after = [ln for ln in start_candidates if ln > comment_line]
+                            if len(after) == 1:
+                                span_start = after[0]
+                            else:
+                                # Ambiguous; require refinement
+                                span_start = None
+
+                    if span_start is not None:
+                        if end_snippet:
+                            norm_end = normalize_for_match(end_snippet)
+                            for idx in range(span_start, len(lines) + 1):
+                                if norm_end in normalize_for_match(lines[idx - 1]):
+                                    span_end = idx
+                                    break
+                            if span_end is None:
+                                # Explicit end_snippet but no match – leave span unset
+                                span_start = None
+                        else:
+                            # Default: until just before next header (any level)
+                            span_end = len(lines)
+                            for idx in range(span_start + 1, len(lines) + 1):
+                                if re.match(r"^#{1,64}\s", lines[idx - 1]):
+                                    span_end = idx - 1
+                                    break
+
+            # Empty-id guard (Dan, May 2026): a real beacon ALWAYS carries an
+            # id (it's the required, file-unique handle). A block that parsed
+            # with no id is degenerate noise — either a malformed real beacon
+            # or a stray '@beacon[' the strict opener let through. Never emit a
+            # node for it; that is what used to surface as '🔱 md-span-beacon #-'.
+            b_id_parsed = (fields.get("id") or "").strip()
+            if not b_id_parsed:
+                if DEBUG_MD_BEACONS:
+                    print(
+                        "[MD-BEACON] SKIP degenerate beacon with empty id at "
+                        "line %d (kind=%r, fields=%r)" % (comment_line, kind, fields),
+                        file=sys.stderr,
+                    )
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "skipped_empty_id", fields, field_texts,
+                    ))
+                continue
+
+            beacon = {
+                "id": fields.get("id"),
+                "role": fields.get("role"),
+                "slice_labels": fields.get("slice_labels"),
+                "kind": kind,
+                "start_snippet": start_snippet,
+                "end_snippet": end_snippet,
+                "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                "comment_line": comment_line,
+                "span_lineno_start": span_start,
+                "span_lineno_end": span_end,
+                "kind_explicit": bool(kind_raw),
+                "show_span": show_span,
+                "show_span_explicit": show_span_explicit,
+            }
+            beacons.append(beacon)
+            if diagnostics is not None:
+                diagnostics.append(_beacon_block_diagnostic(
+                    comment_line, block_end_line, "kept", fields, field_texts,
+                ))
+        else:
+            i += 1
+
+    # Second pass: compute span ranges for Markdown span beacons using @beacon-close[...]
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        # Only override when no span was set by start_snippet/end_snippet
+        if beacon.get("span_lineno_start") is not None and beacon.get("span_lineno_end") is not None:
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        # Find end of opener's metadata block (the structural closing ']'
+        # line, NOT merely the first line containing a ']'; see the block
+        # collection loop above for why role=/comment= values can contain ']').
+        def _is_structural_beacon_close_2(raw_line: str) -> bool:
+            t = raw_line.strip()
+            if t.startswith("<!--"):
+                t = t[4:].lstrip()
+            if t.startswith("#"):
+                t = t.lstrip("#").lstrip()
+            elif t.startswith("//"):
+                t = t[2:].lstrip()
+            return t.startswith("]")
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1]
+            if _is_structural_beacon_close_2(raw):
+                open_end = j
+                break
+            j += 1
+
+        # Scan forward for matching @beacon-close[...] with same id.
+        # Fence-aware: ignore any '@beacon-close[' that sits inside a fenced
+        # code block (e.g. a documentation example), mirroring the strict
+        # opener detection above.
+        close_comment_line = None
+        k = open_end + 1
+        close_in_fence = False
+        close_fence_char = ""
+        close_fence_len = 0
+        while k <= n:
+            raw = lines[k - 1]
+            cfm = _fence_marker(raw)
+            if cfm is not None:
+                cf_char, cf_len = cfm
+                if not close_in_fence:
+                    close_in_fence = True
+                    close_fence_char = cf_char
+                    close_fence_len = cf_len
+                elif cf_char == close_fence_char and cf_len >= close_fence_len:
+                    close_in_fence = False
+                    close_fence_char = ""
+                    close_fence_len = 0
+                k += 1
+                continue
+            if close_in_fence:
+                k += 1
+                continue
+            if "@beacon-close[" in raw:
+                close_lines = [raw]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1]
+                    close_lines.append(next_raw)
+                    if next_raw.strip().lstrip("#").lstrip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    text = cl.strip()
+                    # Strip HTML comment wrappers
+                    if text.startswith("<!--"):
+                        text = text[4:].lstrip()
+                    if text.endswith("-->"):
+                        text = text[:-3].rstrip()
+                    # Drop trailing ',' and ']'
+                    while text and text[-1] in ",]":
+                        text = text[:-1].rstrip()
+                    if "id=" in text:
+                        _, val = text.split("=", 1)
+                        close_id = val.strip()
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons

@@ -1,0 +1,3172 @@
+{
+ "kind": "bulk",
+ "reconstruction": "normalized from recorded group finalizations (the BASE runtime emitted whole JSON records, not JSONL lines)",
+ "synthetic": {
+  "cases": {
+   "own_then_other": "(iii) own group refreshes, then another group writes; refresh keys survive beside both receipts",
+   "own_then_other_rejected": "(ii) own group first, other group's receipt rejected",
+   "other_then_own_rejected": "(ii) other group first (keeps its findings), own group's receipt rejected",
+   "interrupted": "(i) abruptly ended: receipts, no row line, in_flight",
+   "in_sync": "(v) every candidate in sync: no receipts, nodes_satisfied 0"
+  },
+  "absent": "A1(iv): a cancellation inside a group; needs the harness case and the G5 writer's stop-path row, so it is not invented here."
+ },
+ "in_flight": {
+  "file": "E:\\work\\bulk\\interrupted.py",
+  "file_node_id": "id-k\\interrupted.py",
+  "status": "failed",
+  "changed": false,
+  "findings": [],
+  "warnings": [],
+  "events": [],
+  "error": "File attempt interrupted before completion",
+  "base_lines": null
+ },
+ "records": [
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 0,
+    "current_file": "id-wn_then_other.py",
+    "current_phase": "update-beacons",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "failed",
+      "changed": false,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "error": "File attempt interrupted before completion",
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      }
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [],
+    "changed": false,
+    "findings": [],
+    "findings_total": 0,
+    "findings_by_code": {},
+    "findings_truncated": 0,
+    "summary_line": "0 successful \u00b7 1 failed \u00b7 0 skipped \u00b7 0 findings \u00b7 0 events",
+    "status": "failed",
+    "successful": 0,
+    "failed": 1,
+    "skipped": 0,
+    "partial_success": false,
+    "success": false,
+    "cancelled": false,
+    "node_outcomes": [],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 0
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 1,
+    "current_file": null,
+    "current_phase": "refresh-file",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "completed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      }
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "2 successful \u00b7 0 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 2,
+    "failed": 0,
+    "skipped": 0,
+    "partial_success": false,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 2
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 1,
+    "current_file": "id-ther_rejected.py",
+    "current_phase": "update-beacons",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "completed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "file_node_id": "id-ther_rejected.py",
+      "status": "failed",
+      "changed": false,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "error": "File attempt interrupted before completion",
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "min_severity": "info"
+       }
+      }
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "2 successful \u00b7 1 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 2,
+    "failed": 1,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 2
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 2,
+    "current_file": null,
+    "current_phase": "refresh-file",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "other-a",
+        "changed": false,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 2,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "completed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "file_node_id": "id-ther_rejected.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "own-c",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 0,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 0,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py",
+     "E:\\work\\bulk\\own_then_other_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "3 successful \u00b7 0 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 3,
+    "failed": 0,
+    "skipped": 0,
+    "partial_success": false,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "other-a",
+      "changed": false,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "own-c",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 4
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 2,
+    "current_file": "id-_own_rejected.py",
+    "current_phase": "update-beacons",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "other-a",
+        "changed": false,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 2,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "completed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "file_node_id": "id-ther_rejected.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "own-c",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 0,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 0,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py",
+     "E:\\work\\bulk\\own_then_other_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "3 successful \u00b7 0 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 3,
+    "failed": 0,
+    "skipped": 0,
+    "partial_success": false,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "other-a",
+      "changed": false,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "own-c",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 4
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 3,
+    "current_file": null,
+    "current_phase": "refresh-file",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "other-a",
+        "changed": false,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 2,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "own-d",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      },
+      "error": "Node write not satisfied"
+     },
+     {
+      "file": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "file_node_id": "id-ther_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "own-c",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "other-c",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 0,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 0,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      },
+      "error": "Node write not satisfied"
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py",
+     "E:\\work\\bulk\\own_then_other_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "1 successful \u00b7 2 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 1,
+    "failed": 2,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "other-a",
+      "changed": false,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "own-c",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "other-c",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "own-d",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 4
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 3,
+    "current_file": "id-\\bulk\\in_sync.py",
+    "current_phase": "update-beacons",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "other-a",
+        "changed": false,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 2,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "own-d",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      },
+      "error": "Node write not satisfied"
+     },
+     {
+      "file": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "file_node_id": "id-ther_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "own-c",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "other-c",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 0,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 0,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      },
+      "error": "Node write not satisfied"
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py",
+     "E:\\work\\bulk\\own_then_other_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "1 successful \u00b7 2 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 1,
+    "failed": 2,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "other-a",
+      "changed": false,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "own-c",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "other-c",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "own-d",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 4
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "running",
+   "error": null,
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 4,
+    "current_file": null,
+    "current_phase": "update-beacons",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "other-a",
+        "changed": false,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 2,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "own-d",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      },
+      "error": "Node write not satisfied"
+     },
+     {
+      "file": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "file_node_id": "id-ther_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "own-c",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "other-c",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 0,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 0,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      },
+      "error": "Node write not satisfied"
+     },
+     {
+      "file": "E:\\work\\bulk\\in_sync.py",
+      "file_node_id": "id-\\bulk\\in_sync.py",
+      "status": "completed",
+      "changed": false,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "node_outcomes": [],
+      "nodes_satisfied": 0,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\in_sync.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "03ff21fe61b0c335df47047b70ab014679796685d138dae2f0c8129f89fd8c2b",
+      "source_path": "E:\\work\\bulk\\in_sync.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      },
+      "final_observation": true
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py",
+     "E:\\work\\bulk\\own_then_other_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "2 successful \u00b7 2 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 2,
+    "failed": 2,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "other-a",
+      "changed": false,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "own-c",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "other-c",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "own-d",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 4
+   }
+  },
+  {
+   "id": "carto-bulk-apply-7f3c21d0",
+   "type": "CARTO_BULK_APPLY",
+   "mode": "file",
+   "root_uuid": "f55bad11-4e3c-e0e7-96b6-c42ffa5fe797",
+   "status": "failed",
+   "error": "File attempt interrupted before completion",
+   "created_at": "2026-10-27T10:00:00.000000+00:00",
+   "updated_at": "2026-10-27T10:10:00.000000",
+   "progress": {
+    "total_files": 5,
+    "completed_files": 4,
+    "current_file": "id-k\\interrupted.py",
+    "current_phase": "update-beacons",
+    "nodes_created": 0,
+    "nodes_updated": 3,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+   },
+   "result_summary": {
+    "files": [
+     {
+      "file": "E:\\work\\bulk\\own_then_other.py",
+      "file_node_id": "id-wn_then_other.py",
+      "status": "refreshed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "own-a",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "source_path": "E:\\work\\bulk\\own_then_other.py",
+        "node_id": "other-a",
+        "changed": false,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       }
+      ],
+      "nodes_satisfied": 2,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 1,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "ccd75499d830c20dc9c1e835ba9f27f84d0847efb73fcd7f6419e2045524631e",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 1,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      }
+     },
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "file_node_id": "id-_own_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [
+       {
+        "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "line": 2,
+        "code": "empty_comment",
+        "severity": "info",
+        "view": "mapper",
+        "authority": "map_source_snapshot",
+        "beacon_id": null,
+        "message": "kept finding",
+        "detail": {},
+        "kind": "empty_comment",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+         "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+        },
+        "members": [],
+        "fix": null,
+        "finding_id": "f-2a52b3125e9c3470"
+       }
+      ],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "other-d",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "node_id": "own-d",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "79f923c1dcb3ea803218861c94db6bd8e4648128285df56d6f4351d943b9da61",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      },
+      "error": "Node write not satisfied"
+     },
+     {
+      "file": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "file_node_id": "id-ther_rejected.py",
+      "status": "failed",
+      "changed": true,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": false,
+      "final_observation": true,
+      "node_outcomes": [
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "own-c",
+        "changed": true,
+        "satisfied": true,
+        "writer_success": true,
+        "success": true,
+        "noop_reason": null
+       },
+       {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "node_id": "other-c",
+        "changed": false,
+        "satisfied": false,
+        "writer_success": false,
+        "success": false,
+        "noop_reason": null,
+        "error": "Node write not satisfied"
+       }
+      ],
+      "nodes_satisfied": 1,
+      "repair_outcomes": [],
+      "diagnostics": [],
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+      "duplicate_source_beacon_ids": {},
+      "state": "valid",
+      "preserve_existing": false,
+      "reconcile_children": [],
+      "create_allowed": true,
+      "delete_allowed": true,
+      "sections": [],
+      "retained_uuids": [],
+      "retained_sections": [],
+      "reconcile_report": {
+       "nodes_planned": 0
+      },
+      "ambiguities": [],
+      "ambiguous_count": 0,
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "dry_run": false,
+      "reconcile_result": null,
+      "nodes_created": 0,
+      "nodes_updated": 0,
+      "nodes_deleted": 0,
+      "nodes_moved": 0,
+      "api_calls": 1,
+      "_incremental_probe": {
+       "used": false
+      },
+      "refresh_outcome": {
+       "success": true,
+       "repair_outcomes": [],
+       "diagnostics": [],
+       "check_target": {
+        "verb": "check",
+        "params": {
+         "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+         "min_severity": "info"
+        }
+       },
+       "file_sha256": "5e3d72864cbb7fe780a91097f42aaacd599daa8901b29e4910a882c0d1095b03",
+       "duplicate_source_beacon_ids": {},
+       "state": "valid",
+       "preserve_existing": false,
+       "reconcile_children": [],
+       "create_allowed": true,
+       "delete_allowed": true,
+       "sections": [],
+       "retained_uuids": [],
+       "retained_sections": [],
+       "reconcile_report": {
+        "nodes_planned": 0
+       },
+       "ambiguities": [],
+       "ambiguous_count": 0,
+       "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+       "dry_run": false,
+       "reconcile_result": null,
+       "nodes_created": 0,
+       "nodes_updated": 0,
+       "nodes_deleted": 0,
+       "nodes_moved": 0,
+       "api_calls": 1,
+       "_incremental_probe": {
+        "used": false
+       },
+       "status": "refreshed",
+       "changed": false
+      },
+      "error": "Node write not satisfied"
+     },
+     {
+      "file": "E:\\work\\bulk\\in_sync.py",
+      "file_node_id": "id-\\bulk\\in_sync.py",
+      "status": "completed",
+      "changed": false,
+      "findings": [],
+      "warnings": [],
+      "events": [],
+      "success": true,
+      "node_outcomes": [],
+      "nodes_satisfied": 0,
+      "state": "valid",
+      "preserve_existing": false,
+      "check_target": {
+       "verb": "check",
+       "params": {
+        "file_path": "E:\\work\\bulk\\in_sync.py",
+        "min_severity": "info"
+       }
+      },
+      "file_sha256": "03ff21fe61b0c335df47047b70ab014679796685d138dae2f0c8129f89fd8c2b",
+      "source_path": "E:\\work\\bulk\\in_sync.py",
+      "dry_run": true,
+      "_incremental_probe": {
+       "used": false
+      },
+      "final_observation": true
+     }
+    ],
+    "warnings": [],
+    "warnings_total": 0,
+    "warnings_by_type": {},
+    "warnings_truncated": 0,
+    "events": [],
+    "files_changed": [
+     "E:\\work\\bulk\\own_then_other.py",
+     "E:\\work\\bulk\\other_then_own_rejected.py",
+     "E:\\work\\bulk\\own_then_other_rejected.py"
+    ],
+    "changed": true,
+    "findings": [
+     {
+      "file": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "line": 2,
+      "code": "empty_comment",
+      "severity": "info",
+      "view": "mapper",
+      "authority": "map_source_snapshot",
+      "beacon_id": null,
+      "message": "kept finding",
+      "detail": {},
+      "kind": "empty_comment",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "e:\\work\\bulk\\other_then_own_rejected.py",
+       "file_sha256": "a7523bf03bf564ea33f242e185b60b6b9413e58d9a1b650ae66561903a5ea23e"
+      },
+      "members": [],
+      "fix": null,
+      "finding_id": "f-2a52b3125e9c3470"
+     }
+    ],
+    "findings_total": 1,
+    "findings_by_code": {
+     "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "2 successful \u00b7 2 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 2,
+    "failed": 2,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "node_outcomes": [
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "own-a",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "other-d",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other.py",
+      "source_path": "E:\\work\\bulk\\own_then_other.py",
+      "node_id": "other-a",
+      "changed": false,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "own-c",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     },
+     {
+      "file_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "source_path": "E:\\work\\bulk\\own_then_other_rejected.py",
+      "node_id": "other-c",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     },
+     {
+      "file_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "source_path": "E:\\work\\bulk\\other_then_own_rejected.py",
+      "node_id": "own-d",
+      "changed": false,
+      "satisfied": false,
+      "writer_success": false,
+      "success": false,
+      "noop_reason": null,
+      "error": "Node write not satisfied"
+     },
+     {
+      "file_path": "E:\\work\\bulk\\interrupted.py",
+      "source_path": "E:\\work\\bulk\\interrupted.py",
+      "node_id": "e-1",
+      "changed": true,
+      "satisfied": true,
+      "writer_success": true,
+      "success": true,
+      "noop_reason": null
+     }
+    ],
+    "errors": [],
+    "node_updates": 3,
+    "nodes_skipped": 2,
+    "nodes_satisfied": 5
+   },
+   "error_kind": "carto_job_exception"
+  }
+ ]
+}

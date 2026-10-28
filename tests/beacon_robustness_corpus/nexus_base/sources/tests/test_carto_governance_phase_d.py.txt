@@ -1,0 +1,956 @@
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import psutil
+import pytest
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp import config as carto_config
+from workflowy_mcp import server
+from workflowy_mcp.client.api_client_core import WorkFlowyClientCore, operation_cancel_scope
+from workflowy_mcp.models.errors import OperationCancelledError
+
+ACCOUNT = "d" * 32
+
+
+def _cache() -> dict[str, dict]:
+    return {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "file": {"id": "file", "parent_id": "repo"},
+    }
+
+
+def _footprint(tmp_path: Path) -> dict:
+    target = tmp_path / "repo" / "file.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch(exist_ok=True)
+    return gov.compute_footprint(target, "file", _cache(), kind="file")
+
+
+def _claim(
+    tmp_path: Path,
+    *,
+    job_id: str = "job",
+    pid: int | None = None,
+    pid_create_time: float | None = None,
+    pid_start_ticks: int | None = None,
+    pid_boot_id: str | None = None,
+    state: str = "running",
+    owner: str = "detached_worker",
+    launched_at: str | None = None,
+    spawn_started_at: str | None = None,
+) -> dict:
+    process = psutil.Process(os.getpid())
+    return gov.build_claim(
+        job_id=job_id,
+        job_type="CARTO_REFRESH",
+        dedupe_key="a" * 64,
+        account_scope_id=ACCOUNT,
+        footprint=_footprint(tmp_path),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=os.getpid() if pid is None else pid,
+        pid_create_time=(process.create_time() if pid_create_time is None else pid_create_time),
+        pid_start_ticks=pid_start_ticks,
+        pid_boot_id=pid_boot_id,
+        handoff_state=state,
+        spawn_started_at=spawn_started_at,
+        execution_owner=owner,
+        launched_at=launched_at,
+    )
+
+
+def _identity_reader(mapping):
+    """U01 ``identity_reader`` double: map pid -> ProcessIdentity (or a
+    zero-arg callable producing one); absent pids raise NoSuchProcess."""
+
+    def _read(pid):
+        entry = mapping.get(int(pid))
+        if entry is None:
+            raise psutil.NoSuchProcess(pid)
+        return entry() if callable(entry) else entry
+
+    return _read
+
+
+def _write_job(
+    jobs: Path,
+    claim: dict | None,
+    *,
+    job_id: str = "job",
+    status: str = "running",
+    pid: int | None = None,
+    created_at: str | None = None,
+    job_type: str = "CARTO_REFRESH",
+) -> Path:
+    jobs.mkdir(parents=True, exist_ok=True)
+    path = jobs / f"{job_id}.json"
+    payload = {
+        "id": job_id,
+        "type": job_type,
+        "status": status,
+        "pid": pid if pid is not None else (claim or {}).get("pid"),
+        "created_at": created_at or gov.utc_now_iso(),
+        "updated_at": created_at or gov.utc_now_iso(),
+        "cache_refresh_required": True,
+    }
+    if claim is not None:
+        payload["claim_id"] = claim["claim_id"]
+    gov.atomic_write_json(path, payload)
+    return path
+
+
+def _load(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+class _UnknownPsutil:
+    NoSuchProcess = psutil.NoSuchProcess
+
+    @staticmethod
+    def Process(_pid):
+        raise psutil.AccessDenied(_pid)
+
+
+def test_owner_liveness_truth_table_reuse_boot_and_unknown():
+    """U01 P2 (probe doubles): every row of the one classifier's truth table —
+    reuse and boot mismatch are dead; unreadable, unprobeable and legacy are
+    unknown; epoch divergence alone is never death evidence."""
+
+    stored = gov.StoredOwnerIdentity(
+        pid=123, pid_create_time=10.0, start_ticks=100, boot_id="boot-a"
+    )
+
+    def _reader(identity):
+        return lambda _pid: identity
+
+    assert (
+        gov.classify_owner_liveness(
+            stored,
+            identity_reader=_reader(
+                gov.ProcessIdentity(pid=123, start_ticks=100, boot_id="boot-a", create_time=10.0)
+            ),
+        )
+        == "alive"
+    )
+    # Same pid, different incarnation (start ticks differ) — PID reuse.
+    assert (
+        gov.classify_owner_liveness(
+            stored,
+            identity_reader=_reader(
+                gov.ProcessIdentity(pid=123, start_ticks=101, boot_id="boot-a", create_time=10.0)
+            ),
+        )
+        == "dead"
+    )
+    # Different boot.
+    assert (
+        gov.classify_owner_liveness(
+            stored,
+            identity_reader=_reader(
+                gov.ProcessIdentity(pid=123, start_ticks=100, boot_id="boot-b", create_time=10.0)
+            ),
+        )
+        == "dead"
+    )
+    # Epoch moved by seconds with the incarnation unchanged — alive (the
+    # retired epsilon comparison classified this live owner dead).
+    assert (
+        gov.classify_owner_liveness(
+            stored,
+            identity_reader=_reader(
+                gov.ProcessIdentity(pid=123, start_ticks=100, boot_id="boot-a", create_time=11.0)
+            ),
+        )
+        == "alive"
+    )
+    # Unreadable probe, unprobeable current, and legacy artifact: unknown.
+    assert gov.classify_owner_liveness(stored, identity_reader=_raise_psutil_access_denied) == "unknown"
+    assert (
+        gov.classify_owner_liveness(
+            stored,
+            identity_reader=_reader(
+                gov.ProcessIdentity(pid=123, start_ticks=None, boot_id=None, create_time=10.0)
+            ),
+        )
+        == "unknown"
+    )
+    legacy = gov.StoredOwnerIdentity(pid=123, pid_create_time=10.0, start_ticks=None, boot_id=None)
+    assert (
+        gov.classify_owner_liveness(
+            legacy,
+            identity_reader=_reader(
+                gov.ProcessIdentity(pid=123, start_ticks=100, boot_id="boot-a", create_time=10.0)
+            ),
+        )
+        == "unknown"
+    )
+
+    def _missing(pid):
+        raise psutil.NoSuchProcess(pid)
+
+    assert gov.classify_owner_liveness(stored, identity_reader=_missing) == "dead"
+    assert gov.classify_owner_liveness(legacy, identity_reader=_missing) == "dead"
+
+
+def _raise_psutil_access_denied(pid):
+    raise psutil.AccessDenied(pid)
+
+
+@pytest.mark.parametrize("sentinel, expected", [(False, "failed"), (True, "cancelled")])
+def test_dead_claim_reap_terminalizes_tombstones_and_releases(tmp_path, sentinel, expected):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path)
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim)
+    if sentinel:
+        gov.create_cancellation_sentinel("job", "test", jobs)
+    result = gov.sweep_region_governance(
+        jobs,
+        now_epoch=1000,
+        liveness_classifier=lambda _stored: "dead",
+    )
+    assert _load(job_file)["status"] == expected
+    assert result.reaped_claim_ids == [claim["claim_id"]]
+    assert not list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+    assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+@pytest.mark.parametrize(
+    "terminal", ["completed", "completed_with_warnings", "failed", "cancelled"]
+)
+def test_dead_claim_reap_preserves_every_existing_terminal(tmp_path, terminal):
+    jobs = tmp_path / terminal
+    claim = _claim(tmp_path, job_id=terminal)
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim, job_id=terminal, status=terminal)
+    gov.sweep_region_governance(jobs, liveness_classifier=lambda _stored: "dead")
+    assert _load(job_file)["status"] == terminal
+    assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_unknown_spawn_grace_and_age_only_claims_are_never_reaped(tmp_path):
+    for name, classifier, state, spawn in (
+        ("unknown", "unknown", "running", None),
+        ("spawn", "dead", "spawning", gov.utc_now_iso(995)),
+    ):
+        jobs = tmp_path / name
+        claim = _claim(
+            tmp_path,
+            job_id=name,
+            state=state,
+            spawn_started_at=spawn,
+            launched_at=gov.utc_now_iso(1),
+        )
+        gov.write_claim(claim, jobs)
+        _write_job(jobs, claim, job_id=name)
+        result = gov.sweep_region_governance(
+            jobs,
+            now_epoch=1000,
+            spawn_grace_seconds=60,
+            liveness_classifier=lambda _stored, value=classifier: value,
+        )
+        assert not result.reaped_claim_ids
+        assert list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+
+
+def test_reap_status_write_failure_does_not_block_one_exit_door(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path)
+    gov.write_claim(claim, jobs)
+    _write_job(jobs, claim)
+    messages = []
+    result = gov.sweep_region_governance(
+        jobs,
+        liveness_classifier=lambda *_args: "dead",
+        merge_writer=lambda *_args: False,
+        legacy_liveness_classifier=lambda _pid: "unknown",
+        diagnostic=messages.append,
+    )
+    assert result.reaped_claim_ids == [claim["claim_id"]]
+    assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+    assert any("proceeding to claim finalization" in message for message in messages)
+
+
+def test_unclassifiable_claim_and_lease_are_preserved_and_loud(tmp_path):
+    jobs = tmp_path / "jobs"
+    paths = gov.governance_paths(jobs)
+    paths.claims_dir.mkdir(parents=True)
+    paths.leases_dir.mkdir(parents=True)
+    bad_claim = paths.claims_dir / "bad.lock.json"
+    bad_lease = paths.leases_dir / "bad.lock.json"
+    bad_claim.write_text("{", encoding="utf-8")
+    bad_lease.write_text("{", encoding="utf-8")
+    result = gov.sweep_region_governance(jobs)
+    assert {str(bad_claim), str(bad_lease)} <= set(result.unclassifiable_artifacts)
+    assert bad_claim.exists() and bad_lease.exists()
+    assert result.diagnostics
+
+
+@pytest.mark.parametrize(
+    "pid, age, sentinel, expected",
+    [
+        (99999999, 1000, False, "failed"),
+        (None, 1000, False, "failed"),
+        (99999999, 1000, True, "cancelled"),
+    ],
+)
+def test_claimless_dead_or_expired_fallback_no_tombstone(tmp_path, pid, age, sentinel, expected):
+    jobs = tmp_path / "jobs"
+    job_file = _write_job(
+        jobs,
+        None,
+        pid=pid,
+        created_at=gov.utc_now_iso(1000 - age),
+    )
+    if sentinel:
+        gov.create_cancellation_sentinel("job", "test", jobs)
+    gov.sweep_region_governance(
+        jobs,
+        now_epoch=1000,
+        legacy_liveness_classifier=lambda _pid: "dead",
+    )
+    assert _load(job_file)["status"] == expected
+    assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+@pytest.mark.parametrize("legacy_state", ["alive", "unknown"])
+def test_claimless_live_or_unknown_is_preserved_and_blocks_globally(tmp_path, legacy_state):
+    jobs = tmp_path / "jobs"
+    _write_job(jobs, None, pid=os.getpid())
+    result = gov.sweep_region_governance(jobs, legacy_liveness_classifier=lambda _pid: legacy_state)
+    assert result.claimless_conflicts
+    with pytest.raises(gov.GovernanceConflictError):
+        gov.acquire_q3_leases([_footprint(tmp_path)], account_scope_id=ACCOUNT, jobs_root=jobs)
+
+
+def test_scanner_claim_identity_overlay_dead_view_and_bulk_cross_process(tmp_path):
+    jobs = tmp_path / "jobs"
+    live = _claim(tmp_path, job_id="bulk", owner="launcher")
+    gov.write_claim(live, jobs)
+    live_file = _write_job(
+        jobs,
+        live,
+        job_id="bulk",
+        pid=99999999,
+        job_type="CARTO_BULK_APPLY",
+    )
+    scanned = server._scan_carto_job_files(str(jobs))
+    assert scanned[0]["status"] == "running"
+    assert scanned[0]["pid"] == live["pid"]
+
+    gov.create_cancellation_sentinel("bulk", "test", jobs)
+    assert server._scan_carto_job_files(str(jobs))[0]["status"] == "cancelling"
+    assert _load(live_file)["status"] == "running"  # scanner is read-only
+
+    dead_jobs = tmp_path / "dead-jobs"
+    dead = _claim(tmp_path, job_id="dead", pid=99999998, pid_create_time=1)
+    gov.write_claim(dead, dead_jobs)
+    dead_file = _write_job(dead_jobs, dead, job_id="dead", pid=os.getpid())
+    view = gov.inspect_carto_job_liveness(
+        _load(dead_file),
+        dead_file,
+        liveness_classifier=lambda *_args: "dead",
+    )
+    assert view["status"] == "failed"
+    assert _load(dead_file)["status"] == "running"
+    assert "orphaned" not in json.dumps(view).lower()
+
+
+def test_unknown_status_is_active_and_completed_with_warnings_is_terminal():
+    assert carto_config.is_carto_job_active("")
+    assert carto_config.is_carto_job_active("future_state")
+    assert carto_config.is_carto_job_terminal("completed_with_warnings")
+
+
+@pytest.mark.parametrize(
+    "disk,incoming,expected",
+    [
+        ("cancelling", "running", "cancelling"),
+        ("cancelling", "completed", "completed"),
+        ("completed", "running", "completed"),
+        ("completed", "completed_with_warnings", "completed_with_warnings"),
+        ("completed_with_warnings", "completed", "completed_with_warnings"),
+        ("completed_with_warnings", "failed", "failed"),
+        ("failed", "cancelled", "failed"),
+        ("cancelled", "failed", "cancelled"),
+    ],
+)
+def test_status_merge_exact_precedence(tmp_path, disk, incoming, expected):
+    path = tmp_path / "job.json"
+    path.write_text(json.dumps({"id": "job", "status": disk}), encoding="utf-8")
+    assert carto_config.merge_write_carto_job_status(path, {"id": "job", "status": incoming})
+    assert _load(path)["status"] == expected
+
+
+def test_status_merge_sentinel_precheck_and_postwrite_correction(tmp_path, monkeypatch):
+    path = tmp_path / "job.json"
+    path.write_text(json.dumps({"id": "job", "status": "running"}), encoding="utf-8")
+    sentinel = tmp_path / ".cancel_requests" / "job.cancel"
+    sentinel.parent.mkdir()
+    sentinel.write_text("{}", encoding="utf-8")
+    assert carto_config.merge_write_carto_job_status(path, {"id": "job", "status": "waiting"})
+    assert _load(path)["status"] == "cancelling"
+
+    path.write_text(json.dumps({"id": "job", "status": "running"}), encoding="utf-8")
+    calls = iter([False, True])
+    monkeypatch.setattr(
+        carto_config,
+        "_carto_cancel_sentinel_exists",
+        lambda *_args: next(calls),
+    )
+    assert carto_config.merge_write_carto_job_status(path, {"id": "job", "status": "running"})
+    assert _load(path)["status"] == "cancelling"
+
+
+def test_cancel_ordering_already_terminal_and_parent_child_independence(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, job_id="parent", owner="launcher")
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim, job_id="parent")
+    child = _claim(tmp_path, job_id="child", owner="launcher")
+    gov.write_claim(child, jobs)
+    _write_job(jobs, child, job_id="child")
+
+    events = []
+    original_create = gov.create_cancellation_sentinel
+    original_merge = gov.merge_write_carto_job_status
+
+    def create(*args, **kwargs):
+        events.append("sentinel")
+        return original_create(*args, **kwargs)
+
+    def merge(path, payload):
+        if payload.get("status") == "cancelling":
+            events.append("cancelling")
+        return original_merge(path, payload)
+
+    monkeypatch.setattr(gov, "create_cancellation_sentinel", create)
+    monkeypatch.setattr(gov, "merge_write_carto_job_status", merge)
+    result = asyncio.run(
+        gov.cancel_carto_job(
+            job_file,
+            requested_by="test",
+            task_cancel=lambda: events.append("task_cancel"),
+            cooperative_timeout_seconds=0,
+        )
+    )
+    assert events[:3] == ["sentinel", "cancelling", "task_cancel"]
+    assert result["outcome"] == "kill_refused_in_process_job"
+    assert gov.cancellation_sentinel_path("parent", jobs).exists()
+    assert not gov.cancellation_sentinel_path("child", jobs).exists()
+
+    terminal = _load(job_file)
+    terminal["status"] = "failed"
+    original_merge(job_file, terminal)
+    before = job_file.read_bytes()
+    gov.delete_cancellation_sentinel("parent", jobs)
+    result = asyncio.run(gov.cancel_carto_job(job_file, requested_by="test"))
+    assert result["outcome"] == "already_terminal"
+    assert job_file.read_bytes() == before
+    assert not gov.cancellation_sentinel_path("parent", jobs).exists()
+
+
+class _FakeProcess:
+    def __init__(
+        self,
+        pid,
+        *,
+        create_time,
+        cmdline,
+        mutex_path: Path | None = None,
+        timeout_once=False,
+    ):
+        self.pid = pid
+        self._create_time = create_time
+        self._cmdline = cmdline
+        self._mutex_path = mutex_path
+        self._timeout_once = timeout_once
+        self.terminated = False
+        self.killed = False
+
+    def create_time(self):
+        return self._create_time
+
+    def cmdline(self):
+        return self._cmdline
+
+    def terminate(self):
+        if self._mutex_path is not None:
+            with gov.os_lock(self._mutex_path, timeout_seconds=0.2):
+                pass
+        self.terminated = True
+
+    def wait(self, timeout):
+        if self._timeout_once and not self.killed:
+            self._timeout_once = False
+            raise psutil.TimeoutExpired(timeout, self.pid)
+        return 0
+
+    def kill(self):
+        self.killed = True
+
+
+def _fake_psutil(process):
+    return SimpleNamespace(
+        Process=lambda _pid: process,
+        NoSuchProcess=psutil.NoSuchProcess,
+        TimeoutExpired=psutil.TimeoutExpired,
+    )
+
+
+def test_escalation_refusals_for_launcher_mismatch_cmdline_and_unknown(tmp_path):
+    jobs = tmp_path / "jobs"
+    for name, owner, process, expected, claim_ticks, probed in (
+        (
+            "launcher",
+            "launcher",
+            _FakeProcess(101, create_time=1, cmdline=[]),
+            "kill_refused_in_process_job",
+            None,
+            gov.ProcessIdentity(pid=101, start_ticks=None, boot_id=None, create_time=1.0),
+        ),
+        (
+            # U01: same pid, different incarnation — the stored stable fields
+            # no longer match the probed ones, so the owner classifies dead
+            # and the cooperative poll reaps without any kill.
+            "recycled",
+            "detached_worker",
+            _FakeProcess(102, create_time=2, cmdline=[]),
+            "cooperative",
+            1,
+            gov.ProcessIdentity(pid=102, start_ticks=2, boot_id=None, create_time=2.0),
+        ),
+        (
+            "cmdline",
+            "detached_worker",
+            _FakeProcess(103, create_time=1, cmdline=["other"]),
+            "kill_refused_unverified_pid",
+            None,
+            gov.ProcessIdentity(pid=103, start_ticks=None, boot_id=None, create_time=1.0),
+        ),
+    ):
+        root = jobs / name
+        claim = _claim(
+            tmp_path,
+            job_id=name,
+            pid=process.pid,
+            pid_create_time=1,
+            pid_start_ticks=claim_ticks,
+            owner=owner,
+        )
+        gov.write_claim(claim, root)
+        job_file = _write_job(root, claim, job_id=name)
+        result = asyncio.run(
+            gov.cancel_carto_job(
+                job_file,
+                requested_by="test",
+                cooperative_timeout_seconds=0,
+                psutil_module=_fake_psutil(process),
+                identity_reader=_identity_reader({process.pid: probed}),
+            )
+        )
+        assert result["outcome"] == expected
+        assert not process.terminated
+
+    unknown_root = jobs / "unknown"
+    claim = _claim(tmp_path, job_id="unknown", pid=104, pid_create_time=1)
+    gov.write_claim(claim, unknown_root)
+    job_file = _write_job(unknown_root, claim, job_id="unknown")
+
+    def _denied(pid):
+        raise psutil.AccessDenied(pid)
+
+    result = asyncio.run(
+        gov.cancel_carto_job(
+            job_file,
+            requested_by="test",
+            cooperative_timeout_seconds=0,
+            psutil_module=_UnknownPsutil,
+            identity_reader=_denied,
+        )
+    )
+    assert result["outcome"] == "kill_refused_unverified_pid"
+
+
+def test_verified_detached_escalation_terminate_kill_mutex_release_and_sweep(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, pid=200, pid_create_time=1)
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim)
+    process = _FakeProcess(
+        200,
+        create_time=1,
+        cmdline=["python", "--carto-job-file", str(job_file)],
+        mutex_path=gov.governance_paths(jobs).admission_mutex,
+        timeout_once=True,
+    )
+    sweeps = []
+    result = asyncio.run(
+        gov.cancel_carto_job(
+            job_file,
+            requested_by="test",
+            cooperative_timeout_seconds=0,
+            psutil_module=_fake_psutil(process),
+            identity_reader=_identity_reader(
+                {200: gov.ProcessIdentity(pid=200, start_ticks=None, boot_id=None, create_time=1.0)}
+            ),
+            sweep_fn=lambda *args, **kwargs: sweeps.append((args, kwargs)),
+        )
+    )
+    assert result["outcome"] == "forced"
+    assert process.terminated and process.killed
+    assert sweeps
+
+
+def test_postpoll_ownership_reread_targets_transitioned_child(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(
+        tmp_path,
+        pid=os.getpid(),
+        owner="launcher",
+        state="spawning",
+        spawn_started_at=gov.utc_now_iso(),
+    )
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim)
+    child = _FakeProcess(
+        300,
+        create_time=3,
+        cmdline=["python", "--carto-job-file", str(job_file)],
+    )
+    launcher_process = _FakeProcess(
+        os.getpid(),
+        create_time=claim["pid_create_time"],
+        cmdline=[],
+    )
+    process_module = SimpleNamespace(
+        Process=lambda pid: child if int(pid) == 300 else launcher_process,
+        NoSuchProcess=psutil.NoSuchProcess,
+        TimeoutExpired=psutil.TimeoutExpired,
+    )
+    reader = _identity_reader(
+        {
+            os.getpid(): gov.ProcessIdentity(
+                pid=os.getpid(), start_ticks=None, boot_id=None, create_time=1.0
+            ),
+            300: gov.ProcessIdentity(pid=300, start_ticks=None, boot_id=None, create_time=3.0),
+        }
+    )
+    clock = iter([0.0, 0.0, 2.0])
+
+    def transition(_seconds):
+        claim_path = next(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+        current = gov.read_claim(claim_path)
+        current["pid"] = 300
+        current["pid_create_time"] = 3
+        current["execution_owner"] = "detached_worker"
+        gov.write_claim(current, jobs)
+
+    result = asyncio.run(
+        gov.cancel_carto_job(
+            job_file,
+            requested_by="test",
+            cooperative_timeout_seconds=1,
+            sleep_fn=transition,
+            monotonic_fn=lambda: next(clock),
+            psutil_module=process_module,
+            identity_reader=reader,
+            sweep_fn=lambda *_args, **_kwargs: None,
+        )
+    )
+    assert result["outcome"] == "forced"
+    assert child.terminated
+
+
+def test_postpoll_incarnation_mismatch_refuses_kill(tmp_path):
+    """U01: the cooperative poll sees the stored incarnation alive, then the
+    mandatory post-poll ownership reread probes a DIFFERENT incarnation
+    (start ticks changed) — exact-kill verification refuses, never fires."""
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, pid=400, pid_create_time=1, pid_start_ticks=100)
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim)
+    process = _FakeProcess(
+        400,
+        create_time=1,
+        cmdline=["python", "--carto-job-file", str(job_file)],
+    )
+    reads = {"count": 0}
+
+    def changing_reader(pid):
+        reads["count"] += 1
+        return gov.ProcessIdentity(
+            pid=int(pid),
+            start_ticks=100 if reads["count"] == 1 else 101,
+            boot_id=None,
+            create_time=1.0,
+        )
+
+    result = asyncio.run(
+        gov.cancel_carto_job(
+            job_file,
+            requested_by="test",
+            cooperative_timeout_seconds=0,
+            psutil_module=_fake_psutil(process),
+            identity_reader=changing_reader,
+        )
+    )
+    assert result["outcome"] == "kill_refused_unverified_pid"
+    assert not process.terminated
+
+
+from test_carto_final_cache_publication import final_env, write_job, record
+
+
+def test_completed_with_warnings_transition_triggers_terminal_cache_refresh(final_env):
+    jobs, requested = final_env
+    path, payload = write_job(jobs, "warned")
+    async def exercise():
+        await server._refresh_carto_job_tracker_once()
+        assert not requested
+        assert gov.merge_write_carto_job_status(path, {
+            **payload, "status": "completed_with_warnings", "warnings": [{"message": "phase warning"}]})
+        await server._refresh_carto_job_tracker_once()
+        assert requested and "warned" in requested[0]["reason"]
+        assert requested[0]["require_new_fetch"] is True
+        assert record(jobs, "warned")["state"] == "reserved"
+        assert server._scan_carto_job_files(str(jobs))[0]["warnings"] == [{"message": "phase warning"}]
+    asyncio.run(exercise())
+
+
+def test_cooperative_release_and_verified_death(tmp_path):
+    jobs = tmp_path / "release"
+    claim = _claim(tmp_path, owner="launcher")
+    claim_path = gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim)
+    result = asyncio.run(
+        gov.cancel_carto_job(
+            job_file,
+            requested_by="test",
+            task_cancel=lambda: claim_path.unlink(),
+        )
+    )
+    assert result["outcome"] == "cooperative"
+
+    dead_jobs = tmp_path / "dead"
+    dead = _claim(tmp_path, job_id="dead", pid=99999997, pid_create_time=1)
+    gov.write_claim(dead, dead_jobs)
+    dead_file = _write_job(dead_jobs, dead, job_id="dead")
+    result = asyncio.run(
+        gov.cancel_carto_job(
+            dead_file,
+            requested_by="test",
+            psutil_module=SimpleNamespace(
+                Process=lambda pid: (_ for _ in ()).throw(psutil.NoSuchProcess(pid)),
+                NoSuchProcess=psutil.NoSuchProcess,
+                TimeoutExpired=psutil.TimeoutExpired,
+            ),
+            sweep_fn=lambda *_args, **_kwargs: None,
+        )
+    )
+    assert result["outcome"] == "cooperative"
+
+
+@pytest.mark.skipif(sys.platform == "win32" and not sys.executable, reason="python unavailable")
+def test_real_subprocess_exact_pid_force_kill_reaps_and_tombstones(tmp_path):
+    jobs = tmp_path / "jobs"
+    job_file = jobs / "real.json"
+    jobs.mkdir(parents=True)
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(60)",
+            "--carto-job-file",
+            str(job_file),
+        ]
+    )
+    try:
+        identity = psutil.Process(process.pid)
+        claim = _claim(
+            tmp_path,
+            job_id="real",
+            pid=process.pid,
+            pid_create_time=identity.create_time(),
+        )
+        gov.write_claim(claim, jobs)
+        _write_job(jobs, claim, job_id="real")
+        result = asyncio.run(
+            gov.cancel_carto_job(
+                job_file,
+                requested_by="test",
+                cooperative_timeout_seconds=0,
+            )
+        )
+        assert result["outcome"] == "forced"
+        process.wait(timeout=5)
+        assert not list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+        assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+        assert _load(job_file)["status"] == "cancelled"
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def test_token_verified_cancel_finalization_and_vanished_sentinel(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path)
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim, status="cancelling")
+    status = gov.finalize_cancelled_job_claim(job_file, claim["claim_id"])
+    assert status == "failed"
+    assert _load(job_file)["error"] == "cancellation sentinel vanished before finalization"
+    assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_auxiliary_cleanup_terminal_orphan_live_claim_and_malformed_preservation(tmp_path):
+    jobs = tmp_path / "jobs"
+    terminal = _write_job(jobs, None, job_id="terminal", status="completed")
+    del terminal
+    gov.create_cancellation_sentinel("terminal", "test", jobs)
+    paths = gov.governance_paths(jobs)
+    paths.heartbeats_dir.mkdir(parents=True)
+    heartbeat = paths.heartbeats_dir / "terminal.json"
+    heartbeat.write_text("{}", encoding="utf-8")
+    gov.cleanup_carto_auxiliary_artifacts(jobs)
+    assert not gov.cancellation_sentinel_path("terminal", jobs).exists()
+    assert not heartbeat.exists()
+
+    orphan = paths.cancel_dir / "orphan.cancel"
+    orphan.write_text("{}", encoding="utf-8")
+    os.utime(orphan, (1, 1))
+    gov.cleanup_carto_auxiliary_artifacts(jobs, now_epoch=1000, orphan_grace_seconds=10)
+    assert not orphan.exists()
+
+    live = _claim(tmp_path, job_id="live")
+    gov.write_claim(live, jobs)
+    _write_job(jobs, live, job_id="live", status="completed")
+    live_sentinel = gov.create_cancellation_sentinel("live", "test", jobs)
+    gov.cleanup_carto_auxiliary_artifacts(jobs)
+    assert live_sentinel.exists()
+
+    bad = paths.claims_dir / "bad.lock.json"
+    bad.write_text("{", encoding="utf-8")
+    preserved = paths.cancel_dir / "preserved.cancel"
+    preserved.write_text("{}", encoding="utf-8")
+    os.utime(preserved, (1, 1))
+    result = gov.cleanup_carto_auxiliary_artifacts(jobs, now_epoch=1000, orphan_grace_seconds=10)
+    assert preserved.exists()
+    assert result["preserved_unclassifiable"]
+
+
+def test_live_claim_pins_job_json_and_live_tombstone_survives_history_clear(tmp_path, monkeypatch):
+    admission = SimpleNamespace(
+        cooldown_seconds=60,
+        start_grace_seconds=30,
+        spawn_grace_seconds=60,
+        orphan_grace_seconds=120,
+    )
+    monkeypatch.setattr(
+        server,
+        "get_server_config",
+        lambda: SimpleNamespace(
+            admission=admission,
+            governance=SimpleNamespace(mutex_wait_seconds=10),
+        ),
+    )
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path)
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim, status="completed")
+    assert not server._delete_carto_job_json_if_unclaimed(jobs, job_file, _load(job_file))
+    assert job_file.exists()
+
+    # Manual clear never touches cooldown tombstones.
+    assert gov.finalize_claim(claim["claim_id"], jobs)
+    tombstones = list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+    assert tombstones
+    asyncio.run(server._clear_carto_job_history(str(jobs)))
+    assert tombstones[0].exists()
+
+
+def test_refresh_claim_and_q3_lease_lifecycles_remain_separate(tmp_path):
+    paths = gov.governance_paths(tmp_path / "jobs")
+    assert paths.leases_dir.name == ".q3_leases"
+    assert (paths.jobs_root / ".refresh_claims") != paths.leases_dir
+    source = inspect.getsource(server._gc_carto_jobs)
+    assert ".refresh_claims" in source
+    assert "leases_dir" not in source
+
+
+def test_shared_sweep_wiring_and_no_kill_in_watcher_or_startup():
+    assert "sweep_region_governance_locked" in inspect.getsource(gov.admit_carto_job_locked)
+    trigger = inspect.getsource(server._sweep_carto_governance)
+    assert "async with async_os_lock(" in trigger
+    assert "sweep_region_governance_locked(" in trigger
+    assert "_sweep_carto_governance" in inspect.getsource(server._carto_jobs_watcher_loop)
+    assert "_sweep_carto_governance" in inspect.getsource(server.lifespan)
+    for function in (server._carto_jobs_watcher_loop, server.lifespan):
+        source = inspect.getsource(function)
+        assert ".terminate(" not in source
+        assert ".kill(" not in source
+    assert "taskkill" not in inspect.getsource(gov.cancel_carto_job).lower()
+
+
+def test_both_public_cancel_fronts_share_the_controller():
+    system_source = inspect.getsource(server._system_job_cancel_impl)
+    # U4 (WS reader loop): the carto_cancel_job clause was lifted VERBATIM
+    # into _handle_carto_cancel_job and is spawned, so the WS front's source
+    # is the lifted handler; the reader loop must dispatch THAT front (and
+    # never hand-roll the cancellation itself).
+    websocket_source = inspect.getsource(server._handle_carto_cancel_job)
+    pump_source = inspect.getsource(server.websocket_handler)
+    assert "cancel_carto_job(" in system_source
+    assert "_system_job_cancel_impl(" in websocket_source
+    assert 'carto_job["status"] = "cancelled"' not in websocket_source
+    assert 'carto_job["status"] = "cancelled"' not in pump_source
+    assert "_handle_carto_cancel_job(" in pump_source
+
+
+def test_worker_startup_adoption_cancel_and_sentinel_checker_contracts_are_textual():
+    worker = Path(server.__file__).with_name("weave_worker.py").read_text(encoding="utf-8")
+    adoption = worker.index("adopt_carto_worker_claim(args.carto_job_file)")
+    startup_cancel = worker.index("Startup cancellation finalized before client/bootstrap")
+    client_import = worker.index("from workflowy_mcp.client.api_client import WorkFlowyClient")
+    assert adoption < startup_cancel < client_import
+    assert "return carto_cancel_requested(job_path)" not in worker  # callbacks record observation
+    assert "carto_cancel_requested(job_path)" in worker
+    pipeline = (
+        Path(server.__file__).with_name("markdown_generate_pipeline.py").read_text(encoding="utf-8")
+    )
+    assert "return carto_cancel_requested(job_file)" in pipeline
+
+
+def test_job_local_cancel_probe_does_not_cancel_sibling_task():
+    async def scenario():
+        client = WorkFlowyClientCore.__new__(WorkFlowyClientCore)
+        client._operation_cancel_callback = None
+        started = asyncio.Event()
+
+        async def cancelled():
+            with operation_cancel_scope(lambda: True):
+                started.set()
+                with pytest.raises(OperationCancelledError):
+                    await client._sleep_with_operation_cancel(0.01, "cancelled")
+
+        async def sibling():
+            await started.wait()
+            with operation_cancel_scope(lambda: False):
+                await client._sleep_with_operation_cancel(0.01, "sibling")
+                return "ok"
+
+        assert await asyncio.gather(cancelled(), sibling()) == [None, "ok"]
+
+    asyncio.run(scenario())

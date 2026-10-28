@@ -1,0 +1,89 @@
+"""Q11: what the golden corpus pins, whether any pinned record relies on
+swallowing, and how many pinned parser records each candidate stop condition
+would change (i.e. what would need re-baselining).  Read-only.
+"""
+import collections
+import json
+import os
+import sys
+
+sys.path.insert(0, "/mnt/c/tmp/beacon_robustness/area-1")
+import a1lib as L  # noqa: E402
+
+TREE_TESTS = "/mnt/c/tmp/beacon_robustness/area-1/tree/tests"
+sys.path.insert(0, TREE_TESTS)
+import beacon_check_fixtures as fx  # noqa: E402
+
+n = L.n
+golden = json.load(open(os.path.join(TREE_TESTS, "beacon_seams_baseline.json"), encoding="utf-8"))
+SHORT = {"python": "python", "js": "js_ts", "markdown": "markdown", "sql": "sql", "sh": "shell", "yaml": "yaml"}
+
+sources = {}
+for fn in sorted(os.listdir(os.path.join(TREE_TESTS, "beacon_seams_corpus"))):
+    if fn.endswith(".txt"):
+        sources[f"corpus:{fn[:-4]}"] = (fn[:-4], open(os.path.join(TREE_TESTS, "beacon_seams_corpus", fn), "rb").read().decode("utf-8"))
+for name, (fname, text) in fx.all_text_fixtures().items():
+    sources[f"fixture:{name}"] = (fname, text)
+
+summary = {"sources": len(sources), "pinned_sources": len(golden["parsers"]),
+           "pinned_sections": sorted(k for k in golden if isinstance(golden[k], dict)),
+           "current_equals_baseline_parsers": 0, "current_differs_baseline_parsers": []}
+anom = collections.Counter()
+anom_list = []
+cand = collections.defaultdict(collections.Counter)
+cand_examples = collections.defaultdict(list)
+for key, (fname, text) in sources.items():
+    lines = text.splitlines()
+    pinned = golden["parsers"].get(key)
+    for short, lang in SHORT.items():
+        parser = getattr(n, L.PARSER_NAME[lang])
+        diag = []
+        cur = parser(lines, diagnostics=diag)
+        if pinned is not None:
+            if json.loads(json.dumps(cur)) == pinned.get(short):
+                summary["current_equals_baseline_parsers"] += 1
+            else:
+                summary["current_differs_baseline_parsers"].append([key, short])
+        srows = L.python_string_rows(text) if lang == "python" else None
+        recs = {}
+        for rec in diag:
+            if rec.get("record") != "block":
+                continue
+            c = L.classify_block(lang, lines, rec, srows)
+            recs[rec["line"]] = c
+            anom["blocks"] += 1
+            own = L.LANG_BY_EXT.get(os.path.splitext(fname)[1].lower())
+            own = "js_ts" if own == "vue" else own
+            tag = "own_language" if own == lang else "cross_language"
+            anom[f"blocks[{tag}]"] += 1
+            for flag in ("unterminated", "swallowed", "stolen_id", "crossed_code", "one_line_opener", "anomalous"):
+                if c[flag]:
+                    anom[f"{flag}[{tag}]"] += 1
+            if c["anomalous"] or c["stolen_id"]:
+                anom_list.append({"source": key, "parser": short, "tag": tag, "line": c["line"], "end_line": c["end_line"],
+                                  "id": c["id"], "unterminated": c["unterminated"], "swallowed": c["interior_openers"],
+                                  "stolen_id": c["stolen_id"], "crossed_code": c["interior_noprefix"][:5],
+                                  "one_line": c["one_line_opener"]})
+        for cn in L.CANDIDATES:
+            if cn.startswith("MD_") and lang != "markdown":
+                continue
+            after = L.patched_parser(lang, cn)(lines)
+            d = L.diff_parses(cur, after)
+            if d:
+                own = L.LANG_BY_EXT.get(os.path.splitext(fname)[1].lower())
+                own = "js_ts" if own == "vue" else own
+                tag = "own_language" if own == lang else "cross_language"
+                cand[cn][f"pinned_records_changed(source,parser)[{tag}]"] += 1
+                for item in d:
+                    r = recs.get(item["line"])
+                    b = "new_block_surfaced" if r is None else ("anomalous_block_changed" if r["anomalous"] else "CLEAN_block_changed")
+                    cand[cn][f"{b}[{tag}]"] += 1
+                    if len(cand_examples[(cn, b)]) < 8:
+                        cand_examples[(cn, b)].append({"source": key, "parser": short, **item})
+
+out = {"summary": summary, "anomaly_counts": dict(anom), "anomalous": anom_list,
+       "candidates": {k: dict(v) for k, v in cand.items()},
+       "candidate_examples": {f"{a}|{b}": v for (a, b), v in cand_examples.items()}}
+json.dump(out, open("/mnt/c/tmp/beacon_robustness/area-1/out/golden.json", "w"), indent=1, ensure_ascii=False, default=str)
+print(json.dumps({"summary": {k: (v if k != "current_differs_baseline_parsers" else len(v)) for k, v in summary.items()},
+                  "anomaly_counts": dict(anom), "candidates": out["candidates"]}, indent=1))

@@ -1,0 +1,377 @@
+"""Multi-line beacon ``comment=`` round-trip locks.
+
+Program [ap:BHS4ZO]: the shared beacon field parser now supports wrapped
+(multi-line) field values, so a rewritten beacon must keep the FULL text of a
+wrapped ``comment=`` -- through both the plan-branch engine
+(``_execute_beacon_write_plan``) and the legacy note-driven writer, for Python
+and JS/TS -- and a second identical write must be a fixpoint.
+
+Every test works on a scratch file under pytest's ``tmp_path`` and never
+touches a real repository source file or the ``beacon.tags.*`` MCP tools.
+"""
+
+import hashlib
+import os
+import sys
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import beacon_mutation_contract as bmc  # noqa: E402
+import nexus_map_codebase as nmc  # noqa: E402
+from workflowy_mcp.client import api_client_nexus as acn  # noqa: E402
+from workflowy_mcp.lightning_rod_mutation_spec import (  # noqa: E402
+    BeaconMutationOperation,
+    BeaconWritePlan,
+)
+
+_NODE = "33333333-3333-3333-3333-333333333333"
+_FILE = "22222222-2222-2222-2222-222222222222"
+
+# A 3-line wrapped comment whose SECOND line contains "mode == 'object'" (a
+# continuation line carrying an "=" that the old line-by-line parser would
+# have misread) and whose LAST line ends with a comma.
+_COMMENT_LINES = (
+    "Server-level FastMCP transforms applied at startup; hosts the",
+    "mode == 'object' branch and the published-params-schema override",
+    "for the six family tools,",
+)
+# The value the parser is required to return: the three lines joined with one
+# space, with the trailing comma stripped from the last line only.
+FULL_COMMENT = " ".join(_COMMENT_LINES)[:-1].rstrip()
+
+
+def _intent(comment=None):
+    return bmc.BeaconWriteIntent(
+        comment=(
+            bmc.BeaconCommentIntent.fill_if_empty(comment)
+            if comment
+            else bmc.BeaconCommentIntent.preserve()
+        ),
+        source="lightning_rod",
+    )
+
+
+def _plan_for(path, *, op, beacon_id=None, labels=(), resolved_comment=None, comment=None, occurrence=None, sha=None):
+    if sha is None:
+        sha = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    language = {".py": "python", ".js": "js_ts", ".md": "markdown", ".vue": "vue"}[path.suffix]
+    snapshot = nmc.read_source_snapshot(path)
+    target = {"language": language, "operation": "delta_ensure", "note_beacon_id": beacon_id}
+    selection = nmc.select_beacon_block_for_node(snapshot, nmc._beacon_selection_structures(snapshot, language), target)
+    return BeaconWritePlan(
+        success=True,
+        planned_operation=op,
+        node_id=_NODE,
+        target_key=None,
+        cached_name="foo",
+        intended_name="foo " + " ".join(f"#{t}" for t in labels),
+        write_intent=_intent(comment),
+        occurrence=occurrence,
+        file_node_id=_FILE,
+        source_path=str(path),
+        language=None,
+        beacon_id=beacon_id,
+        note_comment=None,
+        disk_comment=None,
+        comment_outcome=None,
+        resolved_comment=resolved_comment,
+        intended_slice_labels=tuple(labels),
+        source_sha256=sha,
+        selection_target=target,
+        physical_witness=selection["physical_witness"],
+    )
+
+
+def _py_block(labels="keep-me,drop-me", bid="multi-1"):
+    return (
+        "# @beacon[\n"
+        f"#   id={bid},\n"
+        "#   role=mymod,\n"
+        f"#   slice_labels={labels},\n"
+        "#   kind=ast,\n"
+        f"#   comment={_COMMENT_LINES[0]}\n"
+        f"#     {_COMMENT_LINES[1]}\n"
+        f"#     {_COMMENT_LINES[2]}\n"
+        "# ]\n"
+        "def foo():\n"
+        "    return 1\n"
+    )
+
+
+def _js_block(labels="keep-me,drop-me", bid="mjs-1"):
+    return (
+        "// @beacon[\n"
+        f"//   id={bid},\n"
+        "//   role=foo,\n"
+        f"//   slice_labels={labels},\n"
+        "//   kind=ast,\n"
+        f"//   comment={_COMMENT_LINES[0]}\n"
+        f"//     {_COMMENT_LINES[1]}\n"
+        f"//     {_COMMENT_LINES[2]}\n"
+        "// ]\n"
+        "function foo() { return 1; }\n"
+    )
+
+
+# --- plan-branch (Python) ----------------------------------------------------
+
+
+def test_plan_branch_remove_preserves_wrapped_python_comment(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text(_py_block(), encoding="utf-8")
+
+    # The shared parser must already read the WHOLE wrapped value.
+    beacons = nmc.parse_python_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+    assert len(beacons) == 1
+    assert beacons[0]["comment"] == FULL_COMMENT
+
+    plan = _plan_for(
+        p,
+        op="update",
+        beacon_id=beacons[0]["id"],
+        labels=("keep-me",),  # labels-only REMOVAL of drop-me
+        resolved_comment=beacons[0]["comment"],
+    )
+    res = nmc.update_beacon_from_node_python(
+        str(p), "foo #keep-me", "", write_intent=plan.write_intent, write_plan=plan
+    )
+    assert res.get("operation") == "updated_beacon", res
+
+    content = p.read_text(encoding="utf-8")
+    # No text lost: the continuation's "=" line and the last line survive.
+    assert "mode == 'object'" in content
+    assert "for the six family tools" in content
+
+    beacons2 = nmc.parse_python_beacon_blocks(content.splitlines())
+    assert beacons2[0]["slice_labels"] == "keep-me"
+    assert beacons2[0]["comment"] == FULL_COMMENT
+
+
+def test_plan_branch_ensure_preserves_wrapped_python_comment(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text(_py_block(), encoding="utf-8")
+    beacons = nmc.parse_python_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+
+    plan = _plan_for(
+        p,
+        op="update",
+        beacon_id=beacons[0]["id"],
+        labels=("keep-me", "drop-me", "new-one"),  # label ADDITION
+        resolved_comment=beacons[0]["comment"],
+    )
+    res = nmc.update_beacon_from_node_python(
+        str(p), "foo #new-one", "", write_intent=plan.write_intent, write_plan=plan
+    )
+    assert res.get("operation") == "updated_beacon", res
+
+    beacons2 = nmc.parse_python_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+    assert beacons2[0]["slice_labels"] == "keep-me,drop-me,new-one"
+    assert beacons2[0]["comment"] == FULL_COMMENT
+
+
+# --- plan-branch (JS/TS) -----------------------------------------------------
+
+
+def test_plan_branch_remove_preserves_wrapped_js_comment(tmp_path):
+    p = tmp_path / "m.js"
+    p.write_text(_js_block(), encoding="utf-8")
+
+    beacons = nmc.parse_js_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+    assert len(beacons) == 1
+    assert beacons[0]["comment"] == FULL_COMMENT
+
+    plan = _plan_for(
+        p,
+        op="update",
+        beacon_id=beacons[0]["id"],
+        labels=("keep-me",),  # labels-only REMOVAL of drop-me
+        resolved_comment=beacons[0]["comment"],
+    )
+    res = nmc.update_beacon_from_node_js_ts(
+        str(p), "foo #keep-me", "", write_intent=plan.write_intent, write_plan=plan
+    )
+    assert res.get("operation") == "updated_beacon", res
+
+    content = p.read_text(encoding="utf-8")
+    assert "mode == 'object'" in content
+    assert "for the six family tools" in content
+
+    beacons2 = nmc.parse_js_beacon_blocks(content.splitlines())
+    assert beacons2[0]["slice_labels"] == "keep-me"
+    assert beacons2[0]["comment"] == FULL_COMMENT
+
+
+# --- legacy note-driven writer (Python) --------------------------------------
+
+
+def test_legacy_note_writer_preserves_wrapped_python_comment(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text(_py_block(), encoding="utf-8")
+    note = (
+        "AST_QUALNAME: foo\n"
+        "BEACON (AST)\n"
+        "id: multi-1\n"
+        "kind: ast\n"
+        f"comment: {FULL_COMMENT}\n"
+    )
+    res = nmc.update_beacon_from_node_python(str(p), "foo #keep-me", note)
+    assert res.get("operation") == "updated_beacon", res
+
+    beacons2 = nmc.parse_python_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+    assert beacons2[0]["comment"] == FULL_COMMENT
+    assert beacons2[0]["slice_labels"] == "keep-me"
+
+
+# --- fixpoint ----------------------------------------------------------------
+
+
+def test_second_identical_plan_write_changes_nothing(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text(_py_block(), encoding="utf-8")
+    b = nmc.parse_python_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+
+    plan1 = _plan_for(
+        p, op="update", beacon_id=b[0]["id"], labels=("keep-me",), resolved_comment=b[0]["comment"]
+    )
+    nmc.update_beacon_from_node_python(
+        str(p), "foo #keep-me", "", write_intent=plan1.write_intent, write_plan=plan1
+    )
+    content1 = p.read_text(encoding="utf-8")
+    b1 = nmc.parse_python_beacon_blocks(content1.splitlines())
+
+    plan2 = _plan_for(
+        p, op="update", beacon_id=b1[0]["id"], labels=("keep-me",), resolved_comment=b1[0]["comment"]
+    )
+    res2 = nmc.update_beacon_from_node_python(
+        str(p), "foo #keep-me", "", write_intent=plan2.write_intent, write_plan=plan2
+    )
+    assert res2.get("operation") == "updated_beacon", res2
+
+    content2 = p.read_text(encoding="utf-8")
+    assert content2 == content1  # a second cycle changes nothing
+    b2 = nmc.parse_python_beacon_blocks(content2.splitlines())
+    assert b2[0]["comment"] == FULL_COMMENT
+
+
+# --- computed plan (the REAL _compute_beacon_write_plan) with a stale note ----
+#
+# The Workflowy map was built by the OLD parser, so the node's note carries only
+# the comment's FIRST line. A preserve-mode mutation must nevertheless resolve
+# the FULL comment from the freshly parsed disk state.
+
+
+def test_computed_plan_remove_with_stale_first_line_note_keeps_full_disk_comment(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text(_py_block(), encoding="utf-8")
+
+    root = "11111111-1111-1111-1111-111111111111"
+    note = (
+        "AST_QUALNAME: foo\n"
+        "---\n"
+        "BEACON (AST)\n"
+        "id: multi-1\n"
+        "role: mymod\n"
+        "slice_labels: keep-me,drop-me\n"
+        "kind: ast\n"
+        f"comment: {_COMMENT_LINES[0]}\n"  # FIRST line only == the stale map
+        "---\n"
+    )
+    cache = {
+        root: {"id": root, "name": "Root", "note": "", "parent_id": None, "priority": 0},
+        _FILE: {
+            "id": _FILE,
+            "name": os.path.basename(str(p)),
+            "note": f"Path: {p}",
+            "parent_id": root,
+            "priority": 0,
+        },
+        _NODE: {
+            "id": _NODE,
+            "name": "ƒ foo #keep-me #drop-me",
+            "note": note,
+            "parent_id": _FILE,
+            "priority": 100,
+        },
+    }
+    op = BeaconMutationOperation(
+        input_index=0,
+        handle="foo",
+        tags=("drop-me",),
+        comment=bmc.BeaconCommentIntent.preserve(),
+    )
+    plan = acn._compute_beacon_write_plan(
+        cache, _NODE, op, "remove_beacon_tags", include_fingerprint=True
+    )
+    assert plan.success, plan.error
+    assert plan.planned_operation == "update"
+    assert plan.resolved_comment == FULL_COMMENT
+    assert plan.intended_slice_labels == ("keep-me",)
+
+    res = nmc.update_beacon_from_node_python(
+        str(p), "foo #keep-me", "note", write_intent=plan.write_intent, write_plan=plan
+    )
+    assert res.get("operation") == "updated_beacon", res
+    b2 = nmc.parse_python_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+    assert b2[0]["slice_labels"] == "keep-me"
+    assert b2[0]["comment"] == FULL_COMMENT
+
+
+def test_computed_plan_ensure_with_stale_first_line_note_keeps_full_disk_comment(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text(_py_block(), encoding="utf-8")
+
+    root = "11111111-1111-1111-1111-111111111111"
+    note = (
+        "AST_QUALNAME: foo\n"
+        "---\n"
+        "BEACON (AST)\n"
+        "id: multi-1\n"
+        "role: mymod\n"
+        "slice_labels: keep-me,drop-me\n"
+        "kind: ast\n"
+        f"comment: {_COMMENT_LINES[0]}\n"  # FIRST line only == the stale map
+        "---\n"
+    )
+    cache = {
+        root: {"id": root, "name": "Root", "note": "", "parent_id": None, "priority": 0},
+        _FILE: {
+            "id": _FILE,
+            "name": os.path.basename(str(p)),
+            "note": f"Path: {p}",
+            "parent_id": root,
+            "priority": 0,
+        },
+        _NODE: {
+            "id": _NODE,
+            "name": "ƒ foo #keep-me #drop-me",
+            "note": note,
+            "parent_id": _FILE,
+            "priority": 100,
+        },
+    }
+    op = BeaconMutationOperation(
+        input_index=0,
+        handle="foo",
+        tags=("new-one",),
+        comment=bmc.BeaconCommentIntent.preserve(),
+    )
+    plan = acn._compute_beacon_write_plan(
+        cache, _NODE, op, "ensure_beacons", include_fingerprint=True
+    )
+    assert plan.success, plan.error
+    assert plan.planned_operation == "update"
+    assert plan.resolved_comment == FULL_COMMENT
+    assert plan.intended_slice_labels == ("keep-me", "drop-me", "new-one")
+
+    res = nmc.update_beacon_from_node_python(
+        str(p), "foo #new-one", "note", write_intent=plan.write_intent, write_plan=plan
+    )
+    assert res.get("operation") == "updated_beacon", res
+    b2 = nmc.parse_python_beacon_blocks(p.read_text(encoding="utf-8").splitlines())
+    assert b2[0]["comment"] == FULL_COMMENT
+    assert b2[0]["slice_labels"] == "keep-me,drop-me,new-one"

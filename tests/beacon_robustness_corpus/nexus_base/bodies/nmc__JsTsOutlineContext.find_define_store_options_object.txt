@@ -1,0 +1,7 @@
+    def find_define_store_options_object(self, v: Any) -> Any:
+        """Return the options object passed to ``defineStore``.
+
+        Wrapper around the Phase B.1 module-level
+        ``_js_find_define_store_options_object``.
+        """
+        return _js_find_define_store_options_object(v, self.source_bytes)

@@ -1,0 +1,275 @@
+"""Peek-only source metrics and Dock-gated recursion, with isolated cache reads."""
+from __future__ import annotations
+
+import asyncio
+import copy
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+from coherence_harness import make_boundary_capable, s04_boundary_status
+from workflowy_mcp import server
+from workflowy_mcp.coherence.cache_view import CacheView
+from workflowy_mcp.coherence.operation_cache import current_operation_cache
+from workflowy_mcp.dock_peek_metrics import build_dock_peek_index, format_dock_peek_metrics
+from workflowy_mcp.mcp_api_registry import dispatch_operation, validate_params
+
+R = "11111111-1111-4111-8111-111111111111"
+A = "22222222-2222-4222-8222-222222222222"
+D = "33333333-3333-4333-8333-333333333333"
+X = "44444444-4444-4444-8444-444444444444"
+G = "55555555-5555-4555-8555-555555555555"
+B = "66666666-6666-4666-8666-666666666666"
+H = "77777777-7777-4777-8777-777777777777"
+C = "88888888-8888-4888-8888-888888888888"
+E = "99999999-9999-4999-8999-999999999999"
+
+
+def rows():
+    # Shuffled insertion order; children follow priority, not map order.
+    return [
+        {"id": R, "name": "[ap:ROOT01] Root #dock", "note": "Root note", "parent_id": None},
+        {"id": C, "name": "Done #wfy-suppress", "note": "historical", "parent_id": R, "priority": 30, "completed": True},
+        {"id": B, "name": "Global Dock #dock", "note": "", "parent_id": R, "priority": 20},
+        {"id": A, "name": "[ap:ALPHA] Alpha 📊 #keep", "note": "MD_PATH: x\n---\n## heading\n<tool-arg>", "parent_id": R, "priority": 10},
+        {"id": G, "name": "Grandchild", "note": "#dock mentioned in a note is NOT a Dock", "parent_id": A, "priority": 20},
+        {"id": D, "name": "Local Dock #dock--local", "note": "", "parent_id": A, "priority": 10},
+        {"id": X, "name": "Behind local", "note": "LOCAL HIDDEN BODY" * 100, "parent_id": D},
+        {"id": H, "name": "Behind global", "note": "GLOBAL HIDDEN BODY" * 100, "parent_id": B},
+        {"id": E, "name": "Historical child", "note": "kept", "parent_id": C},
+    ]
+
+
+def size(node):
+    return len((node.get("name") or "").encode("utf-8")) + len((node.get("note") or "").encode("utf-8"))
+
+
+def setup(monkeypatch, *, status=None, nodes=None):
+    client = make_boundary_capable(object.__new__(server.WorkFlowyClient), nodes=nodes if nodes is not None else rows(), boundary_status=status)
+    client.get_node = AsyncMock(side_effect=AssertionError("no live node GET"))
+    client.update_node = AsyncMock(side_effect=AssertionError("no writes"))
+    client.create_node = AsyncMock(side_effect=AssertionError("no writes"))
+    client._adopt_coherence_head = AsyncMock(wraps=client._adopt_coherence_head)
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    config = AsyncMock(return_value=(["dock"], [], None, {"note_session_local_postfixes": ["local"]}))
+    monkeypatch.setattr(server, "_resolve_note_session_config", config)
+    return client, config
+
+
+def dispatch(**params):
+    return asyncio.run(dispatch_operation(
+        server.build_anchor_registry(), "dock.peek", {"dock_handle": R, **params},
+        operation_boundary=server._mcp_operation_boundary,
+        mutation_admission=server._mcp_mutation_admission,
+        exception_mapper=server._mcp_exception_mapper,
+        result_finalizer=server._mcp_operation_result_finalizer,
+    ))
+
+
+def test_pure_index_counts_complete_unstripped_content_and_owns_results():
+    nodes = {node["id"]: node for node in rows()}
+    before = copy.deepcopy(nodes)
+    children, metrics = build_dock_peek_index(nodes, R)
+    assert children[R] == (A, B, C)
+    assert children[A] == (D, G)
+    assert metrics[R] == {"child_count": 3, "descendant_count": 8, "self_bytes": size(nodes[R]), "subtree_bytes": sum(map(size, nodes.values()))}
+    assert metrics[A] == {"child_count": 2, "descendant_count": 3, "self_bytes": size(nodes[A]), "subtree_bytes": sum(size(nodes[n]) for n in (A, D, X, G))}
+    assert metrics[D]["descendant_count"] == 1
+    assert metrics[D]["subtree_bytes"] == size(nodes[D]) + size(nodes[X])
+    assert metrics[G]["descendant_count"] == 0
+    assert metrics[G]["subtree_bytes"] == metrics[G]["self_bytes"]
+    # Sizes retain tags, AP-IDs, literal markup, note newlines and metadata.
+    assert metrics[A]["self_bytes"] > len(nodes[A]["name"]) + len(nodes[A]["note"])
+    children[R] = ()
+    metrics[A]["self_bytes"] = -1
+    assert nodes == before  # no source node references in the derived result
+
+
+def test_title_only_empty_and_unrelated_roots():
+    nodes = {
+        "r": {"id": "r", "name": "Root", "note": ""},
+        "a": {"id": "a", "name": "Child", "parent_id": "r"},
+        "empty": {"id": "empty", "name": "", "note": "", "parent_id": "r"},
+        # Unrelated content is not decoded/encoded merely to peek at r.
+        "out": {"id": "out", "note": "\ud800"},
+    }
+    _, metrics = build_dock_peek_index(nodes, "r")
+    assert metrics["r"]["subtree_bytes"] == 9
+    assert metrics["empty"] == {"child_count": 0, "descendant_count": 0, "self_bytes": 0, "subtree_bytes": 0}
+    assert "out" not in metrics
+
+
+def test_parent_field_presence_matches_existing_child_count_authority():
+    nodes = {
+        "r": {"id": "r"},
+        "a": {"id": "a", "parentId": "r", "nm": "alias", "no": "body"},
+        "b": {"id": "b", "parent_id": None, "parentId": "r"},
+    }
+    children, metrics = build_dock_peek_index(nodes, "r")
+    assert children["r"] == ("a",)
+    assert metrics["r"]["child_count"] == metrics["r"]["descendant_count"] == 1
+    assert metrics["a"]["self_bytes"] == 9
+
+
+def test_deep_tree_iterative_aggregation():
+    nodes = {str(i): {"id": str(i), "name": "x", "parent_id": str(i - 1) if i else None} for i in range(1500)}
+    _, metrics = build_dock_peek_index(nodes, "0")
+    assert metrics["0"]["descendant_count"] == 1499
+    assert metrics["0"]["subtree_bytes"] == 1500
+    assert metrics["1499"]["child_count"] == 0
+
+
+@pytest.mark.parametrize("nodes", [
+    {"r": {"id": "r", "parent_id": "r"}},
+    {"r": {"id": "r", "parent_id": "a"}, "a": {"id": "a", "parent_id": "r"}},
+])
+def test_reachable_cycles_are_loud_not_infinite_or_miscounted(nodes):
+    with pytest.raises(ValueError, match="Cycle"):
+        build_dock_peek_index(nodes, "r")
+
+
+def test_absent_root_is_loud():
+    with pytest.raises(ValueError, match="absent"):
+        build_dock_peek_index({}, "missing")
+
+
+@pytest.mark.parametrize("value,formatted", [(0, "0B"), (1, "1B"), (1023, "1023B"), (1024, "1.0KiB"), (1048576, "1.0MiB")])
+def test_four_field_formatter_zero_unknown_and_units(value, formatted):
+    assert format_dock_peek_metrics({"child_count": 0, "descendant_count": 0, "self_bytes": value, "subtree_bytes": value}) == f" ▸0 · desc:0 · self:{formatted} · tree:{formatted}"
+    assert format_dock_peek_metrics(None) == " ▸? · desc:? · self:? · tree:?"
+
+
+@pytest.mark.parametrize("recursive,ids,depths", [(False, [A, B, C], [0, 0, 0]), (True, [A, D, G, B, C, E], [0, 1, 1, 0, 0, 1])])
+@pytest.mark.parametrize("handle", [R, R[:8], "[ap:ROOT01]"])
+def test_real_boundary_one_index_no_live_reads_and_nested_dock_gates(monkeypatch, recursive, ids, depths, handle):
+    client, config = setup(monkeypatch)
+    view = client._cache_view_publisher.capture()
+    before = copy.deepcopy(view.nodes_export)
+    import workflowy_mcp.dock_peek_metrics as module
+    builder = Mock(wraps=module.build_dock_peek_index)
+    monkeypatch.setattr(module, "build_dock_peek_index", builder)
+    # include_completed=True: this test's subject is the walk/index/boundary,
+    # not the completed policy (U6 hides the completed row C by default).
+    result = dispatch(dock_handle=handle, detail="full", recursive=recursive, include_completed=True)
+    assert result["success"] is True and result["recursive"] is recursive
+    assert [row["uuid"] for row in result["rows"]] == ids
+    assert [row["depth"] for row in result["rows"]] == depths
+    assert result["count"] == len(ids)
+    assert result["root_metrics"]["descendant_count"] == 8
+    assert result["root_metrics"]["subtree_bytes"] == sum(map(size, rows()))
+    by_id = {row["uuid"]: row for row in result["rows"]}
+    assert by_id[C]["completed"] is True
+    assert by_id[B]["is_dock"] is True and by_id[B]["is_local_dock"] is False
+    if recursive:
+        assert by_id[D]["is_dock"] and by_id[D]["is_local_dock"]
+        assert by_id[D]["descendant_count"] == 1 and by_id[D]["has_children"]
+    assert X not in by_id and H not in by_id
+    builder.assert_called_once()
+    config.assert_awaited_once()
+    client._adopt_coherence_head.assert_awaited_once()
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+    client.create_node.assert_not_awaited()
+    assert client._cache_view_publisher.capture() is view
+    assert view.nodes_export == before
+    assert current_operation_cache(required=False) is None
+
+
+def test_compact_flags_legend_ap_column_indentation_and_root_summary(monkeypatch):
+    setup(monkeypatch)
+    # include_completed=True keeps the completed row C visible (U6 hides it
+    # by default) so the ✓-marker and geometry assertions stay on subject.
+    result = dispatch(recursive=True, include_completed=True)
+    assert "Key: ⚓ Dock (recursion stops here) · ⭐ favorite Dock · Ⓛ local Dock · ✓ completed" in result
+    assert " ▸3 · desc:8 · self:" in result.splitlines()[0]
+    body = result.split("\n\n", 1)[1].splitlines()
+    assert len(body) == 6
+    assert body[0].startswith("[ap:ALPHA]")
+    # The nested Local Dock keeps its indentation in document order and
+    # shows its default short UUID handle ([ap:0M6VP8] peek half: an AP-less
+    # row is never handle-less). No parent hint: this is not a flat view.
+    assert body[1].startswith(" " * (len("[ap:ALPHA]") + 1 + 4) + "[33333333] Local Dock")
+    assert body[1].endswith(" ⚓ Ⓛ")
+    assert "← in" not in result
+    assert body[3].endswith(" ⚓") and body[4].endswith(" ✓")
+    assert "LOCAL HIDDEN BODY" not in result and "GLOBAL HIDDEN BODY" not in result
+    assert "Behind local" not in result and "Behind global" not in result
+    assert result.count("[ap:ALPHA]") == 1
+
+
+def test_default_direct_mode_and_no_count_knob(monkeypatch):
+    setup(monkeypatch)
+    # U6: the completed row C is hidden by default; the header counts the
+    # displayed rows and names the hidden one.
+    result = dispatch()
+    assert "2 children · 1 completed hidden" in result.splitlines()[0]
+    assert len(result.split("\n\n", 1)[1].splitlines()) == 2
+    # The opt-in restores the pre-U6 inventory.
+    opted = dispatch(include_completed=True)
+    assert "3 children" in opted.splitlines()[0]
+    assert len(opted.split("\n\n", 1)[1].splitlines()) == 3
+    plain = dispatch(show_counts=False, show_description=False)
+    assert "▸" not in plain and "self:" not in plain
+    assert "Key: ⚓" in plain
+
+
+def test_root_dock_is_not_itself_a_recursion_barrier_and_empty_header_has_metrics(monkeypatch):
+    setup(monkeypatch, nodes=[{"id": R, "name": "[ap:ROOT01] Root #dock--local", "note": "root", "parent_id": None}])
+    result = dispatch(recursive=True)
+    assert " ▸0 · desc:0 · self:" in result.splitlines()[0]
+    assert "(no descendants)" in result
+
+
+@pytest.mark.parametrize("params", [{"recursive": "true"}, {"recursive": 1}, {"recursive": None}, {"descend_policy": "wrong"}, {"descend_policy": True}, {"descend_policy": None}, {"offset": 1}, {"limit": 50}])
+def test_closed_flag_contract_before_any_cache_or_config_work(monkeypatch, params):
+    client, config = setup(monkeypatch)
+    result = dispatch(**params)
+    assert result["success"] is False
+    assert result["error"]["code"] in ("invalid_parameter_type", "invalid_enum_value", "forbidden_parameter")
+    client._adopt_coherence_head.assert_not_awaited()
+    config.assert_not_awaited()
+
+
+def test_peek_remains_read_safe_and_preserves_existing_coherence_advisory(monkeypatch):
+    client, _ = setup(monkeypatch, status=s04_boundary_status(hard_dirty=True, hard_generation=7))
+    result = dispatch(detail="full", recursive=True)
+    assert result["success"] is True
+    assert result["coherence_advisory"]["dirty_generation"] == 7
+    assert result["root_metrics"]["descendant_count"] == 8
+    client.update_node.assert_not_awaited()
+
+
+def test_snapshot_publication_elsewhere_cannot_change_metrics_or_traversal(monkeypatch):
+    client, _ = setup(monkeypatch)
+    original = client._cache_view_publisher.capture()
+    next_view = CacheView.build(
+        epoch_number=original.epoch_number, epoch_id=original.epoch_id, adopted_sequence=1,
+        nodes_export={"nodes": [{"id": R, "name": "Different #dock", "note": "new generation", "parent_id": None}]},
+    )
+    resolver = server._resolve_generic_node_handle
+    async def resolving(handle, **kwargs):
+        value = await resolver(handle, **kwargs)
+        # Simulate another publisher; do not mutate the pinned snapshot.
+        monkeypatch.setattr(client._cache_view_publisher, "capture", lambda: next_view)
+        return value
+    monkeypatch.setattr(server, "_resolve_generic_node_handle", resolving)
+    # include_completed=True: the subject is snapshot isolation, not the
+    # completed policy (U6 hides the completed row by default).
+    result = dispatch(detail="full", recursive=True, include_completed=True)
+    assert result["root_metrics"]["descendant_count"] == 8
+    assert len(result["rows"]) == 6
+    client._adopt_coherence_head.assert_awaited_once()
+
+
+def test_public_schema_and_examples_disclose_boundaries_metrics_and_no_paging():
+    registry = server.build_anchor_registry()
+    full = registry.describe_full("dock.peek")
+    props = full["params_schema"]["properties"]
+    assert props["recursive"] == {"type": "boolean", "default": False, "description": props["recursive"]["description"]}
+    assert not {"offset", "limit"} & props.keys()
+    assert props["descend_policy"]["enum"] == ["all", "stop_at_child_anchors"]
+    assert props["descend_policy"]["default"] == "stop_at_child_anchors"
+    assert "behind nested Dock signposts" in full["returns"]["description"]
+    assert "UTF-8" in full["returns"]["description"]
+    for example in full["examples"]:
+        validate_params(registry.resolve("dock.peek"), example["call"]["params"])

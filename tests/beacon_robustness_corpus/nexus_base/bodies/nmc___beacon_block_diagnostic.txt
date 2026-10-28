@@ -1,0 +1,20 @@
+def _beacon_block_diagnostic(
+    line: int,
+    end_line: Optional[int],
+    outcome: str,
+    fields: dict[str, str],
+    field_texts: list[str],
+) -> dict[str, Any]:
+    """One ``block`` diagnostics record: what a block parser decided about
+    the opener on ``line`` (``end_line`` is where its collection loop met
+    its ``]`` test, ``None`` when the input ran out first)."""
+    return {
+        "record": "block",
+        "line": line,
+        "end_line": end_line,
+        "outcome": outcome,
+        "kind_raw": fields.get("kind"),
+        "id": fields.get("id"),
+        "field_keys": sorted(fields),
+        "unknown_keys": beacon_field_unknown_keys(field_texts),
+    }

@@ -1,0 +1,612 @@
+"""Writes aimed at an archived node refuse with the full story (Archive
+Reads U2, §U2.5 test 2).
+
+Every single-node write verb → the §5.2.1 text and code
+``archived_node_read_only`` with the transport never reached; the
+parent/destination matrix → §5.2.3; the extract / promote-move how-to-copy
+sentences; the ``tag.batch`` skip-vs-abort pair (E20); touch and promote
+skip rows; the ``required=False`` pass-through of ``node.move``'s parent
+(E19).
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from coherence_harness import make_boundary_capable
+
+from workflowy_mcp import server
+from workflowy_mcp.archive_store import ArchiveStore, set_archive_store_for_tests
+from workflowy_mcp.client.api_client_etch import WorkFlowyClientEtch
+from workflowy_mcp.node_archive import build_archive_document, serialize_archive
+
+SOURCE_CACHE = {"epoch_number": 1, "epoch_id": "e1", "adopted_sequence": 3}
+
+LIVE_UUID = "aaaaaaaa-0000-0000-0000-000000000001"
+LIVE_OTHER = "bbbbbbbb-0000-0000-0000-000000000002"
+ARCHIVED_UUID = "eeeeeeee-0000-0000-0000-0000000000ee"
+AP_CORE = "ARC1"
+BANNER_FREE_TEXT_521 = (
+    f"node.{None}"  # placeholder; the exact verb prefix is asserted per call
+)
+ARCHIVED_MARK = "is an ARCHIVED node, not in Workflowy: it lives read-only in export file"
+ARCHIVED_PARENT_MARK = (
+    "is an ARCHIVED node, not in Workflowy (export file"
+)
+
+
+def _nest(records):
+    return WorkFlowyClientEtch.__new__(WorkFlowyClientEtch)._build_hierarchy(
+        list(records)
+    )
+
+
+def _rec(node_id, name="n", parent_id=None, priority=0, note="", **extra):
+    record = {
+        "id": node_id,
+        "name": name,
+        "note": note,
+        "parent_id": parent_id,
+        "priority": priority,
+    }
+    record.update(extra)
+    return record
+
+
+@pytest.fixture()
+def archive_env(tmp_path, monkeypatch):
+    document = build_archive_document(
+        [
+            _rec(
+                ARCHIVED_UUID,
+                name=f"[ap:{AP_CORE}] Archived root",
+                note="archived root note",
+            ),
+        ],
+        nest=_nest,
+        node_id=ARCHIVED_UUID,
+        name="archived root",
+        description=None,
+        exported_at="2026-10-01T12:00:00Z",
+        source_cache=dict(SOURCE_CACHE),
+    )
+    (tmp_path / "arch.json").write_bytes(serialize_archive(document).encode("utf-8"))
+    store = ArchiveStore(folder_provider=lambda: str(tmp_path))
+    set_archive_store_for_tests(store)
+    live = [
+        _rec(LIVE_UUID, name="live one", note="live note"),
+        _rec(LIVE_OTHER, name="live two"),
+    ]
+    client = object.__new__(server.WorkFlowyClient)
+    writes: list[str] = []
+
+    def _send_workflowy_write(*args, **kwargs):
+        writes.append(str(args)[:120])
+        raise AssertionError("the write transport must never be reached")
+
+    client._send_workflowy_write = _send_workflowy_write
+
+    async def _get_node(node_id, max_retries=1):
+        if node_id == ARCHIVED_UUID:
+            raise AssertionError("get_node must never run for an archived id")
+        from workflowy_mcp.models.node import WorkFlowyNode
+
+        return WorkFlowyNode.model_validate(
+            {"id": node_id, "name": "live one", "note": "live note"}
+        )
+
+    client.get_node = _get_node
+    make_boundary_capable(client, nodes=live)
+    from n05_region_harness import isolate_claim_scope
+    isolate_claim_scope(client, tmp_path)
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_rate_limiter", None)
+
+    async def _no_admission(spec):
+        return None  # the admission gate needs the real write governor;
+        # the refusal under test lives in the handler's resolvers.
+
+    monkeypatch.setattr(server, "_mcp_mutation_admission", _no_admission)
+
+    # The mutator/tag fronts' SYMBOL fallback leg (reached because an
+    # archived handle misses live) reads the suppress list + the symbol
+    # engine; stub both so the miss resolves without a tab (production
+    # shape: with a tab the leg simply finds nothing for a UUID/AP handle).
+    async def _no_tags():
+        return []
+
+    monkeypatch.setattr(server, "_beacon_symbol_suppress_tags", _no_tags)
+
+    async def _symbol_zero(*a, **k):
+        return {"success": True, "match_count": 0, "candidates": [], "truncated": 0}
+
+    client.read_text_snippet_by_symbol = _symbol_zero
+
+    # The anchor Dock verbs read the note-session config BEFORE resolving
+    # the handle; stub the tab read (a (tags, globals, default) 3-tuple).
+    async def _config(target_tab):
+        return (["#wfy-ns"], [], "", {"note_session_tags": ["#wfy-ns"]})
+
+    monkeypatch.setattr(server, "_resolve_note_session_config", _config)
+    yield {
+        "store": store,
+        "tmp_path": tmp_path,
+        "client": client,
+        "writes": writes,
+    }
+    set_archive_store_for_tests(None)
+
+
+def _node(verb, params):
+    return asyncio.run(server.node(verb=verb, params=params))
+
+
+def _tag(verb, params):
+    return asyncio.run(server.tag(verb=verb, params=params))
+
+
+def _anchor(verb, params):
+    return asyncio.run(server.anchor(verb=verb, params=params))
+
+
+def _payload(result):
+    """The anchor family's error boundary keeps a success:false payload under
+    ``detail``; the node/tag families return the ledger at the top level."""
+    if isinstance(result, dict) and isinstance(result.get("detail"), dict):
+        return result["detail"]
+    return result
+
+
+def _assert_refusal(result, operation, handle, role_text=None, file_suffix="arch.json"):
+    assert result["success"] is False, (operation, result)
+    error = result["error"]
+    assert error["code"] == "archived_node_read_only", error
+    message = error["message"]
+    assert message.startswith(f"{operation}: "), message
+    assert handle in message
+    if role_text is not None:
+        # §5.2.3 — the parent/destination wording.
+        assert ARCHIVED_PARENT_MARK in message
+        assert f"Choose a live {role_text.split()[-1]}." in message
+    else:
+        assert ARCHIVED_MARK in message
+        assert "Archived nodes are never changed. No action was taken." in message
+    assert "exported 2026-10-01T12:00:00Z)" in message
+    extra = error.get("extra") or {}
+    assert extra.get("archive_file", "").endswith(file_suffix)
+    assert extra.get("exported_at") == "2026-10-01T12:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# Single-node writes on the archived node itself (§5.2.1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "family,front,verb,params",
+    [
+        ("node", "node", "edit", {"node_handle": "@", "name": "new name"}),
+        ("node", "node", "update_emoji", {"node_id": "@", "emoji": "⚡"}),
+        ("node", "node", "prepend_emoji", {"node_id": "@", "emoji": "⚡"}),
+        ("node", "node", "append_emoji", {"node_id": "@", "emoji": "⚡"}),
+        ("node", "node", "append_note", {"node_handle": "@", "text": "more"}),
+        ("node", "node", "prepend_note", {"node_handle": "@", "text": "more"}),
+        ("node", "node", "delete", {"node_handle": "@"}),
+        ("node", "node", "complete", {"node_id": "@"}),
+        ("node", "node", "uncomplete", {"node_handle": "@"}),
+        ("node", "node", "move", {"node_id": "@", "parent_id": "inbox", "position": "bottom"}),
+        ("tag", "tag", "add", {"node_id": "@", "tag": "x"}),
+        ("tag", "tag", "remove", {"node_id": "@", "tag": "x"}),
+        ("tag", "tag", "rename", {"node_id": "@", "old_tag": "a", "new_tag": "b"}),
+        ("anchor", "anchor", "dock.update", {"dock_handle": "@", "topic": "T"}),
+        ("anchor", "anchor", "dock.promote", {"node_handle": "@"}),
+        ("anchor", "anchor", "dock.demote", {"dock_handle": "@"}),
+        ("anchor", "anchor", "point.assign_id", {"node_handle": "@", "ap_id": "NEWID1"}),
+        ("anchor", "anchor", "point.remove_id", {"node_handle": "@"}),
+    ],
+)
+def test_single_node_writes_refuse_archived(archive_env, family, front, verb, params):
+    concrete = {
+        key: (ARCHIVED_UUID if value == "@" else value) for key, value in params.items()
+    }
+    front_fn = {"node": _node, "tag": _tag, "anchor": _anchor}[front]
+    result = front_fn(verb=verb, params=concrete)
+    _assert_refusal(result, f"{family}.{verb}", ARCHIVED_UUID)
+    assert archive_env["writes"] == []
+
+
+def test_single_node_write_refuses_by_ap_handle(archive_env):
+    result = _node("edit", {"node_handle": f"[ap:{AP_CORE}]", "name": "x"})
+    _assert_refusal(result, "node.edit", f"[ap:{AP_CORE}]")
+    assert archive_env["writes"] == []
+
+
+def test_tag_add_unresolvable_keeps_noop_dict_with_hint(archive_env):
+    # A handle that is neither live nor archived keeps today's friendly
+    # no-op reply; an AP-shaped one gains the state-B hint on its note.
+    result = _tag("add", {"node_id": "[ap:NOPE1]", "tag": "x"})
+    assert result["success"] is True
+    assert result.get("changed") is False
+    flattened = str(result)
+    assert "did not resolve to a UUID" in flattened
+    assert "1 active archive(s)" in flattened
+
+
+# ---------------------------------------------------------------------------
+# Parent / destination refusals (§5.2.3)
+# ---------------------------------------------------------------------------
+
+
+def test_etch_under_archived_parent(archive_env):
+    result = _node(
+        "etch",
+        {"parent_handle": ARCHIVED_UUID, "nodes": [{"name": "child"}]},
+    )
+    _assert_refusal(result, "node.etch", ARCHIVED_UUID, role_text="the parent")
+    assert "Choose a live parent." in result["error"]["message"]
+    assert archive_env["writes"] == []
+
+
+def test_etch_async_under_archived_parent(archive_env):
+    result = _node(
+        "etch",
+        {
+            "parent_handle": ARCHIVED_UUID,
+            "nodes": [{"name": "child"}],
+            "execution": "async",
+        },
+    )
+    assert result["success"] is False
+    assert result["error"]["code"] == "archived_node_read_only"
+    assert ARCHIVED_PARENT_MARK in result["error"]["message"]
+
+
+def test_capture_under_archived_parent(archive_env):
+    result = _anchor(
+        "point.capture",
+        {
+            "parent_handle": ARCHIVED_UUID,
+            "content": "body text",
+            "name": "New point",
+        },
+    )
+    _assert_refusal(result, "anchor.point.capture", ARCHIVED_UUID, role_text="the parent")
+    assert archive_env["writes"] == []
+
+
+def test_dock_create_under_archived_parent(archive_env):
+    result = _anchor(
+        "dock.create",
+        {"topic": "New dock", "parent_handle": ARCHIVED_UUID},
+    )
+    assert result["success"] is False
+    assert result["error"]["code"] == "archived_node_read_only"
+    assert ARCHIVED_PARENT_MARK in result["error"]["message"]
+
+
+def test_move_under_archived_parent(archive_env):
+    result = _node(
+        "move",
+        {"node_id": LIVE_UUID, "parent_id": ARCHIVED_UUID, "position": "bottom"},
+    )
+    _assert_refusal(result, "node.move", ARCHIVED_UUID, role_text="the parent")
+    assert archive_env["writes"] == []
+
+
+def test_move_parent_pass_through_checks_store_first(archive_env, monkeypatch):
+    # E19: an OPTIONAL parent that misses live but names an archived node
+    # refuses (the store is checked BEFORE the pass-through); a special key
+    # like 'inbox' still passes through unchanged.
+    result = _node(
+        "move",
+        {"node_id": LIVE_UUID, "parent_id": f"[ap:{AP_CORE}]", "position": "bottom"},
+    )
+    _assert_refusal(result, "node.move", f"[ap:{AP_CORE}]", role_text="the parent")
+    assert archive_env["writes"] == []
+
+
+def test_promote_to_archived_destination(archive_env):
+    result = _anchor(
+        "point.promote",
+        {
+            "items": [
+                {"handle": LIVE_UUID, "destination": ARCHIVED_UUID, "mode": "move"}
+            ]
+        },
+    )
+    assert result["success"] is False
+    rows = _payload(result)["results"]
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["reason"] == "archived_node"
+    assert "the destination" in rows[0]["detail"]
+    assert ARCHIVED_PARENT_MARK in rows[0]["detail"]
+    assert "Choose a live destination." in rows[0]["detail"]
+    assert rows[0]["archive"]["archive_file"].endswith("arch.json")
+    assert archive_env["writes"] == []
+
+
+# ---------------------------------------------------------------------------
+# The how-to-copy sentences (§5.2.2)
+# ---------------------------------------------------------------------------
+
+
+def test_extract_archived_source_names_extract_copy(archive_env):
+    result = _anchor(
+        "point.extract",
+        {
+            "node_handle": f"[ap:{AP_CORE}]",
+            "parent_handle": LIVE_OTHER,
+            "start_line": 1,
+            "end_line": 1,
+            "name": "Extracted point",
+        },
+    )
+    # The extract's SOURCE resolution rides _node_read_impl's generic
+    # resolver with the operation context naming anchor.point.extract: the
+    # text carries the extract how-to-copy sentence with NO call-site change.
+    assert result["success"] is False
+    error = result["error"]
+    assert error["code"] == "archived_node_read_only"
+    message = error["message"]
+    assert message.startswith("anchor.point.extract: ")
+    assert "To copy its text into Workflowy, read it" in message
+    assert "anchor.point.capture with content" in message
+    assert archive_env["writes"] == []
+
+
+def test_promote_move_archived_source_names_derivative_copy(archive_env):
+    result = _anchor(
+        "point.promote",
+        {
+            "items": [
+                {
+                    "handle": f"[ap:{AP_CORE}]",
+                    "destination": LIVE_OTHER,
+                    "mode": "move",
+                }
+            ]
+        },
+    )
+    assert result["success"] is False
+    row = _payload(result)["results"][0]
+    assert row["status"] == "skipped"
+    assert row["reason"] == "archived_node"
+    assert "promote it with mode='derivative'" in row["detail"]
+    assert "the archive is untouched" in row["detail"]
+    assert archive_env["writes"] == []
+
+
+# ---------------------------------------------------------------------------
+# Batches (§5.2.4 / E20)
+# ---------------------------------------------------------------------------
+
+
+def _batch_env(monkeypatch, archive_env):
+    committed: list[tuple[str, str]] = []
+
+    async def _add_tag(node_id, tags, max_retries=1):
+        committed.append((node_id, tuple(tags)))
+        return {
+            "success": True,
+            "tags_added": list(tags),
+            "tags_already_present": [],
+            "old_name": "live one",
+            "new_name": "live one #x",
+        }
+
+    archive_env["client"].workflowy_add_tag = _add_tag
+    return committed
+
+
+def test_tag_batch_archived_row_skipped_live_commits(archive_env, monkeypatch):
+    committed = _batch_env(monkeypatch, archive_env)
+    result = _tag(
+        "batch",
+        {
+            "operations": [
+                {"handle": ARCHIVED_UUID, "operation": "add", "tags": ["x"]},
+                {"handle": LIVE_UUID, "operation": "add", "tags": ["x"]},
+            ]
+        },
+    )
+    payload = _payload(result)
+    assert payload["success"] is False  # one skipped row is not a clean batch
+    assert payload["partial_success"] is True
+    rows = payload["results"]
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["reason"] == "archived_node"
+    assert ARCHIVED_MARK in rows[0]["detail"]
+    assert rows[0]["archive"]["archive_file"].endswith("arch.json")
+    assert rows[1]["status"] == "committed"
+    assert committed == [(LIVE_UUID, ("x",))]
+    assert payload["summary"]["committed"] == 1
+
+
+def test_tag_batch_unresolvable_still_aborts(archive_env, monkeypatch):
+    _batch_env(monkeypatch, archive_env)
+    result = _tag(
+        "batch",
+        {
+            "operations": [
+                {"handle": ARCHIVED_UUID, "operation": "add", "tags": ["x"]},
+                {"handle": "cccccccc-0000-0000-0000-000000000009", "operation": "add", "tags": ["x"]},
+            ]
+        },
+    )
+    payload = _payload(result)
+    assert payload["success"] is False
+    assert payload.get("partial_success") is not True
+    statuses = {row["status"] for row in payload["results"]}
+    assert "skipped" in statuses  # the archived row is reported skipped
+    assert "unresolved" in statuses
+    assert archive_env["writes"] == []
+
+
+def test_touch_archived_items_skip_batch_continues(archive_env, monkeypatch):
+    async def _vocab(target_tab):
+        return (
+            ["#wfy-ns"],
+            {
+                "local_postfixes": ["local"],
+                "favorite_postfixes": ["fav"],
+                "deprecated_postfixes": ["deprecated"],
+            },
+        )
+
+    monkeypatch.setattr(server, "_read_anchor_dock_vocabulary", _vocab)
+
+    from workflowy_mcp.models.node import WorkFlowyNode
+
+    # Increasing timestamps so the touch verification's modifiedAt order
+    # check passes; content (name/note) never changes.
+    clock = {"ts": 1_700_000_000}
+
+    def _node(node_id):
+        return WorkFlowyNode.model_validate(
+            {
+                "id": node_id,
+                "name": "live one",
+                "note": "live note",
+                "modifiedAt": clock["ts"],
+                "createdAt": 1_699_999_999,
+            }
+        )
+
+    async def _node_read(node_id, as_raw_node=True, **k):
+        return _node(node_id)
+
+    monkeypatch.setattr(server, "_node_read_impl", _node_read)
+
+    async def _edit_core(node_id, **kwargs):
+        clock["ts"] += 2
+        return _node(node_id)
+
+    monkeypatch.setattr(server, "_node_edit_core", _edit_core)
+
+    result = _anchor(
+        "point.touch",
+        {"handles": [ARCHIVED_UUID, LIVE_UUID, LIVE_OTHER]},
+    )
+    payload = _payload(result)
+    assert payload["success"] is False  # not every row touched
+    statuses = {row["handle"]: (row["status"], row.get("reason")) for row in payload["results"]}
+    assert statuses[ARCHIVED_UUID] == ("skipped", "archived_node")
+    assert statuses[LIVE_UUID][0] in ("touched", "failed")
+    assert statuses[LIVE_OTHER][0] in ("touched", "failed")
+    assert statuses[LIVE_UUID][0] == "touched" and statuses[LIVE_OTHER][0] == "touched", statuses
+    assert payload["partial_success"] is True
+    rows = payload["results"]
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["reason"] == "archived_node"
+    assert ARCHIVED_MARK in rows[0]["detail"]
+    assert rows[0]["archive"]["archive_file"].endswith("arch.json")
+    assert rows[1]["status"] == "touched"
+    assert rows[2]["status"] == "touched"
+    assert archive_env["writes"] == []
+
+
+# ---------------------------------------------------------------------------
+# Chain-1 W2 (F2): the exact archived UUID whose head is SHARED with a live
+# node — the audit's reproduction ids. A corrective shave of it must never
+# become a write to the unrelated live node: the resolver discards the shave
+# in every mode and the site's archive-aware miss refuses/skips.
+# ---------------------------------------------------------------------------
+
+SHARED_LIVE_UUID = "aaaaaaaa-0000-0000-0000-000000000001"
+SHARED_ARCHIVED_UUID = "aaaaaaaa-0000-0000-0000-0000000000ff"
+
+
+@pytest.fixture()
+def shared_head_env(tmp_path, monkeypatch, archive_env):
+    """The audit's F2 fixture, layered on the standard env: a live node and
+    a visible archived record sharing the 8-hex head, so the live prefix
+    kernel's unique shave of the archived full UUID is reachable."""
+    document = build_archive_document(
+        [
+            _rec(
+                SHARED_ARCHIVED_UUID,
+                name="[ap:SHR1] Archived shared head",
+                note="archived shared note",
+            ),
+        ],
+        nest=_nest,
+        node_id=SHARED_ARCHIVED_UUID,
+        name="shared head archive",
+        description=None,
+        exported_at="2026-10-01T12:00:00Z",
+        source_cache=dict(SOURCE_CACHE),
+    )
+    (tmp_path / "shared.json").write_bytes(serialize_archive(document).encode("utf-8"))
+    store = ArchiveStore(folder_provider=lambda: str(tmp_path))
+    set_archive_store_for_tests(store)
+    yield {
+        "store": store,
+        "tmp_path": tmp_path,
+        "client": archive_env["client"],
+        "writes": archive_env["writes"],
+    }
+    set_archive_store_for_tests(None)
+
+
+def test_delete_exact_archived_shared_head_refuses_not_corrects(shared_head_env):
+    # node.delete(A) — A's exact full UUID — records ZERO transport calls and
+    # returns the archive refusal; the shaved live L is never the target.
+    result = _node("delete", {"node_handle": SHARED_ARCHIVED_UUID})
+    _assert_refusal(
+        result,
+        "node.delete",
+        SHARED_ARCHIVED_UUID,
+        file_suffix="shared.json",
+    )
+    assert shared_head_env["writes"] == []
+
+
+def test_etch_parent_exact_archived_shared_head_refuses(shared_head_env):
+    # The generic parent slot cannot use L either: §5.2.3, no write.
+    result = _node(
+        "etch",
+        {"parent_id": SHARED_ARCHIVED_UUID, "nodes": [{"name": "kid"}]},
+    )
+    _assert_refusal(
+        result,
+        "node.etch",
+        SHARED_ARCHIVED_UUID,
+        role_text="parent",
+        file_suffix="shared.json",
+    )
+    assert shared_head_env["writes"] == []
+
+
+def test_tag_batch_exact_archived_shared_head_skips_live_commits(
+    shared_head_env, monkeypatch
+):
+    committed = _batch_env(monkeypatch, shared_head_env)
+    result = _tag(
+        "batch",
+        {
+            "operations": [
+                {"handle": SHARED_ARCHIVED_UUID, "operation": "add", "tags": ["x"]},
+                {"handle": SHARED_LIVE_UUID, "operation": "add", "tags": ["x"]},
+            ]
+        },
+    )
+    payload = _payload(result)
+    assert payload["partial_success"] is True
+    rows = payload["results"]
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["reason"] == "archived_node"
+    assert SHARED_ARCHIVED_UUID in str(rows[0]["detail"])
+    assert rows[1]["status"] == "committed"
+    assert committed == [(SHARED_LIVE_UUID, ("x",))]
+
+
+def test_read_exact_archived_shared_head_serves_no_correction(shared_head_env):
+    # The read side of the same fixture: the raw archive read still serves A
+    # (banner first) with NO correction echo, and never reaches get_node.
+    result = _node("read", {"node_id": SHARED_ARCHIVED_UUID})
+    assert isinstance(result, str)
+    assert result.startswith("⚠️⚠️⚠️ ARCHIVED NODE")
+    assert "resolved:" not in result
+    assert "live one" not in result

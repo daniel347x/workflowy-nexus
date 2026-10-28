@@ -1,0 +1,87 @@
+def apply_yaml_beacons(
+    lines: list[str],
+    file_children: List[Dict[str, Any]],
+    beacons: list[dict[str, Any]],
+) -> None:
+    """Attach YAML span beacons as child nodes under the file node.
+
+    Behavior mirrors SQL/SH: purely location-centric annotations; explicit spans
+    are left to snippet tools.
+    """
+    if not beacons:
+        return
+
+    n = len(lines)
+    _prepend_duplicate_beacon_id_warning_nodes(file_children, beacons, language="YAML")
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "yaml-span-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        context_lines = _extract_yaml_beacon_context(
+            lines,
+            beacon.get("comment_line") or 0,
+            beacon_id=b_id,
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (YAML SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (YAML):")
+            note_lines.extend(context_lines)
+
+        # Raw YAML span text between opener/closer (if Cartographer computed it)
+        span_text_lines: List[str] = []
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            span_start = max(1, span_start)
+            span_end = min(n, span_end)
+            if span_start <= span_end:
+                span_text_lines = lines[span_start - 1 : span_end]
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+        }
+
+        file_children.append(span_node)

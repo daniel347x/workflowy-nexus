@@ -1,0 +1,500 @@
+"""U01 — clock-independent owner identity: the regression locks.
+
+Every governed artifact stamps its owner as ``(pid, create_time)``; on Linux
+that epoch derive from ``/proc/stat btime``, which STEPS on this WSL2 VM
+(~1 s every ~30 s), and the retired 1 ms epoch-epsilon comparison classified
+LIVE owners dead (their protection reaped, stale-basis admissions admitted).
+These locks pin the repair: exact integer start-ticks / boot-id comparison,
+no epsilon, genuine death and PID reuse still detected, legacy artifacts
+fail closed, identity failure refuses rather than fabricates.
+
+L1 — the ONE classifier's truth table (probe doubles, no OS dependency).
+L2 — clock-step scenario locks x4, parametrized step in {-1 s, 0, +1 s}
+     (Linux-only; modelled on C:\\temp\\astra_mci_clock_audit.py: hold
+     ``psutil._pslinux.boot_time`` fixed, stamp the live holder, inject the
+     step; each lock FIRST asserts the injection is live, so a post-fix pass
+     is causal and on pre-fix code the same injection fails the scenario).
+L3 — genuine death, PID reuse and boot mismatch still classify dead
+     end-to-end through the real sweep paths.
+L4 — legacy (pre-upgrade, no stable fields) fail-closed policy.
+L5 — platform probe (runs on Linux and Windows).
+L6 — identity unreadable at STAMP time: refusal before persist, never
+     fabrication.
+L7 — the launcher->worker handoff window: after the post-Popen child record
+     and BEFORE adoption, the claim classifies alive and its four owner
+     fields describe the child.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import psutil
+import pytest
+
+from workflowy_mcp import carto_job_governance as gov
+
+if sys.platform.startswith("linux"):
+    import psutil._pslinux as psutil_linux
+else:  # the btime injection exists only on Linux
+    psutil_linux = None
+
+from mutation_lease_harness import (
+    ACCOUNT_A,
+    cache_of,
+    dead_identity,
+    live_identity,
+    make_lease_env,
+)
+
+LINUX_ONLY = pytest.mark.skipif(psutil_linux is None, reason="btime injection is Linux-specific")
+
+_STEP_IDS = ["-1s", "control-0", "+1s"]
+_STEPS = [-1.0, 0.0, 1.0]
+
+
+# ---------------------------------------------------------------------------
+# L1 — classifier truth table (probe doubles)
+# ---------------------------------------------------------------------------
+
+
+def _probe(value):
+    """An identity_reader double returning one ProcessIdentity or raising one exception."""
+
+    if isinstance(value, BaseException):
+        def _raise(_pid):
+            raise value
+
+        return _raise
+    return lambda _pid: value
+
+
+def _identity(pid=123, ticks=100, boot="boot-a", created=10.0):
+    return gov.ProcessIdentity(pid=pid, start_ticks=ticks, boot_id=boot, create_time=created)
+
+
+def _stored(pid=123, created=10.0, ticks=100, boot="boot-a"):
+    return gov.StoredOwnerIdentity(
+        pid=pid, pid_create_time=created, start_ticks=ticks, boot_id=boot
+    )
+
+
+def _l1_rows():
+    """The truth-table rows, built LAZILY inside the test so this module also
+    COLLECTS on the pre-fix checkout (where the new names do not exist)."""
+
+    return [
+        # (case id, probe result, stored fields, expected verdict)
+        ("absent-pid-dead", psutil.NoSuchProcess(123), _stored(), "dead"),
+        ("absent-pid-legacy-dead", psutil.NoSuchProcess(123), _stored(ticks=None, boot=None), "dead"),
+        ("unreadable-unknown", gov.ProcessIdentityError("procfs race"), _stored(), "unknown"),
+        ("other-error-unknown", RuntimeError("unexpected"), _stored(), "unknown"),
+        ("current-ticks-none-unknown", _identity(ticks=None, boot=None), _stored(), "unknown"),
+        ("legacy-live-unknown", _identity(), _stored(ticks=None, boot=None), "unknown"),
+        ("pid-reuse-dead", _identity(ticks=101), _stored(ticks=100), "dead"),
+        ("boot-mismatch-dead", _identity(boot="boot-b"), _stored(boot="boot-a"), "dead"),
+        ("match-alive", _identity(), _stored(), "alive"),
+        ("windows-shape-alive", _identity(boot=None), _stored(boot=None), "alive"),
+        ("stored-bootless-alive", _identity(boot="boot-a"), _stored(boot=None), "alive"),
+        # THE regression lock: the stored epoch diverged by whole seconds with the
+        # incarnation unchanged — the retired epsilon comparison said DEAD here.
+        ("epoch-diverged-alive", _identity(created=99.0), _stored(created=1.0), "alive"),
+        ("malformed-stored-ticks-unknown", _identity(), _stored(ticks="junk"), "unknown"),
+        ("malformed-pid-unknown", _identity(), _stored(pid="junk"), "unknown"),
+        ("nonpositive-pid-unknown", _identity(), _stored(pid=0), "unknown"),
+    ]
+
+
+_L1_IDS = [
+    "absent-pid-dead",
+    "absent-pid-legacy-dead",
+    "unreadable-unknown",
+    "other-error-unknown",
+    "current-ticks-none-unknown",
+    "legacy-live-unknown",
+    "pid-reuse-dead",
+    "boot-mismatch-dead",
+    "match-alive",
+    "windows-shape-alive",
+    "stored-bootless-alive",
+    "epoch-diverged-alive",
+    "malformed-stored-ticks-unknown",
+    "malformed-pid-unknown",
+    "nonpositive-pid-unknown",
+]
+
+
+@pytest.mark.parametrize("row_index", range(len(_L1_IDS)), ids=_L1_IDS)
+def test_l1_classifier_truth_table(row_index):
+    _id, probe, stored, expected = _l1_rows()[row_index]
+    assert gov.classify_owner_liveness(stored, identity_reader=_probe(probe)) == expected
+
+
+# ---------------------------------------------------------------------------
+# L2 — clock-step scenario locks (Astra's injection model)
+# ---------------------------------------------------------------------------
+
+
+class _ClockStep:
+    """Hold ``psutil._pslinux.boot_time`` at one fixed value, then inject the step."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, step: float) -> None:
+        self._step = step
+        self._injected = False
+        base = psutil_linux.boot_time()
+        self._offset = {"value": 0.0}
+        monkeypatch.setattr(psutil_linux, "boot_time", lambda: base + self._offset["value"])
+
+    def inject(self) -> None:
+        if self._injected:
+            return
+        self._injected = True
+        before = psutil.Process(os.getpid()).create_time()
+        self._offset["value"] = self._step
+        after = psutil.Process(os.getpid()).create_time()
+        # Anti-test-theater probe: the injection is LIVE — the epoch moved by
+        # the injected step (±0.5 s tolerance for natural drift between the
+        # base capture and the patch).  A post-fix pass is causal, never
+        # vacuous: on pre-fix code this moved epoch is consulted and the
+        # scenario fails; post-fix it is never consulted.
+        assert abs((after - before) - self._step) <= 0.5, (
+            f"injection inert: epoch moved {after - before:+.3f}s, expected {self._step:+.1f}s"
+        )
+
+    def assert_used(self) -> None:
+        assert self._injected, "the scenario never stamped its live holder"
+
+
+@LINUX_ONLY
+@pytest.mark.parametrize("step", _STEPS, ids=_STEP_IDS)
+def test_l2_refresh_successor_serializes_survives_clock_step(tmp_path, monkeypatch, step):
+    """The newer-generation successor lock under a ±1 s btime step: the live
+    active publisher is NEVER recovered as dead; exactly one successor."""
+    import test_coherence_s02_refresh_claim as s02
+
+    injection = _ClockStep(monkeypatch, step)
+    original = s02._fake_claim
+
+    def stamping_fake_claim(*args, **kwargs):
+        claim = original(*args, **kwargs)  # the live owner is stamped...
+        injection.inject()  # ...then the clock steps
+        return claim
+
+    monkeypatch.setattr(s02, "_fake_claim", stamping_fake_claim)
+    s02.test_newer_generation_serializes_exactly_one_successor(tmp_path)
+    injection.assert_used()
+
+
+@LINUX_ONLY
+@pytest.mark.parametrize("step", _STEPS, ids=_STEP_IDS)
+def test_l2_compat_patch_gate_survives_clock_step(tmp_path, monkeypatch, step):
+    """The compat-patch dedupe-forbiddance lock under a ±1 s btime step: the
+    live full-refresh owner still gates the compat patch (RefreshClaimError)."""
+    import test_coherence_s02_refresh_claim as s02
+
+    injection = _ClockStep(monkeypatch, step)
+    original = s02._fake_claim
+
+    def stamping_fake_claim(*args, **kwargs):
+        claim = original(*args, **kwargs)
+        injection.inject()
+        return claim
+
+    monkeypatch.setattr(s02, "_fake_claim", stamping_fake_claim)
+    s02.test_compat_patch_never_dedupes_with_full_refresh(tmp_path)
+    injection.assert_used()
+
+
+# ---------------------------------------------------------------------------
+# L3 — death, reuse and boot mismatch still classify dead end-to-end
+# ---------------------------------------------------------------------------
+
+
+def test_l3_genuinely_dead_owner_reaped_through_real_sweep(tmp_path):
+    _prove_q3_owner_reaping(tmp_path, dead_identity())
+
+
+def _q3_owner_reaping_witness(root, owner):
+    env = make_lease_env(root, ACCOUNT_A)
+    lease = gov.build_q3_lease(
+        lease_id="3" * 32, account_scope_id=env.account,
+        footprint=gov.compute_footprint(None, "file", cache_of(("vault", None), ("repo", "vault"), ("file", "repo")), kind="file"),
+        pid=owner.pid, pid_create_time=owner.create_time,
+        pid_start_ticks=owner.start_ticks, pid_boot_id=owner.boot_id,
+    )
+    path = gov.write_q3_lease(lease, env.jobs_root)
+    sweep = gov.sweep_region_governance(env.jobs_root)
+    assert lease["lease_id"] in sweep.reaped_lease_ids
+    assert not path.exists()
+
+
+def _prove_q3_owner_reaping(root, owner):
+    original = gov.classify_owner_liveness
+
+    def planted_alive(stored, **kwargs):
+        if (stored.pid, stored.start_ticks, stored.boot_id) == (owner.pid, owner.start_ticks, owner.boot_id):
+            return "alive"
+        return original(stored, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(gov, "classify_owner_liveness", planted_alive)
+        with pytest.raises(AssertionError):
+            _q3_owner_reaping_witness(root / "neutralized", owner)
+    _q3_owner_reaping_witness(root / "restored", owner)
+
+
+def test_l3_genuinely_dead_refresh_owner_recovers_through_real_flow(tmp_path):
+    from coherence_harness import RecordedSleep, make_coherence_root, s02_fetch, s02_make_export
+    from test_coherence_s02_refresh_claim import _fake_claim
+    from workflowy_mcp.coherence import read_manifest, run_full_refresh
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    dead = dead_identity()
+    _fake_claim(
+        paths,
+        status="downloading",
+        owner_pid=dead.pid,
+        owner_pid_create_time=dead.create_time,
+        owner_start_ticks=dead.start_ticks,
+        owner_boot_id=dead.boot_id,
+    )
+    calls: list[int] = []
+    outcome = asyncio.run(
+        run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([]), calls),
+            settle_seconds=0,
+            snapshot_dir=tmp_path / "snapshots",
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+        )
+    )
+    assert outcome.status == "published"
+    assert outcome.successor_refresh_performed is True
+    assert calls == [1]
+    assert read_manifest(paths, required=True).epoch_number == 1
+
+
+def test_l3_pid_reuse_is_dead_end_to_end(tmp_path):
+    """Same pid, different incarnation (start ticks differ) -> dead."""
+    current = live_identity()
+    reused = gov.ProcessIdentity(
+        pid=current.pid,
+        start_ticks=current.start_ticks + 1,
+        boot_id=current.boot_id,
+        create_time=current.create_time,
+    )
+    _prove_q3_owner_reaping(tmp_path, reused)
+
+
+@LINUX_ONLY
+def test_l3_different_boot_id_is_dead_end_to_end(tmp_path):
+    """Same pid and ticks, different boot -> dead (Linux boot token)."""
+    current = live_identity()
+    other_boot = gov.ProcessIdentity(
+        pid=current.pid,
+        start_ticks=current.start_ticks,
+        boot_id="0" * 36,
+        create_time=current.create_time,
+    )
+    _prove_q3_owner_reaping(tmp_path, other_boot)
+
+
+# ---------------------------------------------------------------------------
+# L4 — legacy (pre-upgrade) fail-closed policy
+# ---------------------------------------------------------------------------
+
+
+def test_l4_legacy_claim_kill_verification_decides_on_argv_and_pid(tmp_path):
+    """A pre-upgrade claim (NO stable fields) authorizes a force-kill on pid
+    existence + exact argv match alone."""
+    jobs = tmp_path / "jobs"
+    jobs.mkdir(parents=True)
+    job_file = jobs / "legacy.json"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(60)",
+            "--carto-job-file",
+            str(job_file),
+        ]
+    )
+    try:
+        child = gov.read_process_identity(process.pid)
+        claim = gov.build_claim(
+            job_id="legacy",
+            job_type="CARTO_REFRESH",
+            dedupe_key="c" * 64,
+            account_scope_id=ACCOUNT_A,
+            footprint={
+                "kind": "file",
+                "path": str(tmp_path / "f"),
+                "root_uuid": "file-a",
+                "ancestor_chain": ["file-a"],
+            },
+            launcher="agent",
+            parent_job_id=None,
+            launcher_pid=os.getpid(),
+            pid=child.pid,
+            pid_create_time=child.create_time,
+            handoff_state="running",
+            spawn_started_at=None,
+            execution_owner="detached_worker",
+        )
+        gov.write_claim(claim, jobs)
+        job_file.write_text(
+            json.dumps(
+                {
+                    "id": "legacy",
+                    "type": "CARTO_REFRESH",
+                    "status": "running",
+                    "claim_id": claim["claim_id"],
+                    "pid": child.pid,
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = asyncio.run(
+            gov.cancel_carto_job(job_file, requested_by="test", cooperative_timeout_seconds=0)
+        )
+        assert result["outcome"] == "forced"
+        process.wait(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# L5 — platform probe
+# ---------------------------------------------------------------------------
+
+
+def test_l5_platform_identity_probe_stable_and_shaped():
+    first = gov.current_process_identity()
+    second = gov.current_process_identity()
+    assert first.pid == os.getpid()
+    assert first.start_ticks == second.start_ticks
+    assert first.boot_id == second.boot_id
+    assert isinstance(first.start_ticks, int) and first.start_ticks > 0
+    if sys.platform.startswith("linux"):
+        assert isinstance(first.boot_id, str) and len(first.boot_id) == 36
+    elif sys.platform == "win32":
+        assert first.boot_id is None
+    probed = gov.read_process_identity(os.getpid())
+    assert probed.start_ticks == first.start_ticks
+    assert probed.boot_id == first.boot_id
+
+
+# ---------------------------------------------------------------------------
+# L6 — refusal, never fabrication
+# ---------------------------------------------------------------------------
+
+
+def test_l6_identity_failure_refuses_refresh_claim_before_persist(tmp_path, monkeypatch):
+    """Identity-reader failure at acquisition -> RefreshClaimError BEFORE any
+    claim persists (extends test_coherence_s02_refresh_claim.py's A3 lock)."""
+    from coherence_harness import RecordedSleep, make_coherence_root, s02_fetch, s02_make_export
+    from workflowy_mcp.coherence import read_refresh_claim, run_full_refresh
+    from workflowy_mcp.coherence.errors import RefreshClaimError
+
+    def _failing_identity():
+        raise gov.ProcessIdentityError("identity unavailable")
+
+    monkeypatch.setattr(gov, "current_process_identity", _failing_identity)
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    calls: list[int] = []
+    with pytest.raises(RefreshClaimError):
+        asyncio.run(
+            run_full_refresh(
+                paths=paths,
+                fetch=s02_fetch(s02_make_export([]), calls),
+                settle_seconds=0,
+                snapshot_dir=tmp_path / "snapshots",
+                sleep=RecordedSleep(),
+                poll_seconds=0.02,
+            )
+        )
+    assert calls == []
+    assert read_refresh_claim(paths) is None
+
+
+# ---------------------------------------------------------------------------
+# L7 — the handoff window (post-Popen child record, before adoption)
+# ---------------------------------------------------------------------------
+
+
+def test_l7_handoff_window_claim_classifies_alive_before_adoption(tmp_path):
+    """After ``_record_spawned_worker`` runs and adoption has NOT yet run, the
+    claim's four owner fields all describe the CHILD, it classifies ``alive``
+    through the ONE classifier, and the read-only view reports it."""
+    jobs = tmp_path / "jobs"
+    jobs.mkdir(parents=True)
+    launcher = gov.current_process_identity()
+    claim = gov.build_claim(
+        job_id="l7-job",
+        job_type="CARTO_REFRESH",
+        dedupe_key="b" * 64,
+        account_scope_id=ACCOUNT_A,
+        footprint={
+            "kind": "file",
+            "path": str(tmp_path / "f"),
+            "root_uuid": "file-a",
+            "ancestor_chain": ["file-a"],
+        },
+        launcher="agent",
+        parent_job_id=None,
+        launcher_pid=launcher.pid,
+        pid=launcher.pid,
+        pid_create_time=launcher.create_time,
+        pid_start_ticks=launcher.start_ticks,
+        pid_boot_id=launcher.boot_id,
+        handoff_state="spawning",
+        spawn_started_at=gov.utc_now_iso(),
+        execution_owner="launcher",
+    )
+    gov.write_claim(claim, jobs)
+    job_file = jobs / "l7-job.json"
+    job_file.write_text(
+        json.dumps(
+            {
+                "id": "l7-job",
+                "type": "CARTO_REFRESH",
+                "status": "spawning",
+                "claim_id": claim["claim_id"],
+                "pid": launcher.pid,
+            }
+        ),
+        encoding="utf-8",
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)", "--carto-job-file", str(job_file)]
+    )
+    try:
+        asyncio.run(gov._record_spawned_worker(claim["claim_id"], job_file, jobs, process.pid))
+        current = gov.read_claim(gov.claim_path_for(claim, jobs))
+        child = gov.read_process_identity(process.pid)
+        # All four owner fields describe the child, from ONE ProcessIdentity.
+        assert current["pid"] == process.pid
+        assert current["pid_create_time"] == child.create_time
+        assert current["pid_start_ticks"] == child.start_ticks
+        assert current["pid_boot_id"] == child.boot_id
+        assert current["execution_owner"] == "detached_worker"
+        assert current["handoff_state"] == "spawning"  # adoption has NOT run
+        assert (
+            gov.classify_owner_liveness(gov.StoredOwnerIdentity.from_claim_dict(current))
+            == "alive"
+        )
+        view = gov.inspect_carto_job_liveness(
+            json.loads(job_file.read_text(encoding="utf-8")), job_file, jobs_root=jobs
+        )
+        assert view["raw_liveness"] == "alive"
+    finally:
+        process.kill()
+        process.wait(timeout=10)

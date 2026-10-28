@@ -1,0 +1,7 @@
+    def find_define_store_setup_body(self, v: Any) -> Any:
+        """Return the BODY node of the setup function passed to ``defineStore``.
+
+        Wrapper around the Phase B.1 module-level
+        ``_js_find_define_store_setup_body``.
+        """
+        return _js_find_define_store_setup_body(v, self.source_bytes)

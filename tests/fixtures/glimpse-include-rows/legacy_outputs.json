@@ -1,0 +1,1086 @@
+{
+ "focused": {
+  "result": {
+   "type": "str",
+   "value": "# Project Root\n\n## Architecture #arch--expand\n\n### Resolver\n\nResolver body"
+  },
+  "spec_blob": {
+   "ancestor_notes": false,
+   "as_markdown": true,
+   "content_format": "markdown",
+   "descend_policy": "all",
+   "focus": {
+    "ancestor_path": [
+     "10000000-0000-4000-8000-000000000001",
+     "10000000-0000-4000-8000-000000000002"
+    ],
+    "mode": "row",
+    "occurrence": 0,
+    "uuid": "10000000-0000-4000-8000-000000000003"
+   },
+   "full_uuids": false,
+   "group_id": null,
+   "group_name": null,
+   "headings_only": false,
+   "kind": "raw_root",
+   "lightning": null,
+   "match_scope": "name_and_note",
+   "recent_by": null,
+   "recursive": true,
+   "root_uuid": "10000000-0000-4000-8000-000000000001",
+   "since": null,
+   "sort_by": "none",
+   "sort_direction": "asc",
+   "tree_mode": "render_tree"
+  }
+ },
+ "modal_authority": {
+  "raw_root": {
+   "markdown": "# Project Root\n\nRoot body\n\n## Architecture #arch--expand\n\nArch body\n\n### Resolver\n\nResolver body\n\n### Cache\n\nCache body\n\n## Deployment #deploy\n\nDeploy body\n\n### Deploy step\n\nDeploy step body",
+   "rows": [
+    {
+     "ancestor_path": [],
+     "created": 1,
+     "depth": 0,
+     "modified": 1,
+     "name": "Project Root",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000001"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 10,
+     "depth": 1,
+     "modified": 40,
+     "name": "Architecture #arch--expand",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 15,
+     "depth": 2,
+     "modified": 90,
+     "name": "Resolver",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000003"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 50,
+     "depth": 2,
+     "modified": 100,
+     "name": "Cache",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000004"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 30,
+     "depth": 1,
+     "modified": 60,
+     "name": "Deployment #deploy",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000005"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000005"
+     ],
+     "created": 35,
+     "depth": 2,
+     "modified": 95,
+     "name": "Deploy step",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000006"
+    }
+   ]
+  },
+  "raw_root_created_asc": {
+   "markdown": "# Project Root\n\n## Architecture #arch--expand\n\n### Resolver\n\nResolver body\n\n## Deployment #deploy\n\n### Deploy step\n\nDeploy step body\n\n## Architecture #arch--expand\n\n### Cache\n\nCache body",
+   "rows": [
+    {
+     "ancestor_path": [],
+     "created": 1,
+     "depth": 0,
+     "modified": 1,
+     "name": "Project Root",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000001"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 10,
+     "depth": 1,
+     "modified": 40,
+     "name": "Architecture #arch--expand",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 15,
+     "depth": 2,
+     "modified": 90,
+     "name": "Resolver",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000003"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 30,
+     "depth": 1,
+     "modified": 60,
+     "name": "Deployment #deploy",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000005"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000005"
+     ],
+     "created": 35,
+     "depth": 2,
+     "modified": 95,
+     "name": "Deploy step",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000006"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 10,
+     "depth": 1,
+     "modified": 40,
+     "name": "Architecture #arch--expand",
+     "occurrence": 1,
+     "uuid": "10000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 50,
+     "depth": 2,
+     "modified": 100,
+     "name": "Cache",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000004"
+    }
+   ]
+  },
+  "raw_root_modified_desc": {
+   "markdown": "# Project Root\n\n## Architecture #arch--expand\n\n### Cache\n\nCache body\n\n## Deployment #deploy\n\n### Deploy step\n\nDeploy step body\n\n## Architecture #arch--expand\n\n### Resolver\n\nResolver body",
+   "rows": [
+    {
+     "ancestor_path": [],
+     "created": 1,
+     "depth": 0,
+     "modified": 1,
+     "name": "Project Root",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000001"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 10,
+     "depth": 1,
+     "modified": 40,
+     "name": "Architecture #arch--expand",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 50,
+     "depth": 2,
+     "modified": 100,
+     "name": "Cache",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000004"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 30,
+     "depth": 1,
+     "modified": 60,
+     "name": "Deployment #deploy",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000005"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000005"
+     ],
+     "created": 35,
+     "depth": 2,
+     "modified": 95,
+     "name": "Deploy step",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000006"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 10,
+     "depth": 1,
+     "modified": 40,
+     "name": "Architecture #arch--expand",
+     "occurrence": 1,
+     "uuid": "10000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 15,
+     "depth": 2,
+     "modified": 90,
+     "name": "Resolver",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000003"
+    }
+   ]
+  },
+  "simple_dock": {
+   "markdown": "# Project Dock #wfy-ns\n\nDock body\n\n## Dock Alpha\n\nDock Alpha body\n\n## Dock Beta\n\nDock Beta body\n\n## Child Dock #wfy-ns\n\nChild Dock body",
+   "rows": [
+    {
+     "ancestor_path": [],
+     "created": 5,
+     "depth": 0,
+     "modified": 5,
+     "name": "Project Dock #wfy-ns",
+     "occurrence": 0,
+     "uuid": "20000000-0000-4000-8000-000000000001"
+    },
+    {
+     "ancestor_path": [
+      "20000000-0000-4000-8000-000000000001"
+     ],
+     "created": 6,
+     "depth": 1,
+     "modified": 7,
+     "name": "Dock Alpha",
+     "occurrence": 0,
+     "uuid": "20000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "20000000-0000-4000-8000-000000000001"
+     ],
+     "created": 8,
+     "depth": 1,
+     "modified": 9,
+     "name": "Dock Beta",
+     "occurrence": 0,
+     "uuid": "20000000-0000-4000-8000-000000000003"
+    },
+    {
+     "ancestor_path": [
+      "20000000-0000-4000-8000-000000000001"
+     ],
+     "created": 12,
+     "depth": 1,
+     "modified": 13,
+     "name": "Child Dock #wfy-ns",
+     "occurrence": 0,
+     "uuid": "20000000-0000-4000-8000-000000000004"
+    }
+   ]
+  },
+  "slice_group": {
+   "markdown": "# Project Root\n\nRoot body\n\n## Architecture #arch--expand\n\nArch body\n\n### Resolver\n\nResolver body\n\n### Cache\n\nCache body",
+   "rows": [
+    {
+     "ancestor_path": [],
+     "created": 1,
+     "depth": 0,
+     "modified": 1,
+     "name": "Project Root",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000001"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001"
+     ],
+     "created": 10,
+     "depth": 1,
+     "modified": 40,
+     "name": "Architecture #arch--expand",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 15,
+     "depth": 2,
+     "modified": 90,
+     "name": "Resolver",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000003"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 50,
+     "depth": 2,
+     "modified": 100,
+     "name": "Cache",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000004"
+    }
+   ]
+  },
+  "slice_override": {
+   "markdown": "# Architecture #arch--expand\n\nArch body\n\n## Resolver\n\nResolver body\n\n## Cache\n\nCache body",
+   "rows": [
+    {
+     "ancestor_path": [],
+     "created": 10,
+     "depth": 0,
+     "modified": 40,
+     "name": "Architecture #arch--expand",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000002"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 15,
+     "depth": 1,
+     "modified": 90,
+     "name": "Resolver",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000003"
+    },
+    {
+     "ancestor_path": [
+      "10000000-0000-4000-8000-000000000002"
+     ],
+     "created": 50,
+     "depth": 1,
+     "modified": 100,
+     "name": "Cache",
+     "occurrence": 0,
+     "uuid": "10000000-0000-4000-8000-000000000004"
+    }
+   ]
+  }
+ },
+ "provenance": {
+  "base_commit": "0c56c969dc9e58f6695f6d132780e6bc9fdee007",
+  "capture_command": "GLIMPSE_CAPTURE_ROOT=tmp/pre <warm-venv>/bin/python tests/fixtures/glimpse-include-rows/capture_legacy.py --out tests/fixtures/glimpse-include-rows/legacy_outputs.json",
+  "captured_utc": "2026-10-22T09:16:40.552193+00:00",
+  "extracted_from": "git archive <base_commit> | tar -x -C tmp/pre",
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "scenario_sha256": "8ae10abe8d25ac57d2d1250ae3c8f705d0661bfa837fc809830c913b3ee88ab2",
+  "server_sha256": "a225702518284d179e886847ebd82129a8bffc4f7172ef455aae8fbb89c182c0"
+ },
+ "results": {
+  "anchor_dock": {
+   "type": "str",
+   "value": "# Project Dock #wfy-ns\n\nDock body\n\n## Dock Alpha\n\nDock Alpha body\n\n## Dock Beta\n\nDock Beta body\n\n## Child Dock #wfy-ns\n\nChild Dock body"
+  },
+  "bad_group": {
+   "type": "dict",
+   "value": {
+    "error": {
+     "code": "glimpse_request_failed",
+     "describe_hint": {
+      "of": "run",
+      "tool": "glimpse",
+      "verb": "describe"
+     },
+     "extra": {
+      "legacy_result": {
+       "error": "No slice group matched 'No Such Group' as an exact group id, a unique id prefix, a full group name, or a semantic short name (the final pipe-delimited segment without its trailing [n] index). Call slice_group.list (list_slice_groups) to see the current ids and names.",
+       "success": false
+      }
+     },
+     "message": "No slice group matched 'No Such Group' as an exact group id, a unique id prefix, a full group name, or a semantic short name (the final pipe-delimited segment without its trailing [n] index). Call slice_group.list (list_slice_groups) to see the current ids and names."
+    },
+    "operation": "glimpse.run",
+    "operation_doc": {
+     "async": "never",
+     "error_codes": [
+      "missing_verb",
+      "missing_parameter",
+      "forbidden_parameter",
+      "invalid_parameter_type",
+      "invalid_enum_value",
+      "malformed_params",
+      "invalid_parameter_combination",
+      "unknown_operation",
+      "operation_failed",
+      "coherence_barrier_active",
+      "refresh_required",
+      "archived_node_read_only",
+      "glimpse_request_failed",
+      "sort_direction_without_sort_by",
+      "simple_form_double_match",
+      "simple_form_descend_refused",
+      "simple_form_nesting_refused",
+      "simple_form_unresolved",
+      "simple_form_wrong_surface",
+      "simple_form_not_a_parcel",
+      "simple_form_settings_in_parcel"
+     ],
+     "examples": [
+      {
+       "call": {},
+       "note": "Bare family call defaults to live-DOM run."
+      },
+      {
+       "call": {
+        "params": {
+         "group_handle": "Architecture"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "root_handle": "[ap:K7M2QF]"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "group_handle": "Architecture",
+         "root_handle": "UUID"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "render_spec": "modal"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "render_spec": {
+          "dock": "[ap:DOCK01]"
+         }
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "push_to_modal": true,
+         "root_handle": "UUID"
+        },
+        "verb": "run"
+       }
+      }
+     ],
+     "operation": "glimpse.run",
+     "params_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "allow_anchor_dock": {
+        "description": "Override for the Anchor-Dock root guard: a bare root_handle raw dump whose resolved root is an Anchor Dock (global or local) is refused with a peek/render teaching error unless this is true.",
+        "type": "boolean"
+       },
+       "ancestor_notes": {
+        "description": "Ancestor notes are suppressed on chronological renders: when sort_by is 'created' or 'modified' (either direction), or recent is any selection -- a date window ('1w'), 'curated', or an item-count 'last N'/'newest N'/'bottom N' -- every non-leaf of the final render forest (the root included when it is a non-leaf) renders HEADING-ONLY and leaf notes print -- membership and ordering are untouched. An item-count recent selection alone still keeps document-order excerpts unless you also pass a sort. Renders with no sort and no recent selection keep ancestor notes -- except LENS renders (slice_group.render / sift / merge.render, or any render_lens selection), where the connective scaffolding above the lens's input roots (the LCA down to each input root) renders heading-only by default EVEN IN DOCUMENT order; the input roots and their subtrees are unaffected. Pass ancestor_notes: true to include ancestor notes on a chronological render and to restore the lens scaffold notes (the sole opt-out; default false).",
+        "type": "boolean"
+       },
+       "as_markdown": {
+        "type": "boolean"
+       },
+       "descend_policy": {
+        "description": "Boundary leg of the traversal pair (with recursive, the depth leg). 'all' (the default) descends into child Anchor Docks; 'stop_at_child_anchors' stops the walk at them -- the boundary node itself still matches and renders as a leaf signpost. 'stop_at_child_docks' is an accepted alias; the canonical wire spelling is stop_at_child_anchors. Under the depth cap (recursive=False) the boundary is moot: the cap stops the descent first.",
+        "enum": [
+         "all",
+         "stop_at_child_anchors",
+         "stop_at_child_docks"
+        ],
+        "type": "string"
+       },
+       "full_uuids": {
+        "description": "Print FULL 36-char UUIDs in headings-only [id] tokens instead of the short 8-hex handles (the default: short, lengthened just enough to be unique when the 8-hex prefix is ambiguous in the cache). JSON/structured outputs always carry full UUIDs regardless.",
+        "type": "boolean"
+       },
+       "group_handle": {
+        "description": "Persisted slice-group id/prefix, full name, or semantic short name (final pipe-delimited segment, trailing [n] index stripped; case-insensitive).",
+        "type": "string"
+       },
+       "headings_only": {
+        "description": "Titles/UUIDs plus dock.peek's four-field end-of-line metrics (\u25b8N direct children \u00b7 desc:N descendants \u00b7 self:title+note size \u00b7 tree:self+all descendants) from the operation cache, completed/suppressed/out-of-slice descendants included (not the visible child count). Lines whose note carries Cartographer/beacon source-map markers (mapped source code) carry none of it. \u25b80 = known leaf; \u25b8? = node/count unavailable. Counts are snapshot metadata, not live verification or permission to complete/delete a subtree. The [id] token on each heading prints the node's SHORT resolver-compatible handle (8 hex; lengthened just enough to be unique when the 8-hex prefix is ambiguous in the cache) \u2014 pass full_uuids: true for full UUIDs.",
+        "type": "boolean"
+       },
+       "include_archives": {
+        "description": "Default false. true adds the active export archives to this read: archived subtrees appear under the parent they were exported from, each archived node marked \ud83d\udce6, read-only. The exported subtree's parent must stay in Workflowy (it may be moved, but it must stay under the root you search or sift from); every other rule applies exactly as if nothing had been exported. A handle that misses live Workflowy is answered from the archives automatically, with or without this flag. Cannot combine with output_file or push_to_modal. Rules: system(verb='describe', params={'of': 'archives.list', 'detail': 'full'}).",
+        "type": "boolean"
+       },
+       "match_scope": {
+        "description": "WHERE a semantic tag search reads tags. 'name' (the default for tag-search surfaces: slice/group renders, lightning_rod render_tags/gather) matches only the trailing tag region of the node NAME, read by the core splitter -- a '#tag' mentioned mid-title as prose, or living only in a note body, does NOT match. 'name_and_note' matches a tag anywhere in the name or note (Workflowy-search parity) and is the default for free-text search (lightning_rod render_search; the sift query half). Suppression and the family postfixes (--expand/--suppress/--deprecated) follow this scope: under 'name' they count only in the trailing tag region of the name; the global never-expand tag (e.g. #wfy-suppress) counts only in the trailing tag region under EVERY scope.",
+        "enum": [
+         "name_and_note",
+         "name"
+        ],
+        "type": "string"
+       },
+       "output_file": {
+        "description": "Write the render output to this file; a compact file-write summary is returned instead of the content. Resolved on the daemon's own host: on a Windows daemon '/mnt/<drive>/\u2026' maps to '<DRIVE>:\\\u2026' and any other POSIX-absolute path is refused with a teaching error; on a WSL daemon 'X:\\\u2026' maps to '/mnt/<drive>/\u2026'; relative paths are refused everywhere. The result's path_record echoes requested/resolved/translated/host.",
+        "type": "string"
+       },
+       "push_to_modal": {
+        "type": "boolean"
+       },
+       "recent": {
+        "description": "Most-recent selection token. A SELECTION -- it never reorders; presentation order stays with sort_by/sort_direction. Count: 'last N' or 'newest N' select the N NEWEST leaves by recent_by (the sort_by axis when it is a timestamp, else 'modified') -- whatever the sort direction. 'bottom N' instead keeps the POSITIONAL tail of the current render order (the legacy 'last N' behavior; an old wire blob without a selection field means this). Time window: '1w', '3d', '12h' (measured back from the newest item in scope, not the clock). 'curated' (slice-group scope only): everything newer than the most recently CREATED already-tagged node -- the untagged material awaiting curation. sort_direction only orders the selected set (asc = oldest first) and never changes which items were chosen.",
+        "type": "string"
+       },
+       "recent_by": {
+        "description": "Recency basis for an item-count recent selection ('last N' / 'newest N'): 'created' | 'modified'. Omitted: the sort_by axis when it is a timestamp, else 'modified'. Inert for time windows, 'curated' and 'bottom N'.",
+        "enum": [
+         "created",
+         "modified",
+         null
+        ],
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "recursive": {
+        "description": "Depth leg of the traversal pair (with descend_policy, the boundary leg). True (default) = the ordinary unbounded walk. False = the scope root's own heading and note plus each DIRECT child's heading and note, and nothing deeper -- child Docks and plain nodes alike; descend_policy is then moot. A RAW-ROOT traversal policy: honoured on the bare-root surfaces (glimpse.run root_handle, anchor.dock.render, the estate {dock} form); a slice-group, lens or Lightning Rod selection refuses it loudly -- its membership is defined over the whole scope, so a depth cap would silently change it.",
+        "type": "boolean"
+       },
+       "render_spec": {
+        "description": "Literal 'modal', one simple form (group name, {group}, {dock}, {node}, {subtree}, {tags,root}, {symbols,root}, the long {ref,kind} alias, bare Dock handle), or a full render-spec object/JSON string; short-circuits explicit scope fields. One PARCEL renders here; an estate of several parcels uses estate, not run.",
+        "type": [
+         "string",
+         "object"
+        ]
+       },
+       "repository_view": {
+        "description": "Clean Markdown commit view for a beacon slice: the render becomes exactly what you could commit to a source repository, with every Workflowy trace removed. Files render as paths relative to their repository, sorted by path; each tagged function, class, region or Markdown section renders in source order as 'kind `signature`' with its labels and its beacon comment (headings_only mode) or, in the full mode, plus the slurped docstring and comments as fenced blocks. No node handle, no absolute path, no metric, no emoji marker, no #tag syntax, no Anchor Point reference, and no plain Workflowy node that the tag family happened to reach (the count is reported in the reply as a '> Repository view:' line above the document, or the repository_view key with output_file -- never inside the document). Screen and output_file carry the same bytes. The document order is fixed (file paths, then source position), so a committed slice changes only when a tagged function's signature, comment or labels change; sort_by created/modified and recent are refused rather than ignored, as are as_markdown: false, full_uuids, push_to_modal, include_archives, a live-DOM or modal glimpse.run, and non-slice search tiers.",
+        "type": "boolean"
+       },
+       "root_handle": {
+        "description": "Raw-dump scope alone; slice-group override root with group_handle.",
+        "type": "string"
+       },
+       "sort_by": {
+        "description": "Presentation sort axis: 'created' | 'modified'; 'none' forces document order. Omitted on a group scope: the slice group's saved default sort is inherited. A timestamp sort_by is also the default recency basis for an item-count 'newest' selection when recent_by is omitted.",
+        "enum": [
+         "none",
+         "created",
+         "modified"
+        ],
+        "type": "string"
+       },
+       "sort_direction": {
+        "description": "Presentation order only: 'asc' (default) = oldest first, 'desc' = newest first. It NEVER changes which items a recency selection (recent) chose -- selection and order are independent. Requires an explicit timestamp sort_by ('created'|'modified'): a direction with no sort basis is refused loudly (sort_direction_without_sort_by) -- even when a slice group's saved default sort would supply one (the guard checks the raw call params; pass sort_by explicitly). A recency selection never needs it.",
+        "enum": [
+         "asc",
+         "desc"
+        ],
+        "type": "string"
+       },
+       "target_tab": {
+        "type": "string"
+       }
+      },
+      "type": "object"
+     },
+     "related": [
+      "slice_group.render",
+      "lightning_rod.render_search"
+     ],
+     "returns": {
+      "description": "Successful results preserve the established GLIMPSE-family contract: raw Markdown/text strings, structured full/UUID results, modal acknowledgements, or artifact summaries. Scope truth table: neither group_handle nor root_handle = live DOM; root_handle only = raw dump; group_handle only = persisted slice group at its saved root; both = the group lens at an override root. render_spec='modal' reads and exactly re-projects the dock, including frozen DOM captures; a render-spec object is the paste fallback. push_to_modal writes a server-side scope into the dock, the dual of modal readback: honored for explicit scopes AND for a render_spec blob (routed through the same push funnel; the blob's focus is dropped), invalid for a bare live-DOM call, and refused with an actionable error for render_spec='modal' (cross-tab read-then-push copy is a pending feature). recent (most-recent selection; legacy tail/since accepted) takes 'last N' | 'newest N' (the N NEWEST leaves by recent_by -- the sort_by axis when it is a timestamp, else 'modified' -- whatever the direction), 'bottom N' (the positional tail of the current order), a window like '1w' (measured back from the newest item in scope, not the clock), or 'curated' (requires group_handle and pivots on creation time). sort_direction only orders the selected set (asc = oldest first) and never changes which items were chosen. match_scope selects WHERE a tag search reads tags and applies only to a slice-group scope: 'name' (default) = the trailing tag region of the node name, 'name_and_note' = tags anywhere in name or note. Suppression and postfixes follow the same scope (under 'name' they count only in the trailing tag region; the global never-expand tag is trailing-only under every scope). Omitted sort_by inherits a slice group's saved default; 'none' forces document order. headings_only=true in Markdown mode is the compact UUID harvest. Low-level descend_policy='stop_at_child_anchors' means stop at child Anchor Docks. recursive (default true) is the depth leg of the traversal pair: false on a bare root_handle raw dump renders that root's own heading and note plus each DIRECT child's heading and note, and nothing deeper (child Docks and plain nodes alike; descend_policy is then moot); it is refused loudly for a group_handle scope or a live-DOM render. ancestor_notes (default false) is the U6 teaching flag: chronological renders -- sort_by created/modified in either direction, or ANY recent selection (a date window, 'curated', or an item-count 'last N'/'newest N'/'bottom N') -- suppress ancestor notes automatically (every non-leaf of the final render forest, the root included, renders heading-only; leaf notes print); pass ancestor_notes=true to include them. Renders with no sort and no recent selection always keep ancestor notes -- except a render_lens projection (a render_spec blob carrying lightning mode render_lens), where the connective scaffolding above the lens's input roots renders heading-only by default even in document order and ancestor_notes=true restores it. A legitimately empty result is delivered as the literal string '(empty)', never a bare blank string (the public funnel's empty-output stub)."
+     },
+     "side_effects": [
+      "render",
+      "modal_push",
+      "artifact_write"
+     ],
+     "summary": "Render the live DOM, the docked modal's current view, a known root, or a slice-group scope. Truth table: root_handle alone = raw subtree dump; group_handle alone = curated slice; both = that lens at an override root; neither = live DOM. render_spec='modal' re-projects what the dock shows with no UUIDs. A raw dump rooted AT an Anchor Dock is refused (anchor.dock.peek/render, or allow_anchor_dock=true). A render specification is exactly one entry of an estate; see estate. render_spec also accepts a group name/{group}, {dock}, {node}, {subtree}, {tags,root}, {symbols,root}, the long {ref,kind} alias, or a bare Dock handle ({node} renders that node alone with its note; {subtree} every descendant; see estate for the per-kind default reads). Read slice groups (and also lenses) through the same funnel; 'modal' remains the readback token."
+    },
+    "success": false
+   }
+  },
+  "lens_parcel": {
+   "type": "str",
+   "value": "# Project Root\n\nRoot body\n\n## Architecture #arch--expand\n\nArch body\n\n### Resolver\n\nResolver body\n\n### Cache\n\nCache body\n\n## Deployment #deploy\n\nDeploy body"
+  },
+  "node_parcel": {
+   "type": "str",
+   "value": "# Resolver\n\nResolver body"
+  },
+  "raw_root": {
+   "type": "str",
+   "value": "# Project Root\n\nRoot body\n\n## Architecture #arch--expand\n\nArch body\n\n### Resolver\n\nResolver body\n\n### Cache\n\nCache body\n\n## Deployment #deploy\n\nDeploy body\n\n### Deploy step\n\nDeploy step body"
+  },
+  "raw_root_advisory": {
+   "type": "str",
+   "value": "\u26a0\ufe0f COHERENCE FAILURE \u2014 advisory only; NOT part of the returned content. This cache-backed result may be stale; Workflowy mutations are blocked until a full system.cache.refresh succeeds.\n\n# Project Root\n\nRoot body\n\n## Architecture #arch--expand\n\nArch body\n\n### Resolver\n\nResolver body\n\n### Cache\n\nCache body\n\n## Deployment #deploy\n\nDeploy body\n\n### Deploy step\n\nDeploy step body"
+  },
+  "raw_root_created_asc": {
+   "type": "str",
+   "value": "# Project Root\n\n## Architecture #arch--expand\n\n### Resolver\n\nResolver body\n\n## Deployment #deploy\n\n### Deploy step\n\nDeploy step body\n\n## Architecture #arch--expand\n\n### Cache\n\nCache body"
+  },
+  "raw_root_empty_window": {
+   "type": "str",
+   "value": "> Recency window: only items within the window back from the NEWEST ITEM IN SCOPE (not the clock); sort_direction only orders (asc = oldest first); it never changes which items were chosen.\n# Project Root\n\n## Architecture #arch--expand\n\n### Cache\n\nCache body"
+  },
+  "raw_root_full": {
+   "type": "dict",
+   "value": {
+    "_source": "cache_root_uuid",
+    "depth": 3,
+    "node_count": 6,
+    "preview_tree": [
+     "[10000000-0000-4000-8000-000000000001] [WG-1    ] \u29bf Project Root [Root body]",
+     "[10000000-0000-4000-8000-000000000002] [WG-1.1  ]     \u29bf Architecture #arch--expand [Arch body]",
+     "[10000000-0000-4000-8000-000000000003] [WG-1.1.1]         \u2022 Resolver [Resolver body]",
+     "[10000000-0000-4000-8000-000000000004] [WG-1.1.2]         \u2022 Cache [Cache body]",
+     "[10000000-0000-4000-8000-000000000005] [WG-1.2  ]     \u29bf Deployment #deploy [Deploy body]",
+     "[10000000-0000-4000-8000-000000000006] [WG-1.2.1]         \u2022 Deploy step [Deploy step body]"
+    ],
+    "render_scope": {
+     "content_format": "markdown",
+     "descend_policy": "all",
+     "focus": null,
+     "group_id": null,
+     "group_name": null,
+     "headings_only": false,
+     "kind": "raw_root",
+     "live_gui_sync_skipped_reason": "raw_dump",
+     "live_gui_sync_supported": false,
+     "match_scope": "name_and_note",
+     "recent_by": null,
+     "recursive": true,
+     "root_uuid": "10000000-0000-4000-8000-000000000001",
+     "since": null,
+     "sort_by": "none",
+     "sort_direction": "asc",
+     "tree_mode": "render_tree"
+    },
+    "root_uuid": "10000000-0000-4000-8000-000000000001",
+    "success": true
+   }
+  },
+  "raw_root_full_headings": {
+   "type": "dict",
+   "value": {
+    "_source": "cache_root_uuid",
+    "depth": 3,
+    "node_count": 6,
+    "preview_tree": [
+     "[10000000-0000-4000-8000-000000000001] [WG-1    ] \u29bf Project Root \u25b82",
+     "[10000000-0000-4000-8000-000000000002] [WG-1.1  ]     \u29bf Architecture #arch--expand \u25b82",
+     "[10000000-0000-4000-8000-000000000003] [WG-1.1.1]         \u2022 Resolver \u25b80",
+     "[10000000-0000-4000-8000-000000000004] [WG-1.1.2]         \u2022 Cache \u25b80",
+     "[10000000-0000-4000-8000-000000000005] [WG-1.2  ]     \u29bf Deployment #deploy \u25b81",
+     "[10000000-0000-4000-8000-000000000006] [WG-1.2.1]         \u2022 Deploy step \u25b80"
+    ],
+    "render_scope": {
+     "content_format": "markdown",
+     "descend_policy": "all",
+     "focus": null,
+     "group_id": null,
+     "group_name": null,
+     "headings_only": true,
+     "kind": "raw_root",
+     "live_gui_sync_skipped_reason": "raw_dump",
+     "live_gui_sync_supported": false,
+     "match_scope": "name_and_note",
+     "recent_by": null,
+     "recursive": true,
+     "root_uuid": "10000000-0000-4000-8000-000000000001",
+     "since": null,
+     "sort_by": "none",
+     "sort_direction": "asc",
+     "tree_mode": "render_tree"
+    },
+    "root_uuid": "10000000-0000-4000-8000-000000000001",
+    "success": true
+   }
+  },
+  "raw_root_headings": {
+   "type": "str",
+   "value": "# [10000000000040008000000000000001] Project Root \u25b82 \u00b7 desc:5 \u00b7 self:21B \u00b7 tree:148B\n\n## [10000000000040008000000000000002] Architecture #arch--expand \u25b82 \u00b7 desc:2 \u00b7 self:35B \u00b7 tree:71B\n\n### [10000000000040008000000000000003] Resolver \u25b80 \u00b7 desc:0 \u00b7 self:21B \u00b7 tree:21B\n\n### [10000000000040008000000000000004] Cache \u25b80 \u00b7 desc:0 \u00b7 self:15B \u00b7 tree:15B\n\n## [10000000000040008000000000000005] Deployment #deploy \u25b81 \u00b7 desc:1 \u00b7 self:29B \u00b7 tree:56B\n\n### [10000000000040008000000000000006] Deploy step \u25b80 \u00b7 desc:0 \u00b7 self:27B \u00b7 tree:27B"
+  },
+  "raw_root_modified_desc": {
+   "type": "str",
+   "value": "# Project Root\n\n## Architecture #arch--expand\n\n### Cache\n\nCache body\n\n## Deployment #deploy\n\n### Deploy step\n\nDeploy step body\n\n## Architecture #arch--expand\n\n### Resolver\n\nResolver body"
+  },
+  "raw_root_output_file": {
+   "type": "dict",
+   "value": {
+    "_source": "cache_root_uuid",
+    "bytes_written": 190,
+    "depth": 3,
+    "node_count": 6,
+    "output_file": "<TMP>/out.md",
+    "path_record": {
+     "host": "wsl",
+     "requested": "<TMP>/out.md",
+     "resolved": "<TMP>/out.md",
+     "translated": false
+    },
+    "render_scope": {
+     "content_format": "markdown",
+     "descend_policy": "all",
+     "focus": null,
+     "group_id": null,
+     "group_name": null,
+     "headings_only": false,
+     "kind": "raw_root",
+     "live_gui_sync_skipped_reason": "raw_dump",
+     "live_gui_sync_supported": false,
+     "match_scope": "name_and_note",
+     "recent_by": null,
+     "recursive": true,
+     "root_uuid": "10000000-0000-4000-8000-000000000001",
+     "since": null,
+     "sort_by": "none",
+     "sort_direction": "asc",
+     "tree_mode": "render_tree"
+    },
+    "root_uuid": "10000000-0000-4000-8000-000000000001",
+    "success": true
+   }
+  },
+  "raw_root_recent": {
+   "type": "str",
+   "value": "> Recency selection: the 2 newest by modified; sort_direction only orders these 2 (asc = oldest first); it never changes which items were chosen.\n# Project Root\n\n## Architecture #arch--expand\n\n### Cache\n\nCache body\n\n## Deployment #deploy\n\n### Deploy step\n\nDeploy step body"
+  },
+  "simple_dock": {
+   "type": "str",
+   "value": "# Project Dock #wfy-ns\n\nDock body\n\n## Dock Alpha\n\nDock Alpha body\n\n## Dock Beta\n\nDock Beta body\n\n## Child Dock #wfy-ns\n\nChild Dock body"
+  },
+  "slice_group": {
+   "type": "str",
+   "value": "# Project Root\n\nRoot body\n\n## Architecture #arch--expand\n\nArch body\n\n### Resolver\n\nResolver body\n\n### Cache\n\nCache body"
+  },
+  "slice_override": {
+   "type": "str",
+   "value": "# Architecture #arch--expand\n\nArch body\n\n## Resolver\n\nResolver body\n\n## Cache\n\nCache body"
+  },
+  "stale_focus": {
+   "type": "dict",
+   "value": {
+    "error": {
+     "code": "glimpse_request_failed",
+     "describe_hint": {
+      "of": "run",
+      "tool": "glimpse",
+      "verb": "describe"
+     },
+     "extra": {
+      "legacy_result": {
+       "_source": "cache_root_uuid",
+       "depth": 0,
+       "error": "The requested focus row could not be resolved occurrence-exactly against the current render tree, so it will not be guessed. Refresh the nodes cache and retry (re-apply the slice if you edited Workflowy).",
+       "focus_unresolved": "99999999-0000-4000-8000-000000000000",
+       "node_count": 0,
+       "render_scope": {
+        "content_format": "markdown",
+        "descend_policy": "all",
+        "focus": {
+         "ancestor_path": [
+          "10000000-0000-4000-8000-000000000001"
+         ],
+         "mode": "row",
+         "occurrence": 0,
+         "uuid": "99999999-0000-4000-8000-000000000000"
+        },
+        "group_id": null,
+        "group_name": null,
+        "headings_only": false,
+        "kind": "raw_root",
+        "live_gui_sync_skipped_reason": "raw_dump",
+        "live_gui_sync_supported": false,
+        "match_scope": "name_and_note",
+        "recent_by": null,
+        "recursive": true,
+        "root_uuid": "10000000-0000-4000-8000-000000000001",
+        "since": null,
+        "sort_by": "none",
+        "sort_direction": "asc",
+        "tree_mode": "render_tree"
+       },
+       "root_uuid": "10000000-0000-4000-8000-000000000001",
+       "success": false
+      }
+     },
+     "message": "The requested focus row could not be resolved occurrence-exactly against the current render tree, so it will not be guessed. Refresh the nodes cache and retry (re-apply the slice if you edited Workflowy)."
+    },
+    "operation": "glimpse.run",
+    "operation_doc": {
+     "async": "never",
+     "error_codes": [
+      "missing_verb",
+      "missing_parameter",
+      "forbidden_parameter",
+      "invalid_parameter_type",
+      "invalid_enum_value",
+      "malformed_params",
+      "invalid_parameter_combination",
+      "unknown_operation",
+      "operation_failed",
+      "coherence_barrier_active",
+      "refresh_required",
+      "archived_node_read_only",
+      "glimpse_request_failed",
+      "sort_direction_without_sort_by",
+      "simple_form_double_match",
+      "simple_form_descend_refused",
+      "simple_form_nesting_refused",
+      "simple_form_unresolved",
+      "simple_form_wrong_surface",
+      "simple_form_not_a_parcel",
+      "simple_form_settings_in_parcel"
+     ],
+     "examples": [
+      {
+       "call": {},
+       "note": "Bare family call defaults to live-DOM run."
+      },
+      {
+       "call": {
+        "params": {
+         "group_handle": "Architecture"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "root_handle": "[ap:K7M2QF]"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "group_handle": "Architecture",
+         "root_handle": "UUID"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "render_spec": "modal"
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "render_spec": {
+          "dock": "[ap:DOCK01]"
+         }
+        },
+        "verb": "run"
+       }
+      },
+      {
+       "call": {
+        "params": {
+         "push_to_modal": true,
+         "root_handle": "UUID"
+        },
+        "verb": "run"
+       }
+      }
+     ],
+     "operation": "glimpse.run",
+     "params_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "allow_anchor_dock": {
+        "description": "Override for the Anchor-Dock root guard: a bare root_handle raw dump whose resolved root is an Anchor Dock (global or local) is refused with a peek/render teaching error unless this is true.",
+        "type": "boolean"
+       },
+       "ancestor_notes": {
+        "description": "Ancestor notes are suppressed on chronological renders: when sort_by is 'created' or 'modified' (either direction), or recent is any selection -- a date window ('1w'), 'curated', or an item-count 'last N'/'newest N'/'bottom N' -- every non-leaf of the final render forest (the root included when it is a non-leaf) renders HEADING-ONLY and leaf notes print -- membership and ordering are untouched. An item-count recent selection alone still keeps document-order excerpts unless you also pass a sort. Renders with no sort and no recent selection keep ancestor notes -- except LENS renders (slice_group.render / sift / merge.render, or any render_lens selection), where the connective scaffolding above the lens's input roots (the LCA down to each input root) renders heading-only by default EVEN IN DOCUMENT order; the input roots and their subtrees are unaffected. Pass ancestor_notes: true to include ancestor notes on a chronological render and to restore the lens scaffold notes (the sole opt-out; default false).",
+        "type": "boolean"
+       },
+       "as_markdown": {
+        "type": "boolean"
+       },
+       "descend_policy": {
+        "description": "Boundary leg of the traversal pair (with recursive, the depth leg). 'all' (the default) descends into child Anchor Docks; 'stop_at_child_anchors' stops the walk at them -- the boundary node itself still matches and renders as a leaf signpost. 'stop_at_child_docks' is an accepted alias; the canonical wire spelling is stop_at_child_anchors. Under the depth cap (recursive=False) the boundary is moot: the cap stops the descent first.",
+        "enum": [
+         "all",
+         "stop_at_child_anchors",
+         "stop_at_child_docks"
+        ],
+        "type": "string"
+       },
+       "full_uuids": {
+        "description": "Print FULL 36-char UUIDs in headings-only [id] tokens instead of the short 8-hex handles (the default: short, lengthened just enough to be unique when the 8-hex prefix is ambiguous in the cache). JSON/structured outputs always carry full UUIDs regardless.",
+        "type": "boolean"
+       },
+       "group_handle": {
+        "description": "Persisted slice-group id/prefix, full name, or semantic short name (final pipe-delimited segment, trailing [n] index stripped; case-insensitive).",
+        "type": "string"
+       },
+       "headings_only": {
+        "description": "Titles/UUIDs plus dock.peek's four-field end-of-line metrics (\u25b8N direct children \u00b7 desc:N descendants \u00b7 self:title+note size \u00b7 tree:self+all descendants) from the operation cache, completed/suppressed/out-of-slice descendants included (not the visible child count). Lines whose note carries Cartographer/beacon source-map markers (mapped source code) carry none of it. \u25b80 = known leaf; \u25b8? = node/count unavailable. Counts are snapshot metadata, not live verification or permission to complete/delete a subtree. The [id] token on each heading prints the node's SHORT resolver-compatible handle (8 hex; lengthened just enough to be unique when the 8-hex prefix is ambiguous in the cache) \u2014 pass full_uuids: true for full UUIDs.",
+        "type": "boolean"
+       },
+       "include_archives": {
+        "description": "Default false. true adds the active export archives to this read: archived subtrees appear under the parent they were exported from, each archived node marked \ud83d\udce6, read-only. The exported subtree's parent must stay in Workflowy (it may be moved, but it must stay under the root you search or sift from); every other rule applies exactly as if nothing had been exported. A handle that misses live Workflowy is answered from the archives automatically, with or without this flag. Cannot combine with output_file or push_to_modal. Rules: system(verb='describe', params={'of': 'archives.list', 'detail': 'full'}).",
+        "type": "boolean"
+       },
+       "match_scope": {
+        "description": "WHERE a semantic tag search reads tags. 'name' (the default for tag-search surfaces: slice/group renders, lightning_rod render_tags/gather) matches only the trailing tag region of the node NAME, read by the core splitter -- a '#tag' mentioned mid-title as prose, or living only in a note body, does NOT match. 'name_and_note' matches a tag anywhere in the name or note (Workflowy-search parity) and is the default for free-text search (lightning_rod render_search; the sift query half). Suppression and the family postfixes (--expand/--suppress/--deprecated) follow this scope: under 'name' they count only in the trailing tag region of the name; the global never-expand tag (e.g. #wfy-suppress) counts only in the trailing tag region under EVERY scope.",
+        "enum": [
+         "name_and_note",
+         "name"
+        ],
+        "type": "string"
+       },
+       "output_file": {
+        "description": "Write the render output to this file; a compact file-write summary is returned instead of the content. Resolved on the daemon's own host: on a Windows daemon '/mnt/<drive>/\u2026' maps to '<DRIVE>:\\\u2026' and any other POSIX-absolute path is refused with a teaching error; on a WSL daemon 'X:\\\u2026' maps to '/mnt/<drive>/\u2026'; relative paths are refused everywhere. The result's path_record echoes requested/resolved/translated/host.",
+        "type": "string"
+       },
+       "push_to_modal": {
+        "type": "boolean"
+       },
+       "recent": {
+        "description": "Most-recent selection token. A SELECTION -- it never reorders; presentation order stays with sort_by/sort_direction. Count: 'last N' or 'newest N' select the N NEWEST leaves by recent_by (the sort_by axis when it is a timestamp, else 'modified') -- whatever the sort direction. 'bottom N' instead keeps the POSITIONAL tail of the current render order (the legacy 'last N' behavior; an old wire blob without a selection field means this). Time window: '1w', '3d', '12h' (measured back from the newest item in scope, not the clock). 'curated' (slice-group scope only): everything newer than the most recently CREATED already-tagged node -- the untagged material awaiting curation. sort_direction only orders the selected set (asc = oldest first) and never changes which items were chosen.",
+        "type": "string"
+       },
+       "recent_by": {
+        "description": "Recency basis for an item-count recent selection ('last N' / 'newest N'): 'created' | 'modified'. Omitted: the sort_by axis when it is a timestamp, else 'modified'. Inert for time windows, 'curated' and 'bottom N'.",
+        "enum": [
+         "created",
+         "modified",
+         null
+        ],
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "recursive": {
+        "description": "Depth leg of the traversal pair (with descend_policy, the boundary leg). True (default) = the ordinary unbounded walk. False = the scope root's own heading and note plus each DIRECT child's heading and note, and nothing deeper -- child Docks and plain nodes alike; descend_policy is then moot. A RAW-ROOT traversal policy: honoured on the bare-root surfaces (glimpse.run root_handle, anchor.dock.render, the estate {dock} form); a slice-group, lens or Lightning Rod selection refuses it loudly -- its membership is defined over the whole scope, so a depth cap would silently change it.",
+        "type": "boolean"
+       },
+       "render_spec": {
+        "description": "Literal 'modal', one simple form (group name, {group}, {dock}, {node}, {subtree}, {tags,root}, {symbols,root}, the long {ref,kind} alias, bare Dock handle), or a full render-spec object/JSON string; short-circuits explicit scope fields. One PARCEL renders here; an estate of several parcels uses estate, not run.",
+        "type": [
+         "string",
+         "object"
+        ]
+       },
+       "repository_view": {
+        "description": "Clean Markdown commit view for a beacon slice: the render becomes exactly what you could commit to a source repository, with every Workflowy trace removed. Files render as paths relative to their repository, sorted by path; each tagged function, class, region or Markdown section renders in source order as 'kind `signature`' with its labels and its beacon comment (headings_only mode) or, in the full mode, plus the slurped docstring and comments as fenced blocks. No node handle, no absolute path, no metric, no emoji marker, no #tag syntax, no Anchor Point reference, and no plain Workflowy node that the tag family happened to reach (the count is reported in the reply as a '> Repository view:' line above the document, or the repository_view key with output_file -- never inside the document). Screen and output_file carry the same bytes. The document order is fixed (file paths, then source position), so a committed slice changes only when a tagged function's signature, comment or labels change; sort_by created/modified and recent are refused rather than ignored, as are as_markdown: false, full_uuids, push_to_modal, include_archives, a live-DOM or modal glimpse.run, and non-slice search tiers.",
+        "type": "boolean"
+       },
+       "root_handle": {
+        "description": "Raw-dump scope alone; slice-group override root with group_handle.",
+        "type": "string"
+       },
+       "sort_by": {
+        "description": "Presentation sort axis: 'created' | 'modified'; 'none' forces document order. Omitted on a group scope: the slice group's saved default sort is inherited. A timestamp sort_by is also the default recency basis for an item-count 'newest' selection when recent_by is omitted.",
+        "enum": [
+         "none",
+         "created",
+         "modified"
+        ],
+        "type": "string"
+       },
+       "sort_direction": {
+        "description": "Presentation order only: 'asc' (default) = oldest first, 'desc' = newest first. It NEVER changes which items a recency selection (recent) chose -- selection and order are independent. Requires an explicit timestamp sort_by ('created'|'modified'): a direction with no sort basis is refused loudly (sort_direction_without_sort_by) -- even when a slice group's saved default sort would supply one (the guard checks the raw call params; pass sort_by explicitly). A recency selection never needs it.",
+        "enum": [
+         "asc",
+         "desc"
+        ],
+        "type": "string"
+       },
+       "target_tab": {
+        "type": "string"
+       }
+      },
+      "type": "object"
+     },
+     "related": [
+      "slice_group.render",
+      "lightning_rod.render_search"
+     ],
+     "returns": {
+      "description": "Successful results preserve the established GLIMPSE-family contract: raw Markdown/text strings, structured full/UUID results, modal acknowledgements, or artifact summaries. Scope truth table: neither group_handle nor root_handle = live DOM; root_handle only = raw dump; group_handle only = persisted slice group at its saved root; both = the group lens at an override root. render_spec='modal' reads and exactly re-projects the dock, including frozen DOM captures; a render-spec object is the paste fallback. push_to_modal writes a server-side scope into the dock, the dual of modal readback: honored for explicit scopes AND for a render_spec blob (routed through the same push funnel; the blob's focus is dropped), invalid for a bare live-DOM call, and refused with an actionable error for render_spec='modal' (cross-tab read-then-push copy is a pending feature). recent (most-recent selection; legacy tail/since accepted) takes 'last N' | 'newest N' (the N NEWEST leaves by recent_by -- the sort_by axis when it is a timestamp, else 'modified' -- whatever the direction), 'bottom N' (the positional tail of the current order), a window like '1w' (measured back from the newest item in scope, not the clock), or 'curated' (requires group_handle and pivots on creation time). sort_direction only orders the selected set (asc = oldest first) and never changes which items were chosen. match_scope selects WHERE a tag search reads tags and applies only to a slice-group scope: 'name' (default) = the trailing tag region of the node name, 'name_and_note' = tags anywhere in name or note. Suppression and postfixes follow the same scope (under 'name' they count only in the trailing tag region; the global never-expand tag is trailing-only under every scope). Omitted sort_by inherits a slice group's saved default; 'none' forces document order. headings_only=true in Markdown mode is the compact UUID harvest. Low-level descend_policy='stop_at_child_anchors' means stop at child Anchor Docks. recursive (default true) is the depth leg of the traversal pair: false on a bare root_handle raw dump renders that root's own heading and note plus each DIRECT child's heading and note, and nothing deeper (child Docks and plain nodes alike; descend_policy is then moot); it is refused loudly for a group_handle scope or a live-DOM render. ancestor_notes (default false) is the U6 teaching flag: chronological renders -- sort_by created/modified in either direction, or ANY recent selection (a date window, 'curated', or an item-count 'last N'/'newest N'/'bottom N') -- suppress ancestor notes automatically (every non-leaf of the final render forest, the root included, renders heading-only; leaf notes print); pass ancestor_notes=true to include them. Renders with no sort and no recent selection always keep ancestor notes -- except a render_lens projection (a render_spec blob carrying lightning mode render_lens), where the connective scaffolding above the lens's input roots renders heading-only by default even in document order and ancestor_notes=true restores it. A legitimately empty result is delivered as the literal string '(empty)', never a bare blank string (the public funnel's empty-output stub)."
+     },
+     "side_effects": [
+      "render",
+      "modal_push",
+      "artifact_write"
+     ],
+     "summary": "Render the live DOM, the docked modal's current view, a known root, or a slice-group scope. Truth table: root_handle alone = raw subtree dump; group_handle alone = curated slice; both = that lens at an override root; neither = live DOM. render_spec='modal' re-projects what the dock shows with no UUIDs. A raw dump rooted AT an Anchor Dock is refused (anchor.dock.peek/render, or allow_anchor_dock=true). A render specification is exactly one entry of an estate; see estate. render_spec also accepts a group name/{group}, {dock}, {node}, {subtree}, {tags,root}, {symbols,root}, the long {ref,kind} alias, or a bare Dock handle ({node} renders that node alone with its note; {subtree} every descendant; see estate for the per-kind default reads). Read slice groups (and also lenses) through the same funnel; 'modal' remains the readback token."
+    },
+    "success": false
+   }
+  },
+  "subtree_parcel": {
+   "type": "str",
+   "value": "# Architecture #arch--expand\n\nArch body\n\n## Resolver\n\nResolver body\n\n## Cache\n\nCache body"
+  },
+  "tags_parcel": {
+   "type": "str",
+   "value": "# Project Root\n\nRoot body\n\n## Architecture #arch--expand\n\nArch body\n\n### Resolver\n\nResolver body\n\n### Cache\n\nCache body"
+  }
+ }
+}

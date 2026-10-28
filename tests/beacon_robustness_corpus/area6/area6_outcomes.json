@@ -1,0 +1,6374 @@
+{
+ "meta": {
+  "schema": "beacon_robustness/u01/area6_freeze@1",
+  "generated_at": "2026-10-19T04:28:08.027186+00:00",
+  "base_rev": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+  "origin": {
+   "fixtures_a6.py": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/fixtures_a6.py",
+    "sha256": "c1547d206bd2d763f62ad2d260a57f81cc8f5e8fc66958c41de121158d513675"
+   },
+   "run_other.py": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/run_other.py",
+    "sha256": "24506b18e7e20190be6a1f3ca16684033e77e9c69477263b340ec65c5ec66d8b"
+   },
+   "out/matrix.json": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/matrix.json",
+    "sha256": "8af85d164c41d5edddc5de16f9b21d9edfbe47cfb9a9e657d55c937952896691"
+   },
+   "out/other.json": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/other.json",
+    "sha256": "e94c11f57e6ce60c63d537d48ba4abea1868f5d57d0bde39101df6f5b6323e1a"
+   },
+   "out/baseline_table.md": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/baseline_table.md",
+    "sha256": "c5963cd2d04db88bcc4e68756307ffa85f9b11ff02658ce8f3a65682a92ea2d3"
+   },
+   "out/corpus.json": {
+    "path": "/mnt/c/tmp/beacon_robustness/area-6/out/corpus.json",
+    "sha256": "0b8d55e942edb6af35ab25103e279da62de16f6222810cdc914e8715a7e44daf"
+   }
+  },
+  "notes": [
+   "inputs are quoted verbatim; no test needs /mnt/c/tmp or git",
+   "matrix 'file_path' strings point at the ORIGINAL scratch run (historical provenance only)",
+   "cur = a345dc7 production normalize_duplicate_ast_beacons_in_file; sp = shared-parser prototype; spg = prototype with guard; see area-6/run_matrix.py (frozen sha256 above)",
+   "run_other.py 'other' rows: alias normalizer (A01-A12), C0 repair (C01-C06), EOF normalise (E01-E08)"
+  ]
+ },
+ "matrix_full": [
+  {
+   "case": "py_01_two_good",
+   "ext": "py",
+   "note": "two good ast blocks on one def (two sessions)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_01_two_good.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: beta@f",
+    "lost_code": [],
+    "good_lost": [
+     "beta@f"
+    ],
+    "ids_before": [
+     "alpha@f",
+     "beta@f",
+     "keep@g"
+    ],
+    "ids_after": [
+     "alpha@f",
+     "keep@g"
+    ],
+    "parsed_after": [
+     [
+      "alpha@f",
+      "ast",
+      4,
+      "First session. | Second session.",
+      "lab-a,lab-b",
+      true
+     ],
+     [
+      "keep@g",
+      "ast",
+      14,
+      "Unrelated.",
+      "lab-k",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,11 +5,5 @@\n #   id=alpha@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First session.,\n-# ]\n-# @beacon[\n-#   id=beta@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second session.,\n+#   comment=First session. | Second session.,\n # ]\n",
+    "changed": true,
+    "sha_after": "a8659915ebae"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: beta@f",
+    "lost_code": [],
+    "good_lost": [
+     "beta@f"
+    ],
+    "ids_before": [
+     "alpha@f",
+     "beta@f",
+     "keep@g"
+    ],
+    "ids_after": [
+     "alpha@f",
+     "keep@g"
+    ],
+    "parsed_after": [
+     [
+      "alpha@f",
+      "ast",
+      4,
+      "First session. | Second session.",
+      "lab-a,lab-b",
+      true
+     ],
+     [
+      "keep@g",
+      "ast",
+      14,
+      "Unrelated.",
+      "lab-k",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,11 +5,5 @@\n #   id=alpha@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First session.,\n-# ]\n-# @beacon[\n-#   id=beta@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second session.,\n+#   comment=First session. | Second session.,\n # ]\n",
+    "changed": true,
+    "sha_after": "a8659915ebae"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: beta@f",
+    "lost_code": [],
+    "good_lost": [
+     "beta@f"
+    ],
+    "ids_before": [
+     "alpha@f",
+     "beta@f",
+     "keep@g"
+    ],
+    "ids_after": [
+     "alpha@f",
+     "keep@g"
+    ],
+    "parsed_after": [
+     [
+      "alpha@f",
+      "ast",
+      4,
+      "First session. | Second session.",
+      "lab-a,lab-b",
+      true
+     ],
+     [
+      "keep@g",
+      "ast",
+      14,
+      "Unrelated.",
+      "lab-k",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,11 +5,5 @@\n #   id=alpha@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First session.,\n-# ]\n-# @beacon[\n-#   id=beta@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second session.,\n+#   comment=First session. | Second session.,\n # ]\n",
+    "changed": true,
+    "sha_after": "a8659915ebae"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_02_numeric_second",
+   "ext": "py",
+   "note": "numeric-suffix id second: survivor = numeric id at first position",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_02_numeric_second.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: auto-beacon@f-x1y2",
+    "lost_code": [],
+    "good_lost": [
+     "auto-beacon@f-x1y2"
+    ],
+    "ids_before": [
+     "auto-beacon@f-x1y2",
+     "carto@000123"
+    ],
+    "ids_after": [
+     "carto@000123"
+    ],
+    "parsed_after": [
+     [
+      "carto@000123",
+      "ast",
+      1,
+      "Agent-made. | Numeric id.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,12 +1,6 @@\n-# @beacon[\n-#   id=auto-beacon@f-x1y2,\n-#   slice_labels=lab-a,\n-#   kind=ast,\n-#   comment=Agent-made.,\n-# ]\n # @beacon[\n #   id=carto@000123,\n-#   slice_labels=lab-b,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Numeric id.,\n+#   comment=Agent-made. | Numeric id.,\n # ]\n",
+    "changed": true,
+    "sha_after": "02d457d86b89"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: auto-beacon@f-x1y2",
+    "lost_code": [],
+    "good_lost": [
+     "auto-beacon@f-x1y2"
+    ],
+    "ids_before": [
+     "auto-beacon@f-x1y2",
+     "carto@000123"
+    ],
+    "ids_after": [
+     "carto@000123"
+    ],
+    "parsed_after": [
+     [
+      "carto@000123",
+      "ast",
+      1,
+      "Agent-made. | Numeric id.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,12 +1,6 @@\n-# @beacon[\n-#   id=auto-beacon@f-x1y2,\n-#   slice_labels=lab-a,\n-#   kind=ast,\n-#   comment=Agent-made.,\n-# ]\n # @beacon[\n #   id=carto@000123,\n-#   slice_labels=lab-b,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Numeric id.,\n+#   comment=Agent-made. | Numeric id.,\n # ]\n",
+    "changed": true,
+    "sha_after": "02d457d86b89"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: auto-beacon@f-x1y2",
+    "lost_code": [],
+    "good_lost": [
+     "auto-beacon@f-x1y2"
+    ],
+    "ids_before": [
+     "auto-beacon@f-x1y2",
+     "carto@000123"
+    ],
+    "ids_after": [
+     "carto@000123"
+    ],
+    "parsed_after": [
+     [
+      "carto@000123",
+      "ast",
+      1,
+      "Agent-made. | Numeric id.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,12 +1,6 @@\n-# @beacon[\n-#   id=auto-beacon@f-x1y2,\n-#   slice_labels=lab-a,\n-#   kind=ast,\n-#   comment=Agent-made.,\n-# ]\n # @beacon[\n #   id=carto@000123,\n-#   slice_labels=lab-b,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Numeric id.,\n+#   comment=Agent-made. | Numeric id.,\n # ]\n",
+    "changed": true,
+    "sha_after": "02d457d86b89"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_03_numeric_both",
+   "ext": "py",
+   "note": "two numeric ids: first numeric wins",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_03_numeric_both.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: y@002",
+    "lost_code": [],
+    "good_lost": [
+     "y@002"
+    ],
+    "ids_before": [
+     "x@001",
+     "y@002"
+    ],
+    "ids_after": [
+     "x@001"
+    ],
+    "parsed_after": [
+     [
+      "x@001",
+      "ast",
+      1,
+      null,
+      "lab-x,lab-y",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,8 +2,3 @@\n #   id=x@001,\n-#   slice_labels=lab-x,\n-#   kind=ast,\n-# ]\n-# @beacon[\n-#   id=y@002,\n-#   slice_labels=lab-y,\n+#   slice_labels=lab-x,lab-y,\n #   kind=ast,\n",
+    "changed": true,
+    "sha_after": "9e68ecf01efe"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: y@002",
+    "lost_code": [],
+    "good_lost": [
+     "y@002"
+    ],
+    "ids_before": [
+     "x@001",
+     "y@002"
+    ],
+    "ids_after": [
+     "x@001"
+    ],
+    "parsed_after": [
+     [
+      "x@001",
+      "ast",
+      1,
+      null,
+      "lab-x,lab-y",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,8 +2,3 @@\n #   id=x@001,\n-#   slice_labels=lab-x,\n-#   kind=ast,\n-# ]\n-# @beacon[\n-#   id=y@002,\n-#   slice_labels=lab-y,\n+#   slice_labels=lab-x,lab-y,\n #   kind=ast,\n",
+    "changed": true,
+    "sha_after": "9e68ecf01efe"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: y@002",
+    "lost_code": [],
+    "good_lost": [
+     "y@002"
+    ],
+    "ids_before": [
+     "x@001",
+     "y@002"
+    ],
+    "ids_after": [
+     "x@001"
+    ],
+    "parsed_after": [
+     [
+      "x@001",
+      "ast",
+      1,
+      null,
+      "lab-x,lab-y",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,8 +2,3 @@\n #   id=x@001,\n-#   slice_labels=lab-x,\n-#   kind=ast,\n-# ]\n-# @beacon[\n-#   id=y@002,\n-#   slice_labels=lab-y,\n+#   slice_labels=lab-x,lab-y,\n #   kind=ast,\n",
+    "changed": true,
+    "sha_after": "9e68ecf01efe"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_04_span_over_ast",
+   "ext": "py",
+   "note": "stacked span + ast on one def",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_04_span_over_ast.cur.py",
+     "kind": "python"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "s@f",
+     "a@f"
+    ],
+    "ids_after": [
+     "s@f",
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "s@f",
+      "span",
+      1,
+      "Span starts here.",
+      "lab-s",
+      true
+     ],
+     [
+      "a@f",
+      "ast",
+      7,
+      "Ast on f.",
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "95d20bfc21ff"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "s@f",
+     "a@f"
+    ],
+    "ids_after": [
+     "s@f",
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "s@f",
+      "span",
+      1,
+      "Span starts here.",
+      "lab-s",
+      true
+     ],
+     [
+      "a@f",
+      "ast",
+      7,
+      "Ast on f.",
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "95d20bfc21ff"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "s@f",
+     "a@f"
+    ],
+    "ids_after": [
+     "s@f",
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "s@f",
+      "span",
+      1,
+      "Span starts here.",
+      "lab-s",
+      true
+     ],
+     [
+      "a@f",
+      "ast",
+      7,
+      "Ast on f.",
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "95d20bfc21ff"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_05_ast_over_span",
+   "ext": "py",
+   "note": "stacked ast + span on one def (span between ast and def)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_05_ast_over_span.cur.py",
+     "kind": "python"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@f",
+     "s@f"
+    ],
+    "ids_after": [
+     "a@f",
+     "s@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Ast on f.",
+      "lab-a",
+      true
+     ],
+     [
+      "s@f",
+      "span",
+      7,
+      "Span starts here.",
+      "lab-s",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "dd02343cfed4"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@f",
+     "s@f"
+    ],
+    "ids_after": [
+     "a@f",
+     "s@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Ast on f.",
+      "lab-a",
+      true
+     ],
+     [
+      "s@f",
+      "span",
+      7,
+      "Span starts here.",
+      "lab-s",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "dd02343cfed4"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@f",
+     "s@f"
+    ],
+    "ids_after": [
+     "a@f",
+     "s@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Ast on f.",
+      "lab-a",
+      true
+     ],
+     [
+      "s@f",
+      "span",
+      7,
+      "Span starts here.",
+      "lab-s",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "dd02343cfed4"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_06_F2_lost_bracket",
+   "ext": "py",
+   "note": "F2: lost ] + ]-led code line + good block",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_06_F2_lost_bracket.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "CODE/PROSE DELETED; GOOD ID LOST: good@g",
+    "lost_code": [
+     "PRECIOUS = [",
+     "    \"a\",",
+     "    \"b\",",
+     "]"
+    ],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "lost@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "lost@0"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      1,
+      "Lost its bracket., PRECIOUS = [ \"a\", \"b\" | Good block.",
+      "lab-lost,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,14 +2,5 @@\n #   id=lost@0,\n-#   slice_labels=lab-lost,\n+#   slice_labels=lab-lost,lab-good,\n #   kind=ast,\n-#   comment=Lost its bracket.,\n-PRECIOUS = [\n-    \"a\",\n-    \"b\",\n-]\n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n+#   comment=Lost its bracket., PRECIOUS = [ \"a\", \"b\" | Good block.,\n # ]\n",
+    "changed": true,
+    "sha_after": "8c53fb7ff949"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "CODE/PROSE DELETED; GOOD ID LOST: good@g",
+    "lost_code": [
+     "PRECIOUS = [",
+     "    \"a\",",
+     "    \"b\",",
+     "]"
+    ],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "lost@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "lost@0"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      1,
+      "Lost its bracket., PRECIOUS = [ \"a\", \"b\" | Good block.",
+      "lab-lost,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,14 +2,5 @@\n #   id=lost@0,\n-#   slice_labels=lab-lost,\n+#   slice_labels=lab-lost,lab-good,\n #   kind=ast,\n-#   comment=Lost its bracket.,\n-PRECIOUS = [\n-    \"a\",\n-    \"b\",\n-]\n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n+#   comment=Lost its bracket., PRECIOUS = [ \"a\", \"b\" | Good block.,\n # ]\n",
+    "changed": true,
+    "sha_after": "8c53fb7ff949"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       1,
+       "non-comment line 6 inside block extent"
+      ],
+      [
+       16,
+       "group skipped: a member is structurally broken"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "lost@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "lost@0",
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      1,
+      "Lost its bracket., PRECIOUS = [ \"a\", \"b\"",
+      "lab-lost",
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      10,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "9d0cc408913a"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "py_07_lost_bracket_no_code_bracket",
+   "ext": "py",
+   "note": "lost ] with no ]-led code line: swallows next block, no merge",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_07_lost_bracket_no_code_bracket.cur.py",
+     "kind": "python"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@g"
+    ],
+    "ids_after": [
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      "good@g",
+      "ast",
+      1,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "4e844591880c"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@g"
+    ],
+    "ids_after": [
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      "good@g",
+      "ast",
+      1,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "4e844591880c"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       1,
+       "non-comment line 6 inside block extent"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@g"
+    ],
+    "ids_after": [
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      "good@g",
+      "ast",
+      1,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "4e844591880c"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_08_idless_opener",
+   "ext": "py",
+   "note": "id-less opener above a good block (c07)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_08_idless_opener.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     ""
+    ],
+    "parsed_after": [
+     [
+      "",
+      "ast",
+      1,
+      "No id here. | Good block.",
+      "lab-noid,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,13 +1,8 @@\n # @beacon[\n-#   slice_labels=lab-noid,\n+#   id=,\n+#   slice_labels=lab-noid,lab-good,\n #   kind=ast,\n-#   comment=No id here.,\n+#   comment=No id here. | Good block.,\n # ]\n \n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n-# ]\n def g():\n",
+    "changed": true,
+    "sha_after": "af3893e452a8"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     null,
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      null,
+      "ast",
+      1,
+      "No id here.",
+      "lab-noid",
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      7,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "044b3467cf90"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       1,
+       "no_id"
+      ],
+      [
+       13,
+       "group skipped: a member is structurally broken"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     null,
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      null,
+      "ast",
+      1,
+      "No id here.",
+      "lab-noid",
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      7,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "044b3467cf90"
+   },
+   "sp_same_as_cur": false,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "py_09_nested_opener",
+   "ext": "py",
+   "note": "nested opener above a good block (c06)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_09_nested_opener.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "inner@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "inner@0"
+    ],
+    "parsed_after": [
+     [
+      "inner@0",
+      "ast",
+      1,
+      "Inner opener. | Good block.",
+      "lab-inner,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,19 +1,8 @@\n-# @beacon[\n-#   id=outer@0,\n-#   slice_labels=lab-outer,\n-#   kind=ast,\n-#   comment=Outer opener.,\n # @beacon[\n #   id=inner@0,\n-#   slice_labels=lab-inner,\n+#   slice_labels=lab-inner,lab-good,\n #   kind=ast,\n-#   comment=Inner opener.,\n+#   comment=Inner opener. | Good block.,\n # ]\n \n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n-# ]\n def g():\n",
+    "changed": true,
+    "sha_after": "f42bba1df7ac"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "inner@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "inner@0"
+    ],
+    "parsed_after": [
+     [
+      "inner@0",
+      "ast",
+      1,
+      "Inner opener. | Good block.",
+      "lab-inner,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,19 +1,8 @@\n-# @beacon[\n-#   id=outer@0,\n-#   slice_labels=lab-outer,\n-#   kind=ast,\n-#   comment=Outer opener.,\n # @beacon[\n #   id=inner@0,\n-#   slice_labels=lab-inner,\n+#   slice_labels=lab-inner,lab-good,\n #   kind=ast,\n-#   comment=Inner opener.,\n+#   comment=Inner opener. | Good block.,\n # ]\n \n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n-# ]\n def g():\n",
+    "changed": true,
+    "sha_after": "f42bba1df7ac"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "inner@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "inner@0"
+    ],
+    "parsed_after": [
+     [
+      "inner@0",
+      "ast",
+      1,
+      "Inner opener. | Good block.",
+      "lab-inner,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,19 +1,8 @@\n-# @beacon[\n-#   id=outer@0,\n-#   slice_labels=lab-outer,\n-#   kind=ast,\n-#   comment=Outer opener.,\n # @beacon[\n #   id=inner@0,\n-#   slice_labels=lab-inner,\n+#   slice_labels=lab-inner,lab-good,\n #   kind=ast,\n-#   comment=Inner opener.,\n+#   comment=Inner opener. | Good block.,\n # ]\n \n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n-# ]\n def g():\n",
+    "changed": true,
+    "sha_after": "f42bba1df7ac"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_10_junk_opener",
+   "ext": "py",
+   "note": "junk opener (trailing text) above a good block (c16)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_10_junk_opener.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "junk@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "junk@0"
+    ],
+    "parsed_after": [
+     [
+      "junk@0",
+      "ast",
+      1,
+      "Good block.",
+      "lab-junk,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,10 +1,4 @@\n-# @beacon[ junk after opener\n+# @beacon[\n #   id=junk@0,\n-#   slice_labels=lab-junk,\n-#   kind=ast,\n-# ]\n-\n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n+#   slice_labels=lab-junk,lab-good,\n #   kind=ast,\n@@ -12,2 +6,3 @@\n # ]\n+\n def g():\n",
+    "changed": true,
+    "sha_after": "9f6eee28146b"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "junk@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "junk@0"
+    ],
+    "parsed_after": [
+     [
+      "junk@0",
+      "ast",
+      1,
+      "Good block.",
+      "lab-junk,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,10 +1,4 @@\n-# @beacon[ junk after opener\n+# @beacon[\n #   id=junk@0,\n-#   slice_labels=lab-junk,\n-#   kind=ast,\n-# ]\n-\n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n+#   slice_labels=lab-junk,lab-good,\n #   kind=ast,\n@@ -12,2 +6,3 @@\n # ]\n+\n def g():\n",
+    "changed": true,
+    "sha_after": "9f6eee28146b"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "junk@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "junk@0"
+    ],
+    "parsed_after": [
+     [
+      "junk@0",
+      "ast",
+      1,
+      "Good block.",
+      "lab-junk,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,10 +1,4 @@\n-# @beacon[ junk after opener\n+# @beacon[\n #   id=junk@0,\n-#   slice_labels=lab-junk,\n-#   kind=ast,\n-# ]\n-\n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n+#   slice_labels=lab-junk,lab-good,\n #   kind=ast,\n@@ -12,2 +6,3 @@\n # ]\n+\n def g():\n",
+    "changed": true,
+    "sha_after": "9f6eee28146b"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_11_docstring_two_examples",
+   "ext": "py",
+   "note": "two stacked example blocks inside a docstring (block inside a string)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_11_docstring_two_examples.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "real@h",
+     "ex1@0",
+     "ex2@0"
+    ],
+    "ids_after": [
+     "real@h",
+     "ex1@0"
+    ],
+    "parsed_after": [
+     [
+      "real@h",
+      "ast",
+      1,
+      "Real block.",
+      "lab-real",
+      true
+     ],
+     [
+      "ex1@0",
+      "ast",
+      10,
+      null,
+      "lab-ex1,lab-ex2",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -11,8 +11,3 @@\n     #   id=ex1@0,\n-    #   slice_labels=lab-ex1,\n-    #   kind=ast,\n-    # ]\n-    # @beacon[\n-    #   id=ex2@0,\n-    #   slice_labels=lab-ex2,\n+    #   slice_labels=lab-ex1,lab-ex2,\n     #   kind=ast,\n",
+    "changed": true,
+    "sha_after": "c49869ace022"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "real@h",
+     "ex1@0",
+     "ex2@0"
+    ],
+    "ids_after": [
+     "real@h",
+     "ex1@0"
+    ],
+    "parsed_after": [
+     [
+      "real@h",
+      "ast",
+      1,
+      "Real block.",
+      "lab-real",
+      true
+     ],
+     [
+      "ex1@0",
+      "ast",
+      10,
+      null,
+      "lab-ex1,lab-ex2",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -11,8 +11,3 @@\n     #   id=ex1@0,\n-    #   slice_labels=lab-ex1,\n-    #   kind=ast,\n-    # ]\n-    # @beacon[\n-    #   id=ex2@0,\n-    #   slice_labels=lab-ex2,\n+    #   slice_labels=lab-ex1,lab-ex2,\n     #   kind=ast,\n",
+    "changed": true,
+    "sha_after": "c49869ace022"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "real@h",
+     "ex1@0",
+     "ex2@0"
+    ],
+    "ids_after": [
+     "real@h",
+     "ex1@0"
+    ],
+    "parsed_after": [
+     [
+      "real@h",
+      "ast",
+      1,
+      "Real block.",
+      "lab-real",
+      true
+     ],
+     [
+      "ex1@0",
+      "ast",
+      10,
+      null,
+      "lab-ex1,lab-ex2",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -11,8 +11,3 @@\n     #   id=ex1@0,\n-    #   slice_labels=lab-ex1,\n-    #   kind=ast,\n-    # ]\n-    # @beacon[\n-    #   id=ex2@0,\n-    #   slice_labels=lab-ex2,\n+    #   slice_labels=lab-ex1,lab-ex2,\n     #   kind=ast,\n",
+    "changed": true,
+    "sha_after": "c49869ace022"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_12_test_fixture_string",
+   "ext": "py",
+   "note": "test fixture string with two stacked blocks (tests/ are mapped)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_12_test_fixture_string.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "first",
+     "second"
+    ],
+    "ids_after": [
+     "first"
+    ],
+    "parsed_after": [
+     [
+      "first",
+      "ast",
+      2,
+      "legacy alias | canonical second",
+      "alpha,beta",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n #   id=first,\n-#   slice_labels=alpha,\n+#   slice_labels=alpha,beta,\n #   kind=ast,\n-#   comment=legacy alias,\n-# ]\n-# @beacon[\n-#   id=second,\n-#   slice_labels=beta,\n-#   kind=ast,\n-#   comment=canonical second,\n+#   comment=legacy alias | canonical second,\n # ]\n",
+    "changed": true,
+    "sha_after": "48f757943dad"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "first",
+     "second"
+    ],
+    "ids_after": [
+     "first"
+    ],
+    "parsed_after": [
+     [
+      "first",
+      "ast",
+      2,
+      "legacy alias | canonical second",
+      "alpha,beta",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n #   id=first,\n-#   slice_labels=alpha,\n+#   slice_labels=alpha,beta,\n #   kind=ast,\n-#   comment=legacy alias,\n-# ]\n-# @beacon[\n-#   id=second,\n-#   slice_labels=beta,\n-#   kind=ast,\n-#   comment=canonical second,\n+#   comment=legacy alias | canonical second,\n # ]\n",
+    "changed": true,
+    "sha_after": "48f757943dad"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "first",
+     "second"
+    ],
+    "ids_after": [
+     "first"
+    ],
+    "parsed_after": [
+     [
+      "first",
+      "ast",
+      2,
+      "legacy alias | canonical second",
+      "alpha,beta",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n #   id=first,\n-#   slice_labels=alpha,\n+#   slice_labels=alpha,beta,\n #   kind=ast,\n-#   comment=legacy alias,\n-# ]\n-# @beacon[\n-#   id=second,\n-#   slice_labels=beta,\n-#   kind=ast,\n-#   comment=canonical second,\n+#   comment=legacy alias | canonical second,\n # ]\n",
+    "changed": true,
+    "sha_after": "48f757943dad"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_13_unterminated_after_good",
+   "ext": "py",
+   "note": "good block then an unterminated block (no ] to EOF) on the same def",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_13_unterminated_after_good.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: good@f",
+    "lost_code": [],
+    "good_lost": [
+     "good@f"
+    ],
+    "ids_before": [
+     "good@f",
+     "unterm@0"
+    ],
+    "ids_after": [
+     "unterm@0"
+    ],
+    "parsed_after": [
+     [
+      "unterm@0",
+      "ast",
+      1,
+      "Good block. | Never closed., def f(): return 1 def g():",
+      "lab-good,lab-unterm",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,8 +1,7 @@\n # @beacon[\n-#   id=good@f,\n-#   slice_labels=lab-good,\n+#   id=unterm@0,\n+#   slice_labels=lab-good,lab-unterm,\n #   kind=ast,\n-#   comment=Good block.,\n+#   comment=Good block. | Never closed., def f(): return 1 def g():,\n # ]\n-# @beacon[\n #   id=unterm@0,\n",
+    "changed": true,
+    "sha_after": "dbb1ff1f5ee9"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@f",
+    "lost_code": [],
+    "good_lost": [
+     "good@f"
+    ],
+    "ids_before": [
+     "good@f",
+     "unterm@0"
+    ],
+    "ids_after": [
+     "unterm@0"
+    ],
+    "parsed_after": [
+     [
+      "unterm@0",
+      "ast",
+      1,
+      "Good block. | Never closed., def f(): return 1 def g():",
+      "lab-good,lab-unterm",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,8 +1,7 @@\n # @beacon[\n-#   id=good@f,\n-#   slice_labels=lab-good,\n+#   id=unterm@0,\n+#   slice_labels=lab-good,lab-unterm,\n #   kind=ast,\n-#   comment=Good block.,\n+#   comment=Good block. | Never closed., def f(): return 1 def g():,\n # ]\n-# @beacon[\n #   id=unterm@0,\n",
+    "changed": true,
+    "sha_after": "dbb1ff1f5ee9"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       7,
+       "unterminated"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@f",
+     "unterm@0"
+    ],
+    "ids_after": [
+     "good@f",
+     "unterm@0"
+    ],
+    "parsed_after": [
+     [
+      "good@f",
+      "ast",
+      1,
+      "Good block.",
+      "lab-good",
+      true
+     ],
+     [
+      "unterm@0",
+      "ast",
+      7,
+      "Never closed., def f(): return 1 def g():",
+      "lab-unterm",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "19b3a3a4ed2e"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "py_14_multiline_showspan",
+   "ext": "py",
+   "note": "multi-line comment + show_span on one of two blocks",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_14_multiline_showspan.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "A long comment that wraps onto a second line | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,13 +2,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   show_span=true,\n-#   comment=A long comment that wraps\n-#     onto a second line,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=A long comment that wraps onto a second line | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "4363ab1ba8aa"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "A long comment that wraps onto a second line | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,13 +2,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   show_span=true,\n-#   comment=A long comment that wraps\n-#     onto a second line,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=A long comment that wraps onto a second line | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "4363ab1ba8aa"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "A long comment that wraps onto a second line | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,13 +2,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   show_span=true,\n-#   comment=A long comment that wraps\n-#     onto a second line,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=A long comment that wraps onto a second line | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "4363ab1ba8aa"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_15_detached_indented",
+   "ext": "py",
+   "note": "an indented block left at the end of f's body + good block on g",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_15_detached_indented.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "stray@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "stray@0"
+    ],
+    "parsed_after": [
+     [
+      "stray@0",
+      "ast",
+      4,
+      "Left behind at the end of f. | Good block.",
+      "lab-stray,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,5 +5,5 @@\n     #   id=stray@0,\n-    #   slice_labels=lab-stray,\n+    #   slice_labels=lab-stray,lab-good,\n     #   kind=ast,\n-    #   comment=Left behind at the end of f.,\n+    #   comment=Left behind at the end of f. | Good block.,\n     # ]\n@@ -11,8 +11,2 @@\n \n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n-# ]\n def g():\n",
+    "changed": true,
+    "sha_after": "a96bf17d9caa"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "stray@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "stray@0"
+    ],
+    "parsed_after": [
+     [
+      "stray@0",
+      "ast",
+      4,
+      "Left behind at the end of f. | Good block.",
+      "lab-stray,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,5 +5,5 @@\n     #   id=stray@0,\n-    #   slice_labels=lab-stray,\n+    #   slice_labels=lab-stray,lab-good,\n     #   kind=ast,\n-    #   comment=Left behind at the end of f.,\n+    #   comment=Left behind at the end of f. | Good block.,\n     # ]\n@@ -11,8 +11,2 @@\n \n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n-# ]\n def g():\n",
+    "changed": true,
+    "sha_after": "a96bf17d9caa"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "stray@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "stray@0"
+    ],
+    "parsed_after": [
+     [
+      "stray@0",
+      "ast",
+      4,
+      "Left behind at the end of f. | Good block.",
+      "lab-stray,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,5 +5,5 @@\n     #   id=stray@0,\n-    #   slice_labels=lab-stray,\n+    #   slice_labels=lab-stray,lab-good,\n     #   kind=ast,\n-    #   comment=Left behind at the end of f.,\n+    #   comment=Left behind at the end of f. | Good block.,\n     # ]\n@@ -11,8 +11,2 @@\n \n-# @beacon[\n-#   id=good@g,\n-#   slice_labels=lab-good,\n-#   kind=ast,\n-#   comment=Good block.,\n-# ]\n def g():\n",
+    "changed": true,
+    "sha_after": "a96bf17d9caa"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_16_method_two_blocks",
+   "ext": "py",
+   "note": "two blocks on one method (indented)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_16_method_two_blocks.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@C.m",
+    "lost_code": [],
+    "good_lost": [
+     "b@C.m"
+    ],
+    "ids_before": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n     #   id=a@C.m,\n-    #   slice_labels=lab-a,\n+    #   slice_labels=lab-a,lab-b,\n     #   kind=ast,\n-    #   comment=First.,\n-    # ]\n-    # @beacon[\n-    #   id=b@C.m,\n-    #   slice_labels=lab-b,\n-    #   kind=ast,\n-    #   comment=Second.,\n+    #   comment=First. | Second.,\n     # ]\n",
+    "changed": true,
+    "sha_after": "c20025e8df94"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@C.m",
+    "lost_code": [],
+    "good_lost": [
+     "b@C.m"
+    ],
+    "ids_before": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n     #   id=a@C.m,\n-    #   slice_labels=lab-a,\n+    #   slice_labels=lab-a,lab-b,\n     #   kind=ast,\n-    #   comment=First.,\n-    # ]\n-    # @beacon[\n-    #   id=b@C.m,\n-    #   slice_labels=lab-b,\n-    #   kind=ast,\n-    #   comment=Second.,\n+    #   comment=First. | Second.,\n     # ]\n",
+    "changed": true,
+    "sha_after": "c20025e8df94"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@C.m",
+    "lost_code": [],
+    "good_lost": [
+     "b@C.m"
+    ],
+    "ids_before": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n     #   id=a@C.m,\n-    #   slice_labels=lab-a,\n+    #   slice_labels=lab-a,lab-b,\n     #   kind=ast,\n-    #   comment=First.,\n-    # ]\n-    # @beacon[\n-    #   id=b@C.m,\n-    #   slice_labels=lab-b,\n-    #   kind=ast,\n-    #   comment=Second.,\n+    #   comment=First. | Second.,\n     # ]\n",
+    "changed": true,
+    "sha_after": "c20025e8df94"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_17_crlf_two_good",
+   "ext": "py",
+   "note": "CRLF file with two good blocks",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_17_crlf_two_good.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f; LINE ENDINGS CHANGED (CR 19->0)",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 19,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First.,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=First. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "97feaa94ce6f"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f; LINE ENDINGS CHANGED (CR 19->0)",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 19,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First.,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=First. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "97feaa94ce6f"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f; LINE ENDINGS CHANGED (CR 19->0)",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 19,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,11 +3,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First.,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=First. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "97feaa94ce6f"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_18_multiline_decorator",
+   "ext": "py",
+   "note": "two blocks on one decorated def, multi-line decorator between",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_18_multiline_decorator.cur.py",
+     "kind": "python"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f",
+     "b@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Above decorator.",
+      "lab-a",
+      true
+     ],
+     [
+      "b@f",
+      "ast",
+      10,
+      "Between decorator and def.",
+      "lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "128d014e0bef"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f",
+     "b@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Above decorator.",
+      "lab-a",
+      true
+     ],
+     [
+      "b@f",
+      "ast",
+      10,
+      "Between decorator and def.",
+      "lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "128d014e0bef"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f",
+     "b@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Above decorator.",
+      "lab-a",
+      true
+     ],
+     [
+      "b@f",
+      "ast",
+      10,
+      "Between decorator and def.",
+      "lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "128d014e0bef"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_19_three_blocks",
+   "ext": "py",
+   "note": "three blocks (comment and blank between); identical comments dedupe",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_19_three_blocks.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 2
+    },
+    "cls": "GOOD ID LOST: b@f,c@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f",
+     "c@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f",
+     "c@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "One. | Three.",
+      "lab-a,shared,lab-b,lab-c",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,20 +2,8 @@\n #   id=a@f,\n-#   slice_labels=lab-a,shared,\n+#   slice_labels=lab-a,shared,lab-b,lab-c,\n #   kind=ast,\n-#   comment=One.,\n+#   comment=One. | Three.,\n # ]\n # an ordinary comment between\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,shared,\n-#   kind=ast,\n-#   comment=One.,\n-# ]\n \n-# @beacon[\n-#   id=c@f,\n-#   slice_labels=lab-c,\n-#   kind=ast,\n-#   comment=Three.,\n-# ]\n def f():\n",
+    "changed": true,
+    "sha_after": "365c1d9e906b"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f,c@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f",
+     "c@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f",
+     "c@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "One. | Three.",
+      "lab-a,shared,lab-b,lab-c",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,20 +2,8 @@\n #   id=a@f,\n-#   slice_labels=lab-a,shared,\n+#   slice_labels=lab-a,shared,lab-b,lab-c,\n #   kind=ast,\n-#   comment=One.,\n+#   comment=One. | Three.,\n # ]\n # an ordinary comment between\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,shared,\n-#   kind=ast,\n-#   comment=One.,\n-# ]\n \n-# @beacon[\n-#   id=c@f,\n-#   slice_labels=lab-c,\n-#   kind=ast,\n-#   comment=Three.,\n-# ]\n def f():\n",
+    "changed": true,
+    "sha_after": "365c1d9e906b"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f,c@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f",
+     "c@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f",
+     "c@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "One. | Three.",
+      "lab-a,shared,lab-b,lab-c",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,20 +2,8 @@\n #   id=a@f,\n-#   slice_labels=lab-a,shared,\n+#   slice_labels=lab-a,shared,lab-b,lab-c,\n #   kind=ast,\n-#   comment=One.,\n+#   comment=One. | Three.,\n # ]\n # an ordinary comment between\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,shared,\n-#   kind=ast,\n-#   comment=One.,\n-# ]\n \n-# @beacon[\n-#   id=c@f,\n-#   slice_labels=lab-c,\n-#   kind=ast,\n-#   comment=Three.,\n-# ]\n def f():\n",
+    "changed": true,
+    "sha_after": "365c1d9e906b"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_20_double_hash_comments",
+   "ext": "py",
+   "note": "## opener with comments= (alias missed): merge drops the comments= text",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_20_double_hash_comments.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,10 +1,4 @@\n-##  @beacon[\n-##   id=a@f,\n-##   slice_labels=lab-a,\n-##   kind=ast,\n-##   comments=Typed with the alias.,\n-## ]\n # @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n+#   id=a@f,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n",
+    "changed": true,
+    "sha_after": "9b8809510a8d"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Typed with the alias. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,12 +1,6 @@\n-##  @beacon[\n-##   id=a@f,\n-##   slice_labels=lab-a,\n-##   kind=ast,\n-##   comments=Typed with the alias.,\n-## ]\n # @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n+#   id=a@f,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Second.,\n+#   comment=Typed with the alias. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "b515f9bda11b"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Typed with the alias. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,12 +1,6 @@\n-##  @beacon[\n-##   id=a@f,\n-##   slice_labels=lab-a,\n-##   kind=ast,\n-##   comments=Typed with the alias.,\n-## ]\n # @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n+#   id=a@f,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Second.,\n+#   comment=Typed with the alias. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "b515f9bda11b"
+   },
+   "sp_same_as_cur": false,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "py_21_formfeed",
+   "ext": "py",
+   "note": "form feed in source: readlines vs splitlines line models diverge",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_21_formfeed.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      6,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -7,11 +7,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First.,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=First. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "f83b7827c83f"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      6,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -7,11 +7,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First.,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=First. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "f83b7827c83f"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      6,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -7,11 +7,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=First.,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=First. | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "f83b7827c83f"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_22_comment_continuation_key",
+   "ext": "py",
+   "note": "wrapped comment whose continuation line starts 'comments ='",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_22_comment_continuation_key.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "This explains the | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,12 +2,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=This explains the\n-#   comments = table layout,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=This explains the | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "a4d111c5e7c0"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "This explains the | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,12 +2,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=This explains the\n-#   comments = table layout,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=This explains the | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "a4d111c5e7c0"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "This explains the | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,12 +2,5 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=This explains the\n-#   comments = table layout,\n-# ]\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Second.,\n+#   comment=This explains the | Second.,\n # ]\n",
+    "changed": true,
+    "sha_after": "a4d111c5e7c0"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "js_01_two_good",
+   "ext": "js",
+   "note": "two good // blocks on one function",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_01_two_good.cur.js",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: beta@f",
+    "lost_code": [],
+    "good_lost": [
+     "beta@f"
+    ],
+    "ids_before": [
+     "alpha@f",
+     "beta@f"
+    ],
+    "ids_after": [
+     "alpha@f"
+    ],
+    "parsed_after": [
+     [
+      "alpha@f",
+      "ast",
+      1,
+      "First session. | Second session.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,11 +2,5 @@\n //   id=alpha@f,\n-//   slice_labels=lab-a,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n-//   comment=First session.,\n-// ]\n-// @beacon[\n-//   id=beta@f,\n-//   slice_labels=lab-b,\n-//   kind=ast,\n-//   comment=Second session.,\n+//   comment=First session. | Second session.,\n // ]\n",
+    "changed": true,
+    "sha_after": "bb827d14c484"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: beta@f",
+    "lost_code": [],
+    "good_lost": [
+     "beta@f"
+    ],
+    "ids_before": [
+     "alpha@f",
+     "beta@f"
+    ],
+    "ids_after": [
+     "alpha@f"
+    ],
+    "parsed_after": [
+     [
+      "alpha@f",
+      "ast",
+      1,
+      "First session. | Second session.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,11 +2,5 @@\n //   id=alpha@f,\n-//   slice_labels=lab-a,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n-//   comment=First session.,\n-// ]\n-// @beacon[\n-//   id=beta@f,\n-//   slice_labels=lab-b,\n-//   kind=ast,\n-//   comment=Second session.,\n+//   comment=First session. | Second session.,\n // ]\n",
+    "changed": true,
+    "sha_after": "bb827d14c484"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: beta@f",
+    "lost_code": [],
+    "good_lost": [
+     "beta@f"
+    ],
+    "ids_before": [
+     "alpha@f",
+     "beta@f"
+    ],
+    "ids_after": [
+     "alpha@f"
+    ],
+    "parsed_after": [
+     [
+      "alpha@f",
+      "ast",
+      1,
+      "First session. | Second session.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,11 +2,5 @@\n //   id=alpha@f,\n-//   slice_labels=lab-a,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n-//   comment=First session.,\n-// ]\n-// @beacon[\n-//   id=beta@f,\n-//   slice_labels=lab-b,\n-//   kind=ast,\n-//   comment=Second session.,\n+//   comment=First session. | Second session.,\n // ]\n",
+    "changed": true,
+    "sha_after": "bb827d14c484"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "js_02_F2_lost_bracket",
+   "ext": "js",
+   "note": "F2 in JS: lost ] + ];-led code line + good block",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_02_F2_lost_bracket.cur.js",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "CODE/PROSE DELETED; GOOD ID LOST: good@g",
+    "lost_code": [
+     "const PRECIOUS = [",
+     "  \"a\",",
+     "];"
+    ],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "lost@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "lost@0"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      1,
+      "Lost its bracket., const PRECIOUS = [ \"a\" | Good block.",
+      "lab-lost,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,13 +2,5 @@\n //   id=lost@0,\n-//   slice_labels=lab-lost,\n+//   slice_labels=lab-lost,lab-good,\n //   kind=ast,\n-//   comment=Lost its bracket.,\n-const PRECIOUS = [\n-  \"a\",\n-];\n-// @beacon[\n-//   id=good@g,\n-//   slice_labels=lab-good,\n-//   kind=ast,\n-//   comment=Good block.,\n+//   comment=Lost its bracket., const PRECIOUS = [ \"a\" | Good block.,\n // ]\n",
+    "changed": true,
+    "sha_after": "dc291eb66c5a"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "CODE/PROSE DELETED; GOOD ID LOST: good@g",
+    "lost_code": [
+     "const PRECIOUS = [",
+     "  \"a\",",
+     "];"
+    ],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     "lost@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "lost@0"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      1,
+      "Lost its bracket., const PRECIOUS = [ \"a\" | Good block.",
+      "lab-lost,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,13 +2,5 @@\n //   id=lost@0,\n-//   slice_labels=lab-lost,\n+//   slice_labels=lab-lost,lab-good,\n //   kind=ast,\n-//   comment=Lost its bracket.,\n-const PRECIOUS = [\n-  \"a\",\n-];\n-// @beacon[\n-//   id=good@g,\n-//   slice_labels=lab-good,\n-//   kind=ast,\n-//   comment=Good block.,\n+//   comment=Lost its bracket., const PRECIOUS = [ \"a\" | Good block.,\n // ]\n",
+    "changed": true,
+    "sha_after": "dc291eb66c5a"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       1,
+       "non-comment line 6 inside block extent"
+      ],
+      [
+       15,
+       "group skipped: a member is structurally broken"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "lost@0",
+     "good@g"
+    ],
+    "ids_after": [
+     "lost@0",
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      1,
+      "Lost its bracket., const PRECIOUS = [ \"a\"",
+      "lab-lost",
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      9,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "b4498d1b78ed"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "js_03_jsdoc_two",
+   "ext": "js",
+   "note": "two JSDoc-form blocks on one function",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_03_jsdoc_two.cur.js",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      3,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,14 +2,9 @@\n  * Doc for f.\n- * @beacon[\n- *   id=a@f,\n- *   slice_labels=lab-a,\n- *   kind=ast,\n- * ]\n+ // @beacon[\n+ //   id=a@f,\n+ //   slice_labels=lab-a,lab-b,\n+ //   kind=ast,\n+ // ]\n  */\n /**\n- * @beacon[\n- *   id=b@f,\n- *   slice_labels=lab-b,\n- *   kind=ast,\n- * ]\n  */\n",
+    "changed": true,
+    "sha_after": "3154a291b511"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      3,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,14 +2,9 @@\n  * Doc for f.\n- * @beacon[\n- *   id=a@f,\n- *   slice_labels=lab-a,\n- *   kind=ast,\n- * ]\n+ // @beacon[\n+ //   id=a@f,\n+ //   slice_labels=lab-a,lab-b,\n+ //   kind=ast,\n+ // ]\n  */\n /**\n- * @beacon[\n- *   id=b@f,\n- *   slice_labels=lab-b,\n- *   kind=ast,\n- * ]\n  */\n",
+    "changed": true,
+    "sha_after": "3154a291b511"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      3,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,14 +2,9 @@\n  * Doc for f.\n- * @beacon[\n- *   id=a@f,\n- *   slice_labels=lab-a,\n- *   kind=ast,\n- * ]\n+ // @beacon[\n+ //   id=a@f,\n+ //   slice_labels=lab-a,lab-b,\n+ //   kind=ast,\n+ // ]\n  */\n /**\n- * @beacon[\n- *   id=b@f,\n- *   slice_labels=lab-b,\n- *   kind=ast,\n- * ]\n  */\n",
+    "changed": true,
+    "sha_after": "3154a291b511"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "js_04_cblock_plus_line",
+   "ext": "js",
+   "note": "/* */ block + // block on one function",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_04_cblock_plus_line.cur.js",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "CODE/PROSE DELETED; GOOD ID LOST: b@f",
+    "lost_code": [
+     "   id=a@f,",
+     "   slice_labels=lab-a,",
+     "   kind=ast,",
+     " ] */"
+    ],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Line form.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,9 +1,4 @@\n-/* @beacon[\n-   id=a@f,\n-   slice_labels=lab-a,\n-   kind=ast,\n- ] */\n // @beacon[\n-//   id=b@f,\n-//   slice_labels=lab-b,\n+//   id=a@f,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n",
+    "changed": true,
+    "sha_after": "7bf857a98efa"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "CODE/PROSE DELETED; GOOD ID LOST: b@f",
+    "lost_code": [
+     "   id=a@f,",
+     "   slice_labels=lab-a,",
+     "   kind=ast,",
+     " ] */"
+    ],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      "Line form.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,9 +1,4 @@\n-/* @beacon[\n-   id=a@f,\n-   slice_labels=lab-a,\n-   kind=ast,\n- ] */\n // @beacon[\n-//   id=b@f,\n-//   slice_labels=lab-b,\n+//   id=a@f,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n",
+    "changed": true,
+    "sha_after": "7bf857a98efa"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       1,
+       "non-comment line 2 inside block extent"
+      ],
+      [
+       12,
+       "group skipped: a member is structurally broken"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f",
+     "b@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      1,
+      null,
+      "lab-a",
+      true
+     ],
+     [
+      "b@f",
+      "ast",
+      6,
+      "Line form.",
+      "lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "74f3ecabdaa2"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "js_05_template_literal",
+   "ext": "js",
+   "note": "two example blocks inside a template literal",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_05_template_literal.cur.js",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "ex1@0",
+     "ex2@0"
+    ],
+    "ids_after": [
+     "ex1@0"
+    ],
+    "parsed_after": [
+     [
+      "ex1@0",
+      "ast",
+      2,
+      null,
+      "lab-ex1,lab-ex2",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,8 +3,3 @@\n //   id=ex1@0,\n-//   slice_labels=lab-ex1,\n-//   kind=ast,\n-// ]\n-// @beacon[\n-//   id=ex2@0,\n-//   slice_labels=lab-ex2,\n+//   slice_labels=lab-ex1,lab-ex2,\n //   kind=ast,\n",
+    "changed": true,
+    "sha_after": "c7663ba98847"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "ex1@0",
+     "ex2@0"
+    ],
+    "ids_after": [
+     "ex1@0"
+    ],
+    "parsed_after": [
+     [
+      "ex1@0",
+      "ast",
+      2,
+      null,
+      "lab-ex1,lab-ex2",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,8 +3,3 @@\n //   id=ex1@0,\n-//   slice_labels=lab-ex1,\n-//   kind=ast,\n-// ]\n-// @beacon[\n-//   id=ex2@0,\n-//   slice_labels=lab-ex2,\n+//   slice_labels=lab-ex1,lab-ex2,\n //   kind=ast,\n",
+    "changed": true,
+    "sha_after": "c7663ba98847"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "merge (no loss detected)",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "ex1@0",
+     "ex2@0"
+    ],
+    "ids_after": [
+     "ex1@0"
+    ],
+    "parsed_after": [
+     [
+      "ex1@0",
+      "ast",
+      2,
+      null,
+      "lab-ex1,lab-ex2",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,8 +3,3 @@\n //   id=ex1@0,\n-//   slice_labels=lab-ex1,\n-//   kind=ast,\n-// ]\n-// @beacon[\n-//   id=ex2@0,\n-//   slice_labels=lab-ex2,\n+//   slice_labels=lab-ex1,lab-ex2,\n //   kind=ast,\n",
+    "changed": true,
+    "sha_after": "c7663ba98847"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "js_06_code_mentions_opener",
+   "ext": "js",
+   "note": "a code line containing @beacon[ (shared JS parser opens there; hygiene does not)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_06_code_mentions_opener.cur.js",
+     "kind": "js_ts"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     null,
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      null,
+      "span",
+      1,
+      null,
+      null,
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      6,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "3891dacc6555"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     null,
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      null,
+      "span",
+      1,
+      null,
+      null,
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      6,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "3891dacc6555"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     null,
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      null,
+      "span",
+      1,
+      null,
+      null,
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      6,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "3891dacc6555"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "js_07_unterminated_after_good",
+   "ext": "js",
+   "note": "good block then an unterminated // block on the same function",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_07_unterminated_after_good.cur.js",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: good@f",
+    "lost_code": [],
+    "good_lost": [
+     "good@f"
+    ],
+    "ids_before": [
+     "good@f",
+     "unterm@0"
+    ],
+    "ids_after": [
+     "unterm@0"
+    ],
+    "parsed_after": [
+     [
+      "unterm@0",
+      "ast",
+      1,
+      "Good block. | Never closed.",
+      "lab-good,lab-unterm",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,8 +1,7 @@\n // @beacon[\n-//   id=good@f,\n-//   slice_labels=lab-good,\n+//   id=unterm@0,\n+//   slice_labels=lab-good,lab-unterm,\n //   kind=ast,\n-//   comment=Good block.,\n+//   comment=Good block. | Never closed.,\n // ]\n-// @beacon[\n //   id=unterm@0,\n",
+    "changed": true,
+    "sha_after": "7d9ee062c7f8"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: good@f",
+    "lost_code": [],
+    "good_lost": [
+     "good@f"
+    ],
+    "ids_before": [
+     "good@f",
+     "unterm@0"
+    ],
+    "ids_after": [
+     "unterm@0"
+    ],
+    "parsed_after": [
+     [
+      "unterm@0",
+      "ast",
+      1,
+      "Good block. | Never closed.",
+      "lab-good,lab-unterm",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,8 +1,7 @@\n // @beacon[\n-//   id=good@f,\n-//   slice_labels=lab-good,\n+//   id=unterm@0,\n+//   slice_labels=lab-good,lab-unterm,\n //   kind=ast,\n-//   comment=Good block.,\n+//   comment=Good block. | Never closed.,\n // ]\n-// @beacon[\n //   id=unterm@0,\n",
+    "changed": true,
+    "sha_after": "7d9ee062c7f8"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       7,
+       "unterminated"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@f",
+     "unterm@0"
+    ],
+    "ids_after": [
+     "good@f",
+     "unterm@0"
+    ],
+    "parsed_after": [
+     [
+      "good@f",
+      "ast",
+      1,
+      "Good block.",
+      "lab-good",
+      true
+     ],
+     [
+      "unterm@0",
+      "ast",
+      7,
+      "Never closed.",
+      "lab-unterm",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "afbdb7c70ced"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "js_08_idless_and_nested",
+   "ext": "js",
+   "note": "id-less // opener above a good block",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/js_08_idless_and_nested.cur.js",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: good@g",
+    "lost_code": [],
+    "good_lost": [
+     "good@g"
+    ],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     ""
+    ],
+    "parsed_after": [
+     [
+      "",
+      "ast",
+      1,
+      "No id. | Good block.",
+      "lab-noid,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,11 +1,6 @@\n // @beacon[\n-//   slice_labels=lab-noid,\n+//   id=,\n+//   slice_labels=lab-noid,lab-good,\n //   kind=ast,\n-//   comment=No id.,\n-// ]\n-// @beacon[\n-//   id=good@g,\n-//   slice_labels=lab-good,\n-//   kind=ast,\n-//   comment=Good block.,\n+//   comment=No id. | Good block.,\n // ]\n",
+    "changed": true,
+    "sha_after": "e29c34a42702"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     null,
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      null,
+      "ast",
+      1,
+      "No id.",
+      "lab-noid",
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      6,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "bb8c8fa33f59"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       1,
+       "no_id"
+      ],
+      [
+       12,
+       "group skipped: a member is structurally broken"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     null,
+     "good@g"
+    ],
+    "ids_after": [
+     null,
+     "good@g"
+    ],
+    "parsed_after": [
+     [
+      null,
+      "ast",
+      1,
+      "No id.",
+      "lab-noid",
+      true
+     ],
+     [
+      "good@g",
+      "ast",
+      6,
+      "Good block.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "bb8c8fa33f59"
+   },
+   "sp_same_as_cur": false,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "ts_09_decorated_method",
+   "ext": "ts",
+   "note": "TS: two blocks around a decorator on one method",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/ts_09_decorated_method.cur.ts",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@C.m",
+    "lost_code": [],
+    "good_lost": [
+     "b@C.m"
+    ],
+    "ids_before": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,13 +3,7 @@\n   //   id=a@C.m,\n-  //   slice_labels=lab-a,\n+  //   slice_labels=lab-a,lab-b,\n   //   kind=ast,\n-  //   comment=First.,\n+  //   comment=First. | Second.,\n   // ]\n   @Input()\n-  // @beacon[\n-  //   id=b@C.m,\n-  //   slice_labels=lab-b,\n-  //   kind=ast,\n-  //   comment=Second.,\n-  // ]\n   m(): number { return 1; }\n",
+    "changed": true,
+    "sha_after": "beb5090ab789"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@C.m",
+    "lost_code": [],
+    "good_lost": [
+     "b@C.m"
+    ],
+    "ids_before": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,13 +3,7 @@\n   //   id=a@C.m,\n-  //   slice_labels=lab-a,\n+  //   slice_labels=lab-a,lab-b,\n   //   kind=ast,\n-  //   comment=First.,\n+  //   comment=First. | Second.,\n   // ]\n   @Input()\n-  // @beacon[\n-  //   id=b@C.m,\n-  //   slice_labels=lab-b,\n-  //   kind=ast,\n-  //   comment=Second.,\n-  // ]\n   m(): number { return 1; }\n",
+    "changed": true,
+    "sha_after": "beb5090ab789"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@C.m",
+    "lost_code": [],
+    "good_lost": [
+     "b@C.m"
+    ],
+    "ids_before": [
+     "a@C.m",
+     "b@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,13 +3,7 @@\n   //   id=a@C.m,\n-  //   slice_labels=lab-a,\n+  //   slice_labels=lab-a,lab-b,\n   //   kind=ast,\n-  //   comment=First.,\n+  //   comment=First. | Second.,\n   // ]\n   @Input()\n-  // @beacon[\n-  //   id=b@C.m,\n-  //   slice_labels=lab-b,\n-  //   kind=ast,\n-  //   comment=Second.,\n-  // ]\n   m(): number { return 1; }\n",
+    "changed": true,
+    "sha_after": "beb5090ab789"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "vue_10_script_two",
+   "ext": "vue",
+   "note": "Vue: two // blocks on one script function",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/vue_10_script_two.cur.vue",
+     "kind": "js_ts",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      5,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -6,11 +6,5 @@\n //   id=a@f,\n-//   slice_labels=lab-a,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n-//   comment=First.,\n-// ]\n-// @beacon[\n-//   id=b@f,\n-//   slice_labels=lab-b,\n-//   kind=ast,\n-//   comment=Second.,\n+//   comment=First. | Second.,\n // ]\n",
+    "changed": true,
+    "sha_after": "30cae0b1bc09"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      5,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -6,11 +6,5 @@\n //   id=a@f,\n-//   slice_labels=lab-a,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n-//   comment=First.,\n-// ]\n-// @beacon[\n-//   id=b@f,\n-//   slice_labels=lab-b,\n-//   kind=ast,\n-//   comment=Second.,\n+//   comment=First. | Second.,\n // ]\n",
+    "changed": true,
+    "sha_after": "30cae0b1bc09"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      5,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -6,11 +6,5 @@\n //   id=a@f,\n-//   slice_labels=lab-a,\n+//   slice_labels=lab-a,lab-b,\n //   kind=ast,\n-//   comment=First.,\n-// ]\n-// @beacon[\n-//   id=b@f,\n-//   slice_labels=lab-b,\n-//   kind=ast,\n-//   comment=Second.,\n+//   comment=First. | Second.,\n // ]\n",
+    "changed": true,
+    "sha_after": "30cae0b1bc09"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "vue_11_template_two",
+   "ext": "vue",
+   "note": "Vue: two template HTML-comment blocks on one element",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/vue_11_template_two.cur.vue",
+     "kind": "js_ts"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "ta@0",
+     "tb@0",
+     "ta@0",
+     "tb@0"
+    ],
+    "ids_after": [
+     "ta@0",
+     "tb@0",
+     "ta@0",
+     "tb@0"
+    ],
+    "parsed_after": [
+     [
+      "ta@0",
+      "ast",
+      3,
+      null,
+      "lab-ta",
+      true
+     ],
+     [
+      "tb@0",
+      "ast",
+      10,
+      null,
+      "lab-tb",
+      true
+     ],
+     [
+      "ta@0",
+      "ast",
+      3,
+      null,
+      "lab-ta",
+      true
+     ],
+     [
+      "tb@0",
+      "ast",
+      10,
+      null,
+      "lab-tb",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "1ed31d74ba88"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "ta@0",
+     "tb@0",
+     "ta@0",
+     "tb@0"
+    ],
+    "ids_after": [
+     "ta@0",
+     "tb@0",
+     "ta@0",
+     "tb@0"
+    ],
+    "parsed_after": [
+     [
+      "ta@0",
+      "ast",
+      3,
+      null,
+      "lab-ta",
+      true
+     ],
+     [
+      "tb@0",
+      "ast",
+      10,
+      null,
+      "lab-tb",
+      true
+     ],
+     [
+      "ta@0",
+      "ast",
+      3,
+      null,
+      "lab-ta",
+      true
+     ],
+     [
+      "tb@0",
+      "ast",
+      10,
+      null,
+      "lab-tb",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "1ed31d74ba88"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": [
+      [
+       3,
+       "non-comment line 3 inside block extent"
+      ],
+      [
+       10,
+       "non-comment line 10 inside block extent"
+      ]
+     ]
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "ta@0",
+     "tb@0",
+     "ta@0",
+     "tb@0"
+    ],
+    "ids_after": [
+     "ta@0",
+     "tb@0",
+     "ta@0",
+     "tb@0"
+    ],
+    "parsed_after": [
+     [
+      "ta@0",
+      "ast",
+      3,
+      null,
+      "lab-ta",
+      true
+     ],
+     [
+      "tb@0",
+      "ast",
+      10,
+      null,
+      "lab-tb",
+      true
+     ],
+     [
+      "ta@0",
+      "ast",
+      3,
+      null,
+      "lab-ta",
+      true
+     ],
+     [
+      "tb@0",
+      "ast",
+      10,
+      null,
+      "lab-tb",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "1ed31d74ba88"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "md_01_two_good",
+   "ext": "md",
+   "note": "two good blocks on one heading",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_01_two_good.cur.md",
+     "kind": "markdown",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      6,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -7,14 +7,6 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-  comment=First.,\n-]\n--->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-  comment=Second.,\n-]\n+  comment=First. | Second.,\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "d69523e51db1"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      6,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -7,14 +7,6 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-  comment=First.,\n-]\n--->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-  comment=Second.,\n-]\n+  comment=First. | Second.,\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "d69523e51db1"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      6,
+      "First. | Second.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -7,14 +7,6 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-  comment=First.,\n-]\n--->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-  comment=Second.,\n-]\n+  comment=First. | Second.,\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "d69523e51db1"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "md_02_numeric",
+   "ext": "md",
+   "note": "numeric-suffix survivor in Markdown",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_02_numeric.cur.md",
+     "kind": "markdown",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: auto@h-1x",
+    "lost_code": [],
+    "good_lost": [
+     "auto@h-1x"
+    ],
+    "ids_before": [
+     "auto@h-1x",
+     "doc@000007"
+    ],
+    "ids_after": [
+     "doc@000007"
+    ],
+    "parsed_after": [
+     [
+      "doc@000007",
+      "ast",
+      2,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,8 +1 @@\n-<!--\n-@beacon[\n-  id=auto@h-1x,\n-  slice_labels=lab-a,\n-  kind=ast,\n-]\n--->\n <!--\n@@ -10,5 +3,5 @@\n   id=doc@000007,\n-  slice_labels=lab-b,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "807d6fc323a2"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: auto@h-1x",
+    "lost_code": [],
+    "good_lost": [
+     "auto@h-1x"
+    ],
+    "ids_before": [
+     "auto@h-1x",
+     "doc@000007"
+    ],
+    "ids_after": [
+     "doc@000007"
+    ],
+    "parsed_after": [
+     [
+      "doc@000007",
+      "ast",
+      2,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,8 +1 @@\n-<!--\n-@beacon[\n-  id=auto@h-1x,\n-  slice_labels=lab-a,\n-  kind=ast,\n-]\n--->\n <!--\n@@ -10,5 +3,5 @@\n   id=doc@000007,\n-  slice_labels=lab-b,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "807d6fc323a2"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: auto@h-1x",
+    "lost_code": [],
+    "good_lost": [
+     "auto@h-1x"
+    ],
+    "ids_before": [
+     "auto@h-1x",
+     "doc@000007"
+    ],
+    "ids_after": [
+     "doc@000007"
+    ],
+    "parsed_after": [
+     [
+      "doc@000007",
+      "ast",
+      2,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -1,8 +1 @@\n-<!--\n-@beacon[\n-  id=auto@h-1x,\n-  slice_labels=lab-a,\n-  kind=ast,\n-]\n--->\n <!--\n@@ -10,5 +3,5 @@\n   id=doc@000007,\n-  slice_labels=lab-b,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "807d6fc323a2"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "md_03_ast_span",
+   "ext": "md",
+   "note": "stacked span + ast on one heading",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_03_ast_span.cur.md",
+     "kind": "markdown"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "s@h",
+     "a@h"
+    ],
+    "ids_after": [
+     "s@h",
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "s@h",
+      "span",
+      2,
+      null,
+      "lab-s",
+      true
+     ],
+     [
+      "a@h",
+      "ast",
+      9,
+      null,
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "00db3063eb5c"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "s@h",
+     "a@h"
+    ],
+    "ids_after": [
+     "s@h",
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "s@h",
+      "span",
+      2,
+      null,
+      "lab-s",
+      true
+     ],
+     [
+      "a@h",
+      "ast",
+      9,
+      null,
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "00db3063eb5c"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "s@h",
+     "a@h"
+    ],
+    "ids_after": [
+     "s@h",
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "s@h",
+      "span",
+      2,
+      null,
+      "lab-s",
+      true
+     ],
+     [
+      "a@h",
+      "ast",
+      9,
+      null,
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "00db3063eb5c"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "md_04_lost_end",
+   "ext": "md",
+   "note": "block lost its --> (md_m01 family)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_04_lost_end.cur.md",
+     "kind": "markdown",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "CODE/PROSE DELETED; GOOD ID LOST: good@h3",
+    "lost_code": [
+     "## Heading A",
+     "Precious prose A.",
+     "## Heading B",
+     "Prose B."
+    ],
+    "good_lost": [
+     "good@h3"
+    ],
+    "ids_before": [
+     "lost@0",
+     "good@h3"
+    ],
+    "ids_after": [
+     "lost@0"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      4,
+      "Lost its end. | Good.",
+      "lab-lost,lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,20 +5,6 @@\n   id=lost@0,\n-  slice_labels=lab-lost,\n+  slice_labels=lab-lost,lab-good,\n   kind=ast,\n-  comment=Lost its end.,\n-]\n-## Heading A\n-\n-Precious prose A.\n-\n-<!--\n-@beacon[\n-  id=good@h3,\n-  slice_labels=lab-good,\n-  kind=ast,\n-  comment=Good.,\n-]\n+  comment=Lost its end. | Good.,\n+ ]\n -->\n-## Heading B\n-\n-Prose B.\n",
+    "changed": true,
+    "sha_after": "d4f082427f74"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "lost@0",
+     "good@h3"
+    ],
+    "ids_after": [
+     "lost@0",
+     "good@h3"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      4,
+      "Lost its end.",
+      "lab-lost",
+      true
+     ],
+     [
+      "good@h3",
+      "ast",
+      15,
+      "Good.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "b72d4a193800"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "lost@0",
+     "good@h3"
+    ],
+    "ids_after": [
+     "lost@0",
+     "good@h3"
+    ],
+    "parsed_after": [
+     [
+      "lost@0",
+      "ast",
+      4,
+      "Lost its end.",
+      "lab-lost",
+      true
+     ],
+     [
+      "good@h3",
+      "ast",
+      15,
+      "Good.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "b72d4a193800"
+   },
+   "sp_same_as_cur": false,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "md_05_oneline_open_after_note",
+   "ext": "md",
+   "note": "one-line <!-- @beacon[ opener after an unrelated HTML comment",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_05_oneline_open_after_note.cur.md",
+     "kind": "markdown",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      4,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -2,16 +2,8 @@\n \n-<!-- editor note: keep this -->\n-\n-<!-- @beacon[\n-  id=a@h,\n-  slice_labels=lab-a,\n-  kind=ast,\n-]\n--->\n <!--\n @beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n+  id=a@h,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "d345b71458b4"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      6,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -4,14 +4,8 @@\n \n-<!-- @beacon[\n-  id=a@h,\n-  slice_labels=lab-a,\n-  kind=ast,\n-]\n--->\n <!--\n @beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n+  id=a@h,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "c49cc0ab6aa7"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      6,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -4,14 +4,8 @@\n \n-<!-- @beacon[\n-  id=a@h,\n-  slice_labels=lab-a,\n-  kind=ast,\n-]\n--->\n <!--\n @beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n+  id=a@h,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "c49cc0ab6aa7"
+   },
+   "sp_same_as_cur": false,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "md_06_comment_with_arrow",
+   "ext": "md",
+   "note": "a field value containing --> (first --> ends the hygiene's extent)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_06_comment_with_arrow.cur.md",
+     "kind": "markdown"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h",
+     "b@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      2,
+      "Maps a --> b.",
+      "lab-a",
+      true
+     ],
+     [
+      "b@h",
+      "ast",
+      10,
+      null,
+      "lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "18421949f4ab"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      2,
+      "Maps a --> b.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,13 +3,6 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n   comment=Maps a --> b.,\n-]\n--->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "9741e105cd24"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      2,
+      "Maps a --> b.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,13 +3,6 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n   comment=Maps a --> b.,\n-]\n--->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-]\n+ ]\n -->\n",
+    "changed": true,
+    "sha_after": "9741e105cd24"
+   },
+   "sp_same_as_cur": false,
+   "spg_same_as_cur": false
+  },
+  {
+   "case": "md_07_fenced_examples",
+   "ext": "md",
+   "note": "two example blocks inside a fenced code block",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_07_fenced_examples.cur.md",
+     "kind": "markdown"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [],
+    "ids_after": [],
+    "parsed_after": [],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "fa789373181f"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [],
+    "ids_after": [],
+    "parsed_after": [],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "fa789373181f"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [],
+    "ids_after": [],
+    "parsed_after": [],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "fa789373181f"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "md_08_lost_bracket",
+   "ext": "md",
+   "note": "block lost its ] (md_m04 family)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_08_lost_bracket.cur.md",
+     "kind": "markdown"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@h"
+    ],
+    "ids_after": [
+     "good@h"
+    ],
+    "parsed_after": [
+     [
+      "good@h",
+      "ast",
+      2,
+      "Lost ]., Prose line.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "95d070cc2aa1"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@h"
+    ],
+    "ids_after": [
+     "good@h"
+    ],
+    "parsed_after": [
+     [
+      "good@h",
+      "ast",
+      2,
+      "Lost ]., Prose line.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "95d070cc2aa1"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "good@h"
+    ],
+    "ids_after": [
+     "good@h"
+    ],
+    "parsed_after": [
+     [
+      "good@h",
+      "ast",
+      2,
+      "Lost ]., Prose line.",
+      "lab-good",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "95d070cc2aa1"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "md_09_heading_in_html_comment_between",
+   "ext": "md",
+   "note": "multi-line ordinary HTML comment between two blocks",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/md_09_heading_in_html_comment_between.cur.md",
+     "kind": "markdown",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      2,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,5 +3,5 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n@@ -10,9 +10,2 @@\n -->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-]\n--->\n ## Heading\n",
+    "changed": true,
+    "sha_after": "17f47f49c8fa"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      2,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,5 +3,5 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n@@ -10,9 +10,2 @@\n -->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-]\n--->\n ## Heading\n",
+    "changed": true,
+    "sha_after": "17f47f49c8fa"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@h",
+    "lost_code": [],
+    "good_lost": [
+     "b@h"
+    ],
+    "ids_before": [
+     "a@h",
+     "b@h"
+    ],
+    "ids_after": [
+     "a@h"
+    ],
+    "parsed_after": [
+     [
+      "a@h",
+      "ast",
+      2,
+      null,
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -3,5 +3,5 @@\n   id=a@h,\n-  slice_labels=lab-a,\n+  slice_labels=lab-a,lab-b,\n   kind=ast,\n-]\n+ ]\n -->\n@@ -10,9 +10,2 @@\n -->\n-<!--\n-@beacon[\n-  id=b@h,\n-  slice_labels=lab-b,\n-  kind=ast,\n-]\n--->\n ## Heading\n",
+    "changed": true,
+    "sha_after": "17f47f49c8fa"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "py_23_single_decorator",
+   "ext": "py",
+   "note": "block above a one-line decorator + block between decorator and def",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": true,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/py_23_single_decorator.cur.py",
+     "kind": "python",
+     "merged_groups": 1,
+     "removed_blocks": 1
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      4,
+      "Above decorator. | Between decorator and def.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,13 +5,7 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Above decorator.,\n+#   comment=Above decorator. | Between decorator and def.,\n # ]\n @functools.lru_cache\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Between decorator and def.,\n-# ]\n def f():\n",
+    "changed": true,
+    "sha_after": "8aae0a506075"
+   },
+   "sp": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      4,
+      "Above decorator. | Between decorator and def.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,13 +5,7 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Above decorator.,\n+#   comment=Above decorator. | Between decorator and def.,\n # ]\n @functools.lru_cache\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Between decorator and def.,\n-# ]\n def f():\n",
+    "changed": true,
+    "sha_after": "8aae0a506075"
+   },
+   "spg": {
+    "result": {
+     "changed": true,
+     "merged_groups": 1,
+     "skipped": []
+    },
+    "cls": "GOOD ID LOST: b@f",
+    "lost_code": [],
+    "good_lost": [
+     "b@f"
+    ],
+    "ids_before": [
+     "a@f",
+     "b@f"
+    ],
+    "ids_after": [
+     "a@f"
+    ],
+    "parsed_after": [
+     [
+      "a@f",
+      "ast",
+      4,
+      "Above decorator. | Between decorator and def.",
+      "lab-a,lab-b",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "--- before\n+++ after\n@@ -5,13 +5,7 @@\n #   id=a@f,\n-#   slice_labels=lab-a,\n+#   slice_labels=lab-a,lab-b,\n #   kind=ast,\n-#   comment=Above decorator.,\n+#   comment=Above decorator. | Between decorator and def.,\n # ]\n @functools.lru_cache\n-# @beacon[\n-#   id=b@f,\n-#   slice_labels=lab-b,\n-#   kind=ast,\n-#   comment=Between decorator and def.,\n-# ]\n def f():\n",
+    "changed": true,
+    "sha_after": "8aae0a506075"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  },
+  {
+   "case": "ts_24_single_above_decorator",
+   "ext": "ts",
+   "note": "TS: one block above a decorator (mapper attachment probe)",
+   "cur": {
+    "result": {
+     "success": true,
+     "changed": false,
+     "file_path": "/mnt/c/tmp/beacon_robustness/area-6/tmp/ts_24_single_above_decorator.cur.ts",
+     "kind": "js_ts"
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "Above decorator.",
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "e5015c80b1bc"
+   },
+   "sp": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "Above decorator.",
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "e5015c80b1bc"
+   },
+   "spg": {
+    "result": {
+     "changed": false,
+     "skipped": []
+    },
+    "cls": "NO CHANGE",
+    "lost_code": [],
+    "good_lost": [],
+    "ids_before": [
+     "a@C.m"
+    ],
+    "ids_after": [
+     "a@C.m"
+    ],
+    "parsed_after": [
+     [
+      "a@C.m",
+      "ast",
+      2,
+      "Above decorator.",
+      "lab-a",
+      true
+     ]
+    ],
+    "bad_comments": [],
+    "cr_before": 0,
+    "cr_after": 0,
+    "diff": "",
+    "changed": false,
+    "sha_after": "e5015c80b1bc"
+   },
+   "sp_same_as_cur": true,
+   "spg_same_as_cur": true
+  }
+ ],
+ "other_full": [
+  {
+   "fixer": "alias",
+   "case": "A01_py_block.py",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -5 +5 @@\n-#   comments=Alias.,\n+#   comment=Alias.,\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     "a@f",
+     "Alias."
+    ]
+   ],
+   "comments_after": [
+    [
+     "a@f",
+     "Alias."
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A02_py_docstring_example.py",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -6 +6 @@\n-    #   comments=documented alias,\n+    #   comment=documented alias,\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     "ex@0",
+     "documented alias"
+    ]
+   ],
+   "comments_after": [
+    [
+     "ex@0",
+     "documented alias"
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A03_js_cblock_lost_bracket.js",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -8 +8 @@\n-  comments = load();\n+  comment = load();\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [],
+   "comments_after": []
+  },
+  {
+   "fixer": "alias",
+   "case": "A04_md_fenced_example.md",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -9 +9 @@\n-  comments=old spelling,\n+  comment=old spelling,\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [],
+   "comments_after": []
+  },
+  {
+   "fixer": "alias",
+   "case": "A05_sql_block.sql",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -5 +5 @@\n---   comments=Alias.,\n+--   comment=Alias.,\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     "q@0",
+     "Alias."
+    ]
+   ],
+   "comments_after": [
+    [
+     "q@0",
+     "Alias."
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A06_vue_template.vue",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -6 +6 @@\n-    comments=Alias in template.,\n+    comment=Alias in template.,\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     "t@0",
+     "Alias in template."
+    ],
+    [
+     "t@0",
+     "Alias in template."
+    ]
+   ],
+   "comments_after": [
+    [
+     "t@0",
+     "Alias in template."
+    ],
+    [
+     "t@0",
+     "Alias in template."
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A07_py_crlf.py",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -1,7 +1,7 @@\n-# @beacon[\r\n-#   id=a@f,\r\n-#   kind=ast,\r\n-#   comments=Alias.,\r\n-# ]\r\n-def f():\r\n-    return 1\r\n+# @beacon[\n+#   id=a@f,\n+#   kind=ast,\n+#   comment=Alias.,\n+# ]\n+def f():\n+    return 1\n",
+   "cr": [
+    7,
+    0
+   ],
+   "comments_before": [
+    [
+     "a@f",
+     "Alias."
+    ]
+   ],
+   "comments_after": [
+    [
+     "a@f",
+     "Alias."
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A08_py_lost_bracket_then_comment.py",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -5 +5 @@\n-# comments = these are notes about x\n+# comment = these are notes about x\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [],
+   "comments_after": []
+  },
+  {
+   "fixer": "alias",
+   "case": "A09_py_continuation_key.py",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -5 +5 @@\n-#   comments = table layout,\n+#   comment = table layout,\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     "a@f",
+     "This explains the"
+    ]
+   ],
+   "comments_after": [
+    [
+     "a@f",
+     "table layout"
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A10_js_template_bare_opener.js",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -3 +3 @@\n-comments = 1\n+comment = 1\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     null,
+     "1 `;"
+    ]
+   ],
+   "comments_after": [
+    [
+     null,
+     "1 `;"
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A11_sh_block.sh",
+   "result": {
+    "success": true,
+    "changed": true
+   },
+   "diff": "--- before\n+++ after\n@@ -4 +4 @@\n-#   comments=Alias.,\n+#   comment=Alias.,\n",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     "s@0",
+     "Alias."
+    ]
+   ],
+   "comments_after": [
+    [
+     "s@0",
+     "Alias."
+    ]
+   ]
+  },
+  {
+   "fixer": "alias",
+   "case": "A12_py_double_hash.py",
+   "result": {
+    "success": true,
+    "changed": false
+   },
+   "diff": "",
+   "cr": [
+    0,
+    0
+   ],
+   "comments_before": [
+    [
+     "a@f",
+     "Missed."
+    ]
+   ],
+   "comments_after": [
+    [
+     "a@f",
+     "Missed."
+    ]
+   ]
+  },
+  {
+   "fixer": "c0",
+   "case": "C01_bel_prose.md",
+   "result": {
+    "success": true,
+    "changed": true,
+    "counts": {
+     "BEL": 1
+    }
+   },
+   "before": "b'# Doc\\n\\nPath C:\\\\agentic\\x07 here.\\n'",
+   "after": "b'# Doc\\n\\nPath C:\\\\agentic\\\\a here.\\n'"
+  },
+  {
+   "fixer": "c0",
+   "case": "C02_esc_in_fence.md",
+   "result": {
+    "success": true,
+    "changed": true,
+    "counts": {
+     "C0-1B": 2
+    }
+   },
+   "before": "b'# Doc\\n\\n```text\\n\\x1b[31mred\\x1b[0m\\n```\\n'",
+   "after": "b'# Doc\\n\\n```text\\n[31mred[0m\\n```\\n'"
+  },
+  {
+   "fixer": "c0",
+   "case": "C03_latin1.md",
+   "result": {
+    "raised": "UnicodeDecodeError('utf-8', b'# Doc\\n\\ncaf\\xe9\\n', 10, 11, 'invalid continuation byte')"
+   },
+   "before": "b'# Doc\\n\\ncaf\\xe9\\n'",
+   "after": "b'# Doc\\n\\ncaf\\xe9\\n'"
+  },
+  {
+   "fixer": "c0",
+   "case": "C04_crlf_vt.md",
+   "result": {
+    "success": true,
+    "changed": true,
+    "counts": {
+     "VT": 1
+    }
+   },
+   "before": "b'# Doc\\r\\n\\r\\nA\\x0bB\\r\\n'",
+   "after": "b'# Doc\\r\\n\\r\\nA\\\\vB\\r\\n'"
+  },
+  {
+   "fixer": "c0",
+   "case": "C05_bom.md",
+   "result": {
+    "success": true,
+    "changed": true,
+    "counts": {
+     "C0-00": 1
+    }
+   },
+   "before": "b'\\xef\\xbb\\xbf# Doc\\n\\nx\\x00y\\n'",
+   "after": "b'\\xef\\xbb\\xbf# Doc\\n\\nxy\\n'"
+  },
+  {
+   "fixer": "c0",
+   "case": "C06_noclaim.md",
+   "result": {
+    "raised": "ValueError('A live CARTO claim_id is required for on-disk C0 repair.')"
+   }
+  },
+  {
+   "fixer": "eof",
+   "case": "E01_trailing_blanks.md",
+   "result": {
+    "changed": true,
+    "before_chars": 16,
+    "after_chars": 13,
+    "delta_chars": -3
+   },
+   "before": "b'# Doc\\n\\nText.\\n\\n\\n\\n'",
+   "after": "b'# Doc\\n\\nText.\\n'"
+  },
+  {
+   "fixer": "eof",
+   "case": "E02_u2028.md",
+   "result": {
+    "changed": true,
+    "before_chars": 16,
+    "after_chars": 16,
+    "delta_chars": 0
+   },
+   "before": "b'# Doc\\n\\nOne\\xe2\\x80\\xa8two.\\n'",
+   "after": "b'# Doc\\n\\nOne\\ntwo.\\n'"
+  },
+  {
+   "fixer": "eof",
+   "case": "E03_nel.md",
+   "result": {
+    "changed": true,
+    "before_chars": 18,
+    "after_chars": 18,
+    "delta_chars": 0
+   },
+   "before": "b'# Head\\xc2\\x85ing\\n\\nText.\\n'",
+   "after": "b'# Head\\ning\\n\\nText.\\n'"
+  },
+  {
+   "fixer": "eof",
+   "case": "E04_u2029_heading.md",
+   "result": {
+    "changed": true,
+    "before_chars": 26,
+    "after_chars": 26,
+    "delta_chars": 0
+   },
+   "before": "b'# Doc\\n\\n## Sec\\xe2\\x80\\xa9tion\\n\\nText.\\n'",
+   "after": "b'# Doc\\n\\n## Sec\\ntion\\n\\nText.\\n'"
+  },
+  {
+   "fixer": "eof",
+   "case": "E05_only_blank.md",
+   "result": {
+    "changed": true,
+    "before_chars": 5,
+    "after_chars": 0,
+    "delta_chars": -5
+   },
+   "before": "b'\\n\\n  \\n'",
+   "after": "b''"
+  },
+  {
+   "fixer": "eof",
+   "case": "E06_crlf_trailing.md",
+   "result": {
+    "changed": true,
+    "before_chars": 15,
+    "after_chars": 13,
+    "delta_chars": -2
+   },
+   "before": "b'# Doc\\r\\n\\r\\nText.\\r\\n\\r\\n\\r\\n'",
+   "after": "b'# Doc\\n\\nText.\\n'"
+  },
+  {
+   "fixer": "eof",
+   "case": "E07_no_final_newline.md",
+   "result": {
+    "changed": true,
+    "before_chars": 14,
+    "after_chars": 15,
+    "delta_chars": 1
+   },
+   "before": "b'# Doc\\n\\nText.  '",
+   "after": "b'# Doc\\n\\nText.  \\n'"
+  },
+  {
+   "fixer": "eof",
+   "case": "E08_crlf_clean.md",
+   "result": {
+    "changed": false,
+    "before_chars": 13,
+    "after_chars": 13,
+    "delta_chars": 0
+   },
+   "before": "b'# Doc\\r\\n\\r\\nText.\\r\\n'",
+   "after": "b'# Doc\\r\\n\\r\\nText.\\r\\n'"
+  }
+ ],
+ "corpus_summary": {
+  "files_total": 450,
+  "files_ignored": 1,
+  "summary": {},
+  "rows_changed": []
+ },
+ "baseline_table_md": "| case | before sha256[:12] | after (cur) sha256[:12] | changed | ids before -> after | result |\n|---|---|---|---|---|---|\n| py_01_two_good | 619658144e91 | a8659915ebae | True | ['alpha@f', 'beta@f', 'keep@g'] -> ['alpha@f', 'keep@g'] | mg=1 rm=1 |\n| py_02_numeric_second | e1eac2e5fd4e | 02d457d86b89 | True | ['auto-beacon@f-x1y2', 'carto@000123'] -> ['carto@000123'] | mg=1 rm=1 |\n| py_03_numeric_both | 8cb4f27afa3b | 9e68ecf01efe | True | ['x@001', 'y@002'] -> ['x@001'] | mg=1 rm=1 |\n| py_04_span_over_ast | 95d20bfc21ff | 95d20bfc21ff | False | ['s@f', 'a@f'] -> ['s@f', 'a@f'] | mg=- rm=- |\n| py_05_ast_over_span | dd02343cfed4 | dd02343cfed4 | False | ['a@f', 's@f'] -> ['a@f', 's@f'] | mg=- rm=- |\n| py_06_F2_lost_bracket | 9d0cc408913a | 8c53fb7ff949 | True | ['lost@0', 'good@g'] -> ['lost@0'] | mg=1 rm=1 |\n| py_07_lost_bracket_no_code_bracket | 4e844591880c | 4e844591880c | False | ['good@g'] -> ['good@g'] | mg=- rm=- |\n| py_08_idless_opener | 044b3467cf90 | af3893e452a8 | True | [None, 'good@g'] -> [''] | mg=1 rm=1 |\n| py_09_nested_opener | 6152625fe7ba | f42bba1df7ac | True | ['inner@0', 'good@g'] -> ['inner@0'] | mg=1 rm=1 |\n| py_10_junk_opener | 349de7873b0f | 9f6eee28146b | True | ['junk@0', 'good@g'] -> ['junk@0'] | mg=1 rm=1 |\n| py_11_docstring_two_examples | 1a6e3f9d09cd | c49869ace022 | True | ['real@h', 'ex1@0', 'ex2@0'] -> ['real@h', 'ex1@0'] | mg=1 rm=1 |\n| py_12_test_fixture_string | aa3828af6fa0 | 48f757943dad | True | ['first', 'second'] -> ['first'] | mg=1 rm=1 |\n| py_13_unterminated_after_good | 19b3a3a4ed2e | dbb1ff1f5ee9 | True | ['good@f', 'unterm@0'] -> ['unterm@0'] | mg=1 rm=1 |\n| py_14_multiline_showspan | 4398571bc929 | 4363ab1ba8aa | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| py_15_detached_indented | 797f43c846fc | a96bf17d9caa | True | ['stray@0', 'good@g'] -> ['stray@0'] | mg=1 rm=1 |\n| py_16_method_two_blocks | 6dd8a22fc142 | c20025e8df94 | True | ['a@C.m', 'b@C.m'] -> ['a@C.m'] | mg=1 rm=1 |\n| py_17_crlf_two_good | 42a45be4fb89 | 97feaa94ce6f | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| py_18_multiline_decorator | 128d014e0bef | 128d014e0bef | False | ['a@f', 'b@f'] -> ['a@f', 'b@f'] | mg=- rm=- |\n| py_19_three_blocks | e7fa2f237d9c | 365c1d9e906b | True | ['a@f', 'b@f', 'c@f'] -> ['a@f'] | mg=1 rm=2 |\n| py_20_double_hash_comments | e84bc1e15285 | 9b8809510a8d | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| py_21_formfeed | a20239f8e6fc | f83b7827c83f | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| py_22_comment_continuation_key | bb0b79af57cc | a4d111c5e7c0 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| js_01_two_good | af68413ee070 | bb827d14c484 | True | ['alpha@f', 'beta@f'] -> ['alpha@f'] | mg=1 rm=1 |\n| js_02_F2_lost_bracket | b4498d1b78ed | dc291eb66c5a | True | ['lost@0', 'good@g'] -> ['lost@0'] | mg=1 rm=1 |\n| js_03_jsdoc_two | 387bcb6a08ea | 3154a291b511 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| js_04_cblock_plus_line | 74f3ecabdaa2 | 7bf857a98efa | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| js_05_template_literal | b5a89e0559cb | c7663ba98847 | True | ['ex1@0', 'ex2@0'] -> ['ex1@0'] | mg=1 rm=1 |\n| js_06_code_mentions_opener | 3891dacc6555 | 3891dacc6555 | False | [None, 'good@g'] -> [None, 'good@g'] | mg=- rm=- |\n| js_07_unterminated_after_good | afbdb7c70ced | 7d9ee062c7f8 | True | ['good@f', 'unterm@0'] -> ['unterm@0'] | mg=1 rm=1 |\n| js_08_idless_and_nested | bb8c8fa33f59 | e29c34a42702 | True | [None, 'good@g'] -> [''] | mg=1 rm=1 |\n| ts_09_decorated_method | 9cb840afc6f1 | beb5090ab789 | True | ['a@C.m', 'b@C.m'] -> ['a@C.m'] | mg=1 rm=1 |\n| vue_10_script_two | 3bc7197f6acd | 30cae0b1bc09 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| vue_11_template_two | 1ed31d74ba88 | 1ed31d74ba88 | False | ['ta@0', 'tb@0', 'ta@0', 'tb@0'] -> ['ta@0', 'tb@0', 'ta@0', 'tb@0'] | mg=- rm=- |\n| md_01_two_good | 3bd3018c1e54 | d69523e51db1 | True | ['a@h', 'b@h'] -> ['a@h'] | mg=1 rm=1 |\n| md_02_numeric | 1280359d592f | 807d6fc323a2 | True | ['auto@h-1x', 'doc@000007'] -> ['doc@000007'] | mg=1 rm=1 |\n| md_03_ast_span | 00db3063eb5c | 00db3063eb5c | False | ['s@h', 'a@h'] -> ['s@h', 'a@h'] | mg=- rm=- |\n| md_04_lost_end | b72d4a193800 | d4f082427f74 | True | ['lost@0', 'good@h3'] -> ['lost@0'] | mg=1 rm=1 |\n| md_05_oneline_open_after_note | d15c82f03c8d | d345b71458b4 | True | ['a@h', 'b@h'] -> ['a@h'] | mg=1 rm=1 |\n| md_06_comment_with_arrow | 18421949f4ab | 18421949f4ab | False | ['a@h', 'b@h'] -> ['a@h', 'b@h'] | mg=- rm=- |\n| md_07_fenced_examples | fa789373181f | fa789373181f | False | [] -> [] | mg=- rm=- |\n| md_08_lost_bracket | 95d070cc2aa1 | 95d070cc2aa1 | False | ['good@h'] -> ['good@h'] | mg=- rm=- |\n| md_09_heading_in_html_comment_between | 9cc2afcf2cd9 | 17f47f49c8fa | True | ['a@h', 'b@h'] -> ['a@h'] | mg=1 rm=1 |\n| py_23_single_decorator | 7dad8613033e | 8aae0a506075 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |\n| ts_24_single_above_decorator | e5015c80b1bc | e5015c80b1bc | False | ['a@C.m'] -> ['a@C.m'] | mg=- rm=- |\n",
+ "cases_list": [
+  {
+   "case": "py_01_two_good",
+   "ext": "py",
+   "note": "two good ast blocks on one def (two sessions)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: beta@f",
+   "cls_sp": "GOOD ID LOST: beta@f"
+  },
+  {
+   "case": "py_02_numeric_second",
+   "ext": "py",
+   "note": "numeric-suffix id second: survivor = numeric id at first position",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: auto-beacon@f-x1y2",
+   "cls_sp": "GOOD ID LOST: auto-beacon@f-x1y2"
+  },
+  {
+   "case": "py_03_numeric_both",
+   "ext": "py",
+   "note": "two numeric ids: first numeric wins",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: y@002",
+   "cls_sp": "GOOD ID LOST: y@002"
+  },
+  {
+   "case": "py_04_span_over_ast",
+   "ext": "py",
+   "note": "stacked span + ast on one def",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "py_05_ast_over_span",
+   "ext": "py",
+   "note": "stacked ast + span on one def (span between ast and def)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "py_06_F2_lost_bracket",
+   "ext": "py",
+   "note": "F2: lost ] + ]-led code line + good block",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "CODE/PROSE DELETED; GOOD ID LOST: good@g",
+   "cls_sp": "CODE/PROSE DELETED; GOOD ID LOST: good@g"
+  },
+  {
+   "case": "py_07_lost_bracket_no_code_bracket",
+   "ext": "py",
+   "note": "lost ] with no ]-led code line: swallows next block, no merge",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "py_08_idless_opener",
+   "ext": "py",
+   "note": "id-less opener above a good block (c07)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: good@g",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "py_09_nested_opener",
+   "ext": "py",
+   "note": "nested opener above a good block (c06)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: good@g",
+   "cls_sp": "GOOD ID LOST: good@g"
+  },
+  {
+   "case": "py_10_junk_opener",
+   "ext": "py",
+   "note": "junk opener (trailing text) above a good block (c16)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: good@g",
+   "cls_sp": "GOOD ID LOST: good@g"
+  },
+  {
+   "case": "py_11_docstring_two_examples",
+   "ext": "py",
+   "note": "two stacked example blocks inside a docstring (block inside a string)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "merge (no loss detected)",
+   "cls_sp": "merge (no loss detected)"
+  },
+  {
+   "case": "py_12_test_fixture_string",
+   "ext": "py",
+   "note": "test fixture string with two stacked blocks (tests/ are mapped)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "merge (no loss detected)",
+   "cls_sp": "merge (no loss detected)"
+  },
+  {
+   "case": "py_13_unterminated_after_good",
+   "ext": "py",
+   "note": "good block then an unterminated block (no ] to EOF) on the same def",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: good@f",
+   "cls_sp": "GOOD ID LOST: good@f"
+  },
+  {
+   "case": "py_14_multiline_showspan",
+   "ext": "py",
+   "note": "multi-line comment + show_span on one of two blocks",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f",
+   "cls_sp": "GOOD ID LOST: b@f"
+  },
+  {
+   "case": "py_15_detached_indented",
+   "ext": "py",
+   "note": "an indented block left at the end of f's body + good block on g",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: good@g",
+   "cls_sp": "GOOD ID LOST: good@g"
+  },
+  {
+   "case": "py_16_method_two_blocks",
+   "ext": "py",
+   "note": "two blocks on one method (indented)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@C.m",
+   "cls_sp": "GOOD ID LOST: b@C.m"
+  },
+  {
+   "case": "py_17_crlf_two_good",
+   "ext": "py",
+   "note": "CRLF file with two good blocks",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f; LINE ENDINGS CHANGED (CR 19->0)",
+   "cls_sp": "GOOD ID LOST: b@f; LINE ENDINGS CHANGED (CR 19->0)"
+  },
+  {
+   "case": "py_18_multiline_decorator",
+   "ext": "py",
+   "note": "two blocks on one decorated def, multi-line decorator between",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "py_19_three_blocks",
+   "ext": "py",
+   "note": "three blocks (comment and blank between); identical comments dedupe",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f,c@f",
+   "cls_sp": "GOOD ID LOST: b@f,c@f"
+  },
+  {
+   "case": "py_20_double_hash_comments",
+   "ext": "py",
+   "note": "## opener with comments= (alias missed): merge drops the comments= text",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f",
+   "cls_sp": "GOOD ID LOST: b@f"
+  },
+  {
+   "case": "py_21_formfeed",
+   "ext": "py",
+   "note": "form feed in source: readlines vs splitlines line models diverge",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f",
+   "cls_sp": "GOOD ID LOST: b@f"
+  },
+  {
+   "case": "py_22_comment_continuation_key",
+   "ext": "py",
+   "note": "wrapped comment whose continuation line starts 'comments ='",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f",
+   "cls_sp": "GOOD ID LOST: b@f"
+  },
+  {
+   "case": "js_01_two_good",
+   "ext": "js",
+   "note": "two good // blocks on one function",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: beta@f",
+   "cls_sp": "GOOD ID LOST: beta@f"
+  },
+  {
+   "case": "js_02_F2_lost_bracket",
+   "ext": "js",
+   "note": "F2 in JS: lost ] + ];-led code line + good block",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "CODE/PROSE DELETED; GOOD ID LOST: good@g",
+   "cls_sp": "CODE/PROSE DELETED; GOOD ID LOST: good@g"
+  },
+  {
+   "case": "js_03_jsdoc_two",
+   "ext": "js",
+   "note": "two JSDoc-form blocks on one function",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f",
+   "cls_sp": "GOOD ID LOST: b@f"
+  },
+  {
+   "case": "js_04_cblock_plus_line",
+   "ext": "js",
+   "note": "/* */ block + // block on one function",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "CODE/PROSE DELETED; GOOD ID LOST: b@f",
+   "cls_sp": "CODE/PROSE DELETED; GOOD ID LOST: b@f"
+  },
+  {
+   "case": "js_05_template_literal",
+   "ext": "js",
+   "note": "two example blocks inside a template literal",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "merge (no loss detected)",
+   "cls_sp": "merge (no loss detected)"
+  },
+  {
+   "case": "js_06_code_mentions_opener",
+   "ext": "js",
+   "note": "a code line containing @beacon[ (shared JS parser opens there; hygiene does not)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "js_07_unterminated_after_good",
+   "ext": "js",
+   "note": "good block then an unterminated // block on the same function",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: good@f",
+   "cls_sp": "GOOD ID LOST: good@f"
+  },
+  {
+   "case": "js_08_idless_and_nested",
+   "ext": "js",
+   "note": "id-less // opener above a good block",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: good@g",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "ts_09_decorated_method",
+   "ext": "ts",
+   "note": "TS: two blocks around a decorator on one method",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@C.m",
+   "cls_sp": "GOOD ID LOST: b@C.m"
+  },
+  {
+   "case": "vue_10_script_two",
+   "ext": "vue",
+   "note": "Vue: two // blocks on one script function",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f",
+   "cls_sp": "GOOD ID LOST: b@f"
+  },
+  {
+   "case": "vue_11_template_two",
+   "ext": "vue",
+   "note": "Vue: two template HTML-comment blocks on one element",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "md_01_two_good",
+   "ext": "md",
+   "note": "two good blocks on one heading",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@h",
+   "cls_sp": "GOOD ID LOST: b@h"
+  },
+  {
+   "case": "md_02_numeric",
+   "ext": "md",
+   "note": "numeric-suffix survivor in Markdown",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: auto@h-1x",
+   "cls_sp": "GOOD ID LOST: auto@h-1x"
+  },
+  {
+   "case": "md_03_ast_span",
+   "ext": "md",
+   "note": "stacked span + ast on one heading",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "md_04_lost_end",
+   "ext": "md",
+   "note": "block lost its --> (md_m01 family)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "CODE/PROSE DELETED; GOOD ID LOST: good@h3",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "md_05_oneline_open_after_note",
+   "ext": "md",
+   "note": "one-line <!-- @beacon[ opener after an unrelated HTML comment",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@h",
+   "cls_sp": "GOOD ID LOST: b@h"
+  },
+  {
+   "case": "md_06_comment_with_arrow",
+   "ext": "md",
+   "note": "a field value containing --> (first --> ends the hygiene's extent)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "GOOD ID LOST: b@h"
+  },
+  {
+   "case": "md_07_fenced_examples",
+   "ext": "md",
+   "note": "two example blocks inside a fenced code block",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "md_08_lost_bracket",
+   "ext": "md",
+   "note": "block lost its ] (md_m04 family)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  },
+  {
+   "case": "md_09_heading_in_html_comment_between",
+   "ext": "md",
+   "note": "multi-line ordinary HTML comment between two blocks",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@h",
+   "cls_sp": "GOOD ID LOST: b@h"
+  },
+  {
+   "case": "py_23_single_decorator",
+   "ext": "py",
+   "note": "block above a one-line decorator + block between decorator and def",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "GOOD ID LOST: b@f",
+   "cls_sp": "GOOD ID LOST: b@f"
+  },
+  {
+   "case": "ts_24_single_above_decorator",
+   "ext": "ts",
+   "note": "TS: one block above a decorator (mapper attachment probe)",
+   "variants": [
+    "cur",
+    "sp",
+    "spg"
+   ],
+   "cls_cur": "NO CHANGE",
+   "cls_sp": "NO CHANGE"
+  }
+ ]
+}

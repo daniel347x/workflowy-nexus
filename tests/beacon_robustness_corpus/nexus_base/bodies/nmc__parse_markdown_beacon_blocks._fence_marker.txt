@@ -1,0 +1,8 @@
+    def _fence_marker(raw_line: str):
+        # Return (char, run_length) if this line opens/closes a code fence,
+        # else None. Allows up to 3 leading spaces per CommonMark.
+        m = re.match(r"^ {0,3}(`{3,}|~{3,})", raw_line)
+        if not m:
+            return None
+        run = m.group(1)
+        return run[0], len(run)

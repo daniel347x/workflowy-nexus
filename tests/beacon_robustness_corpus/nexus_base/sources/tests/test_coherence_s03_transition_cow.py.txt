@@ -1,0 +1,1111 @@
+"""S03-A §14.2 — transition COW bridge + client cache-view integration tests."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import NOW, s02_node
+
+from workflowy_mcp.coherence import (
+    CacheView,
+    SemanticEffect,
+    append_journal_transaction,
+    initialize_manifest_if_absent,
+    manifest_with_updates,
+    new_bootstrap_manifest,
+    read_manifest,
+    write_manifest,
+)
+from workflowy_mcp.coherence.errors import (
+    CoherenceAccountMismatchError,
+    JournalIntegrityError,
+)
+from workflowy_mcp.coherence.operation_cache import publish_local_cache_view
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+BASE_NODES = [s02_node("A", name="alpha"), s02_node("B", name="beta", parent_id="A")]
+
+
+# ---------------------------------------------------------------------------
+# Client factory (isolated jobs root + snapshot dir, real client semantics)
+# ---------------------------------------------------------------------------
+
+
+def _make_client(tmp_path: Path, monkeypatch):
+    from pydantic import SecretStr
+
+    from workflowy_mcp.client.api_client_core import WorkFlowyClientCore
+    from workflowy_mcp.models import APIConfiguration
+
+    jobs_root = tmp_path / "cartographer_jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.get_cartographer_jobs_dir",
+        lambda: jobs_root,
+    )
+
+    def _runtime_subdir(*parts):
+        if parts == ("nodes_export_cache",):
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            return snapshot_dir
+        return tmp_path.joinpath(*parts)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.client.api_client_core.get_runtime_subdir", _runtime_subdir
+    )
+    config = APIConfiguration(
+        api_key=SecretStr("test-key-1234"), base_url="https://workflowy.com/api/v1"
+    )
+    return WorkFlowyClientCore(config), jobs_root, snapshot_dir
+
+
+def _populate(client, nodes=BASE_NODES, *, epoch_id: str = "e" * 32, seq: int = 0) -> CacheView:
+    return client._publish_lineage_view(
+        {"nodes": [dict(n) for n in nodes]},
+        epoch_number=1,
+        epoch_id=epoch_id,
+        adopted_sequence=seq,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+
+
+def _node_model(node_id: str, **fields):
+    from workflowy_mcp.models import WorkFlowyNode
+
+    return WorkFlowyNode(id=node_id, **fields)
+
+
+def _seed_lineage(probe, snapshot_dir: Path, nodes=BASE_NODES):
+    """Seed a manifest + base candidate so operation boundaries adopt cleanly."""
+
+    paths = probe._coherence_paths()
+    manifest = initialize_manifest_if_absent(
+        paths, new_bootstrap_manifest(paths.account_root.name, now=NOW)
+    )
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": [dict(n) for n in nodes]},
+        account_scope_id=paths.account_root.name,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=candidate, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    return paths
+
+
+def _make_lineage_client(tmp_path: Path, monkeypatch, nodes=BASE_NODES):
+    probe, _jr, snapshot_dir = _make_client(tmp_path, monkeypatch)
+    paths = _seed_lineage(probe, snapshot_dir, nodes)
+    client, _jr2, _sd2 = _make_client(tmp_path, monkeypatch)
+    return client, paths
+
+
+# ---------------------------------------------------------------------------
+# Publisher ownership + read-only derivations (H3)
+# ---------------------------------------------------------------------------
+
+
+def test_warm_start_builds_publisher_view(tmp_path, monkeypatch):
+    # Learn the credential-derived account scope from a probe client, seed a
+    # manifest + base under THAT scope, then construct the real client and
+    # prove the warm start publishes the lineage view (S03 §6.1).
+    from workflowy_mcp.coherence import initialize_manifest_if_absent, new_bootstrap_manifest
+
+    probe, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    paths = probe._coherence_paths()
+
+    manifest = initialize_manifest_if_absent(paths, new_bootstrap_manifest(paths.account_root.name, now=NOW))
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(tmp_path / "snapshots"),
+        {"nodes": BASE_NODES},
+        account_scope_id=paths.account_root.name,
+        epoch_number=0,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest,
+            base_snapshot_path=candidate,
+            coherence_mode="transition",
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+
+    client, _jr2, _sd2 = _make_client(tmp_path, monkeypatch)
+    view = client._cache_view_publisher.capture()
+    assert view.nodes_by_id["A"]["name"] == "alpha"
+    assert view.epoch_id == manifest.epoch_id
+    assert client._nodes_export_cache is view.nodes_export
+    assert client._nodes_export_cache_timestamp is not None
+
+
+def test_fresh_client_has_unpopulated_sentinel(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    assert client._nodes_export_cache is None
+    assert client._nodes_export_cache_timestamp is None
+    # S03-B loud-boundary tightening: with no operation boundary active and
+    # no explicit view=, the accessor fails loudly (migration-bug dialect) —
+    # the S03-A publisher-current compatibility fallback is retired.
+    from workflowy_mcp.coherence.errors import CacheViewError
+
+    with pytest.raises(CacheViewError, match="no operation cache snapshot"):
+        client._get_nodes_export_cache_nodes()
+    # An explicit unpopulated view keeps the legacy not-initialized dialect.
+    with pytest.raises(RuntimeError, match="not initialized"):
+        client._get_nodes_export_cache_nodes(
+            view=client._cache_view_publisher.capture()
+        )
+
+
+def test_legacy_cache_attributes_are_read_only(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    with pytest.raises(AttributeError):
+        client._nodes_export_cache = {"nodes": []}  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        client._nodes_export_cache_timestamp = "x"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# COW patchers: content, markers, immutability, dirty coupling
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_update_cached_node_name_cow(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    before = client._cache_view_publisher.capture()
+
+    found = await client.update_cached_node_name("A", "alpha-renamed")
+
+    assert found is True
+    after = client._cache_view_publisher.capture()
+    assert after is not before
+    assert after.nodes_by_id["A"]["name"] == "alpha-renamed"
+    # Markers unchanged (COW bridge never advances adoption).
+    assert (after.epoch_id, after.adopted_sequence) == (before.epoch_id, before.adopted_sequence)
+    # The prior published view is untouched (Axiom 5).
+    assert before.nodes_by_id["A"]["name"] == "alpha"
+    assert before.nodes_by_id["A"] is not after.nodes_by_id["A"]
+
+
+@async_test
+async def test_update_cached_node_note_cow_and_missing_id(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+
+    found = await client.update_cached_node_note("B", "note-2")
+    assert found is True
+    assert client._cache_view_publisher.capture().nodes_by_id["B"]["note"] == "note-2"
+
+    missing = await client.update_cached_node_note("ZZ-none", "nope")
+    assert missing is False
+
+
+def test_apply_create_appends_with_parent_and_discards_dirty(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    client._mark_nodes_export_dirty(["C"])
+    assert "C" in client._nodes_export_dirty_ids
+
+    client._apply_create_to_nodes_export_cache(
+        _node_model("C", name="gamma"), parent_id="A"
+    )
+
+    view = client._cache_view_publisher.capture()
+    assert view.nodes_by_id["C"]["parent_id"] == "A"
+    assert view.nodes_by_id["C"]["parentId"] == "A"
+    assert "C" not in client._nodes_export_dirty_ids
+
+
+def test_apply_update_merges_excluding_none_and_preserves_metadata(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    before = client._cache_view_publisher.capture()
+
+    client._apply_update_to_nodes_export_cache(_node_model("A", name="alpha-2"))
+
+    view = client._cache_view_publisher.capture()
+    assert view.nodes_by_id["A"]["name"] == "alpha-2"
+    # exclude_none semantics: parentage/priority not clobbered by the update.
+    assert view.nodes_by_id["A"]["priority"] == before.nodes_by_id["A"]["priority"]
+    with pytest.raises(RuntimeError, match="missing node"):
+        client._apply_update_to_nodes_export_cache(_node_model("ZZ-none", name="x"))
+
+
+def test_apply_delete_removes_subtree(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+
+    client._apply_delete_to_nodes_export_cache("A")
+
+    view = client._cache_view_publisher.capture()
+    assert "A" not in view.nodes_by_id
+    assert "B" not in view.nodes_by_id  # descendant removed too
+    with pytest.raises(RuntimeError, match="missing node"):
+        client._apply_delete_to_nodes_export_cache("A")
+
+
+def test_apply_move_updates_parentage(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+
+    client._apply_move_to_nodes_export_cache("B", None)
+
+    assert client._cache_view_publisher.capture().nodes_by_id["B"]["parent_id"] is None
+
+
+def test_no_published_object_is_mutated_by_patchers(tmp_path, monkeypatch):
+    """§14.2 hard rule: no patcher may mutate a published dict/list/node."""
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    frozen = client._cache_view_publisher.capture()
+    frozen_json = json.dumps(frozen.nodes_export, sort_keys=True, default=str)
+
+    client._apply_create_to_nodes_export_cache(_node_model("C", name="gamma"), parent_id="A")
+    client._apply_update_to_nodes_export_cache(_node_model("A", name="alpha-2"))
+    client._apply_move_to_nodes_export_cache("B", None)
+    client._apply_delete_to_nodes_export_cache("C")
+
+    assert json.dumps(frozen.nodes_export, sort_keys=True, default=str) == frozen_json
+
+
+def test_patchers_raise_on_unpopulated_cache(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    with pytest.raises(RuntimeError, match="not initialized"):
+        client._apply_update_to_nodes_export_cache(_node_model("A", name="x"))
+
+
+# ---------------------------------------------------------------------------
+# Racing semantics (§12.4) and lineage-adoption regression guard
+# ---------------------------------------------------------------------------
+
+
+def test_stale_expected_view_patch_rebases_onto_current(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    basis = client._cache_view_publisher.capture()
+
+    # Another patch lands first, moving the publisher past the basis.
+    client._apply_update_to_nodes_export_cache(_node_model("B", name="beta-2"))
+
+    def _rename_a(working):
+        for index, node in enumerate(working["nodes"]):
+            if node["id"] == "A":
+                patched = dict(node)
+                patched["name"] = "alpha-stale-basis"
+                working["nodes"][index] = patched
+                return
+
+    published = publish_local_cache_view(
+        client._cache_view_publisher,
+        _rename_a,
+        expected_view=basis,  # stale — must rebase, never fail or overwrite B's patch
+        reason="stale-basis-test",
+    )
+
+    assert published.nodes_by_id["A"]["name"] == "alpha-stale-basis"
+    assert published.nodes_by_id["B"]["name"] == "beta-2"  # the racing patch survived
+
+
+def test_lineage_adoption_never_regresses_newer_view(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=5)
+    current = client._cache_view_publisher.capture()
+
+    returned = client._publish_lineage_view(
+        {"nodes": []},
+        epoch_number=1,
+        epoch_id="e" * 32,
+        adopted_sequence=2,  # OLDER markers
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+    )
+
+    assert returned is current
+    assert client._cache_view_publisher.capture() is current
+
+
+@async_test
+async def test_adoption_rebases_tail_onto_racing_cow_patch(tmp_path, monkeypatch):
+    """§5.3: a COW patch landing mid-adoption must survive — the journal tail
+    rebases onto the patched same-generation view (never discarded)."""
+
+    import os
+
+    from workflowy_mcp.coherence import JournalProducer
+    from workflowy_mcp.coherence import adoption as adoption_module
+
+    client, jobs_root, _sd = _make_client(tmp_path, monkeypatch)
+    paths = client._coherence_paths()
+    manifest = read_manifest(paths, required=True)
+
+    # Lineage: base snapshot + one committed record at seq 1.
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(tmp_path / "snapshots"),
+        {"nodes": BASE_NODES},
+        account_scope_id=manifest.account_scope_id,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest,
+            base_snapshot_path=candidate,
+            coherence_mode="transition",
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    manifest = read_manifest(paths, required=True)
+    append_journal_transaction(
+        paths,
+        operation_kind="test",
+        effects=[SemanticEffect.node_create(s02_node("C", name="gamma"))],
+        producer=JournalProducer(
+            pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+        ),
+    )
+    client._publish_lineage_view(
+        {"nodes": [dict(n) for n in BASE_NODES]},
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=manifest.account_scope_id,
+    )
+
+    # Inject a COW patch precisely BETWEEN the adoption's basis capture and
+    # its CAS attempt (inside the tail replay).  Fires EXACTLY ONCE: the
+    # adoption's CAS then fails, retries, and rebases onto the patched view.
+    real_replay = adoption_module._replay_tail_onto
+    fired = {"done": False}
+
+    def _patch_then_replay(payload, records, **kwargs):
+        if not fired["done"]:
+            fired["done"] = True
+
+            def _rename(working):
+                for index, node in enumerate(working["nodes"]):
+                    if node["id"] == "A":
+                        patched = dict(node)
+                        patched["name"] = "alpha-mid-flight"
+                        working["nodes"][index] = patched
+                        return
+
+            publish_local_cache_view(
+                client._cache_view_publisher, _rename, reason="mid-flight"
+            )
+        return real_replay(payload, records, **kwargs)
+
+    monkeypatch.setattr(adoption_module, "_replay_tail_onto", _patch_then_replay)
+
+    result = await client._adopt_coherence_head()
+
+    assert result.disposition == "tail_replayed"
+    view = client._cache_view_publisher.capture()
+    assert view.adopted_sequence == 1
+    # BOTH the mid-flight local patch AND the journal effect survived.
+    assert view.nodes_by_id["A"]["name"] == "alpha-mid-flight"
+    assert view.nodes_by_id["C"]["name"] == "gamma"
+
+
+# ---------------------------------------------------------------------------
+# S02 refresh / compat-patch local-adoption integration
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_refresh_adopts_through_publisher(tmp_path, monkeypatch):
+    from workflowy_mcp.coherence import refresh_authority as refresh_module
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+    client._mark_nodes_export_dirty(["A"])
+    assert client._nodes_export_dirty_ids
+
+    outcome = refresh_module.RefreshOutcome(
+        status="published",
+        refresh_kind="system",
+        claim_id="c" * 32,
+        epoch_number=2,
+        epoch_id="f" * 32,
+        previous_epoch_id="e" * 32,
+        base_snapshot_path=None,
+        incorporated_through_seq=0,
+        journal_head_seq=0,
+        adopted_sequence=0,
+        hard_barrier_cleared=False,
+        external_dirt_cleared=False,
+        external_dirt_clear_failed=False,
+        deduplicated=False,
+        successor_refresh_performed=False,
+        settle_seconds=0.0,
+        node_count=2,
+        snapshot_timestamp=NOW,
+        nodes_export={"nodes": [s02_node("A", name="fresh"), s02_node("B", name="beta")]},
+        details=None,
+    )
+
+    async def _fake_refresh(**_kwargs):
+        return outcome
+
+    monkeypatch.setattr(refresh_module, "run_full_refresh", _fake_refresh)
+
+    result = await client.refresh_nodes_export_cache()
+
+    assert result["success"] is True
+    view = client._cache_view_publisher.capture()
+    assert (view.epoch_number, view.epoch_id, view.adopted_sequence) == (2, "f" * 32, 0)
+    assert view.nodes_by_id["A"]["name"] == "fresh"
+    assert client._nodes_export_dirty_ids == set()
+    assert client._nodes_export_cache_timestamp == NOW
+
+
+@async_test
+async def test_compat_patch_adoption_discards_only_patched_dirty_ids(tmp_path, monkeypatch):
+    from workflowy_mcp.coherence import refresh_authority as refresh_module
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+    client._mark_nodes_export_dirty(["A", "B"])
+
+    outcome = refresh_module.RefreshOutcome(
+        status="published",
+        refresh_kind="compat_patch",
+        claim_id="c" * 32,
+        epoch_number=2,
+        epoch_id="f" * 32,
+        previous_epoch_id="e" * 32,
+        base_snapshot_path=None,
+        incorporated_through_seq=0,
+        journal_head_seq=0,
+        adopted_sequence=0,
+        hard_barrier_cleared=False,
+        external_dirt_cleared=False,
+        external_dirt_clear_failed=False,
+        deduplicated=False,
+        successor_refresh_performed=False,
+        settle_seconds=0.0,
+        node_count=2,
+        snapshot_timestamp=NOW,
+        nodes_export={
+            "nodes": [s02_node("A", name="patched-name"), s02_node("B", name="beta")]
+        },
+        details={
+            "patched": 1,
+            "patched_ids": ["A"],
+            "missing_ids": [],
+            "locked": True,
+            "loaded_latest": None,
+            "snapshot_path": None,
+        },
+    )
+
+    async def _fake_compat(**_kwargs):
+        return outcome
+
+    monkeypatch.setattr(refresh_module, "run_compat_patch", _fake_compat)
+
+    result = await client.patch_nodes_export_snapshot_on_disk(
+        [{"id": "A", "name": "patched-name"}]
+    )
+
+    assert result["success"] is True
+    view = client._cache_view_publisher.capture()
+    assert view.nodes_by_id["A"]["name"] == "patched-name"
+    # Only the patched id's dirty flag was discarded; B's survives.
+    assert client._nodes_export_dirty_ids == {"B"}
+
+
+def test_dirty_ids_mark_and_clear_are_serialized(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    client._mark_nodes_export_dirty(None)  # the "*" sentinel
+    assert "*" in client._nodes_export_dirty_ids
+    client._mark_nodes_export_dirty(["A", "", "B"])
+    assert client._nodes_export_dirty_ids == {"*", "A", "B"}
+
+
+# ---------------------------------------------------------------------------
+# Seal item 2 — attempt-local patcher outcomes under CAS retries
+# ---------------------------------------------------------------------------
+
+
+def _race_once_at_cas(client, monkeypatch, competing_transform):
+    """Fire ``competing_transform`` as a rival COW publication exactly once,
+    precisely at the first CAS attempt of the NEXT bridge publication."""
+
+    from workflowy_mcp.coherence import CacheView as _CacheView
+    from workflowy_mcp.coherence.cache_view import CacheViewPublisher
+
+    publisher = client._cache_view_publisher
+    real_publish = CacheViewPublisher.publish_with_commit
+    fired = {"done": False}
+
+    def _racing_publish(new_view, *, expected_current, commit=None):
+        if not fired["done"]:
+            fired["done"] = True
+            current = expected_current
+            working = dict(current.nodes_export)
+            working["nodes"] = list(current.nodes_export["nodes"])
+            competing_transform(working)
+            competitor = _CacheView.build(
+                epoch_number=current.epoch_number,
+                epoch_id=current.epoch_id,
+                adopted_sequence=current.adopted_sequence,
+                nodes_export=working,
+                account_scope_id=current.account_scope_id,
+            )
+            # The rival wins the race.
+            real_publish(publisher, competitor, expected_current=current)
+        return real_publish(
+            publisher, new_view, expected_current=expected_current, commit=commit
+        )
+
+    monkeypatch.setattr(publisher, "publish_with_commit", _racing_publish)
+
+
+@async_test
+@pytest.mark.parametrize("field", ["name", "note"])
+async def test_patcher_outcome_false_when_rival_removes_target(tmp_path, monkeypatch, field):
+    """Attempt 1 finds the node and loses CAS; the rival removed it; the
+    retry sees it absent; the final return must be False and the claimed
+    patch must NOT appear in the current view."""
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+
+    def _remove_a(working):
+        working["nodes"] = [n for n in working["nodes"] if n.get("id") != "A"]
+
+    _race_once_at_cas(client, monkeypatch, _remove_a)
+
+    if field == "name":
+        result = await client.update_cached_node_name("A", "claimed-patch")
+    else:
+        result = await client.update_cached_node_note("A", "claimed-patch")
+
+    assert result is False
+    view = client._cache_view_publisher.capture()
+    assert "A" not in view.nodes_by_id  # no phantom patch
+
+
+@async_test
+@pytest.mark.parametrize("field", ["name", "note"])
+async def test_patcher_outcome_true_when_rival_keeps_target(tmp_path, monkeypatch, field):
+    """Attempt 1 loses CAS but the rival left the target present; the retry
+    patches it and the final return must be True with both writes visible."""
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+
+    def _rename_b(working):
+        for index, node in enumerate(working["nodes"]):
+            if node.get("id") == "B":
+                patched = dict(node)
+                patched["name"] = "beta-rival"
+                working["nodes"][index] = patched
+                return
+
+    _race_once_at_cas(client, monkeypatch, _rename_b)
+
+    if field == "name":
+        result = await client.update_cached_node_name("A", "alpha-won")
+    else:
+        result = await client.update_cached_node_note("A", "note-won")
+
+    assert result is True
+    view = client._cache_view_publisher.capture()
+    assert view.nodes_by_id["A"][field] == ("alpha-won" if field == "name" else "note-won")
+    assert view.nodes_by_id["B"]["name"] == "beta-rival"  # rival write survived
+
+
+# ---------------------------------------------------------------------------
+# Seal item 3 — equal-marker lineage rule
+# ---------------------------------------------------------------------------
+
+
+def test_equal_marker_offer_preserves_current_cow_chain(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+    client._apply_update_to_nodes_export_cache(_node_model("A", name="alpha-cow"))
+    current = client._cache_view_publisher.capture()
+    client._mark_nodes_export_dirty(["B"])
+
+    returned = client._publish_lineage_view(
+        {"nodes": [s02_node("A", name="stale-original"), s02_node("B", name="beta")]},
+        epoch_number=1,
+        epoch_id="e" * 32,
+        adopted_sequence=0,  # COMPLETE identity equality
+        snapshot_timestamp="1999-01-01T00:00:00+00:00",
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,  # must NOT take effect
+    )
+
+    assert returned is current  # the cumulative COW chain wins
+    view = client._cache_view_publisher.capture()
+    assert view is current
+    assert view.nodes_by_id["A"]["name"] == "alpha-cow"  # COW overlay preserved
+    assert client._nodes_export_dirty_ids == {"B"}  # dirty state untouched
+    assert client._cache_view_snapshot_timestamp == NOW  # timestamp untouched
+
+
+def test_equal_markers_different_epoch_id_fails(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+    current = client._cache_view_publisher.capture()
+
+    with pytest.raises(JournalIntegrityError, match="collides with a different epoch identity"):
+        client._publish_lineage_view(
+            {"nodes": []},
+            epoch_number=1,
+            epoch_id="f" * 32,  # same number, different identity
+            adopted_sequence=0,
+            snapshot_timestamp=NOW,
+            account_scope_id=client._safe_account_scope_id(),
+        )
+    assert client._cache_view_publisher.capture() is current
+
+
+def test_foreign_account_lineage_offer_fails(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+    current = client._cache_view_publisher.capture()
+
+    with pytest.raises(CoherenceAccountMismatchError, match="does not match this client's account"):
+        client._publish_lineage_view(
+            {"nodes": []},
+            epoch_number=2,
+            epoch_id="f" * 32,
+            adopted_sequence=0,
+            snapshot_timestamp=NOW,
+            account_scope_id="b" * 32,
+        )
+    assert client._cache_view_publisher.capture() is current
+
+
+def test_newer_lineage_still_publishes(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+
+    published = client._publish_lineage_view(
+        {"nodes": [s02_node("N", name="newer")]},
+        epoch_number=2,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp="2027-01-01T00:00:00+00:00",
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+
+    assert published.epoch_id == "f" * 32
+    assert client._cache_view_publisher.capture() is published
+    assert client._cache_view_snapshot_timestamp == "2027-01-01T00:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# Seal-2 item 2 — lineage offers bind to the CLIENT's authoritative account
+# ---------------------------------------------------------------------------
+
+
+def test_sentinel_client_rejects_foreign_account_offer(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)  # sentinel current
+    client_account = client._safe_account_scope_id()
+    assert client_account is not None and client_account != "b" * 32
+    before = client._cache_view_publisher.capture()
+
+    with pytest.raises(CoherenceAccountMismatchError, match="does not match this client's account"):
+        client._publish_lineage_view(
+            {"nodes": [s02_node("X")]},
+            epoch_number=1,
+            epoch_id="f" * 32,
+            adopted_sequence=0,
+            snapshot_timestamp=NOW,
+            account_scope_id="b" * 32,
+        )
+    # Refusal preserves the EXACT publisher object (not merely "a sentinel"),
+    # the timestamp bookkeeping, and the dirty set.
+    assert client._cache_view_publisher.capture() is before
+    assert client._cache_view_snapshot_timestamp is None
+    assert client._nodes_export_dirty_ids == set()
+
+
+def test_populated_current_unbound_client_guard_fails(tmp_path, monkeypatch):
+    """Seal-3 item 2B: the client lineage adapter's OWN current-view binding
+    guard (distinct from the adoption-engine checks): a populated current
+    view carrying account_scope_id=None must make any lineage offer fail
+    closed, preserving view/timestamp/dirty exactly."""
+
+    from workflowy_mcp.coherence import CacheView
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+    current = client._cache_view_publisher.capture()
+    # Replace the current view with a POPULATED but UNBOUND view (test seam:
+    # direct publisher publish, no production path can produce this).
+    unbound = CacheView.build(
+        epoch_number=current.epoch_number,
+        epoch_id=current.epoch_id,
+        adopted_sequence=current.adopted_sequence,
+        nodes_export={"nodes": [s02_node("A", name="alpha")]},
+        account_scope_id=None,
+    )
+    client._cache_view_publisher.publish(unbound, expected_current=current)
+    before = client._cache_view_publisher.capture()
+    client._mark_nodes_export_dirty(["A"])
+    timestamp_before = client._cache_view_snapshot_timestamp
+
+    with pytest.raises(
+        CoherenceAccountMismatchError,
+        match="current populated view is not bound to this client's account scope",
+    ):
+        client._publish_lineage_view(
+            {"nodes": [s02_node("N", name="newer")]},
+            epoch_number=2,
+            epoch_id="f" * 32,
+            adopted_sequence=0,
+            snapshot_timestamp="2027-01-01T00:00:00+00:00",
+            account_scope_id=client._safe_account_scope_id(),
+        )
+    assert client._cache_view_publisher.capture() is before
+    assert client._cache_view_snapshot_timestamp == timestamp_before
+    assert client._nodes_export_dirty_ids == {"A"}
+
+
+def test_sentinel_client_omitted_account_normalizes_to_client(tmp_path, monkeypatch):
+    """Documented contract: account_scope_id=None means 'derive from this
+    client', never 'unbound' — the published view is account-bound."""
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    published = client._publish_lineage_view(
+        {"nodes": [s02_node("X", name="xray")]},
+        epoch_number=1,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=None,  # omitted -> client's account
+    )
+    assert published.account_scope_id == client._safe_account_scope_id()
+    assert published.nodes_by_id["X"]["name"] == "xray"
+
+
+def test_populated_client_newer_unbound_offer_normalizes_and_publishes(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+
+    published = client._publish_lineage_view(
+        {"nodes": [s02_node("N", name="newer")]},
+        epoch_number=2,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=None,  # omitted -> derives the client account
+    )
+    assert published.account_scope_id == client._safe_account_scope_id()
+    assert published.nodes_by_id["N"]["name"] == "newer"
+
+
+def test_populated_client_rejects_foreign_account_offer(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, epoch_id="e" * 32, seq=0)
+    current = client._cache_view_publisher.capture()
+    client._mark_nodes_export_dirty(["A"])
+
+    with pytest.raises(CoherenceAccountMismatchError, match="does not match this client's account"):
+        client._publish_lineage_view(
+            {"nodes": []},
+            epoch_number=2,
+            epoch_id="f" * 32,
+            adopted_sequence=0,
+            snapshot_timestamp="2027-01-01T00:00:00+00:00",
+            account_scope_id="b" * 32,
+        )
+    assert client._cache_view_publisher.capture() is current
+    assert client._cache_view_snapshot_timestamp == NOW
+    assert client._nodes_export_dirty_ids == {"A"}
+
+
+def test_sentinel_client_correct_account_publishes(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    published = client._publish_lineage_view(
+        {"nodes": [s02_node("X")]},
+        epoch_number=1,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+    )
+    assert client._cache_view_publisher.capture() is published
+
+
+# ---------------------------------------------------------------------------
+# Seal item 10 — dirty-ID decision inside the synchronized section
+# ---------------------------------------------------------------------------
+
+
+def test_dirty_mark_unpopulated_noop_and_populated_marks(tmp_path, monkeypatch):
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    # Unpopulated: no mark is recorded (legacy no-cache behavior).
+    client._mark_nodes_export_dirty(["A"])
+    client._mark_nodes_export_dirty(None)
+    assert client._nodes_export_dirty_ids == set()
+    # Populated: marks land (blank ids ignored; None = "*").
+    _populate(client)
+    client._mark_nodes_export_dirty(["A", ""])
+    assert client._nodes_export_dirty_ids == {"A"}
+    client._mark_nodes_export_dirty(None)
+    assert "*" in client._nodes_export_dirty_ids
+
+
+def test_dirty_mark_decision_uses_current_state_inside_lock(tmp_path, monkeypatch):
+    """The populated check must observe the state AT the synchronized
+    section, never a stale outside-lock read: publish DURING the entry to
+    the mark and the mark must still land."""
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)  # unpopulated
+    real_sync = client._cache_view_publisher.synchronized
+
+    def _publish_first(fn):
+        _populate(client)  # publish BEFORE the synchronized section runs
+        return real_sync(fn)
+
+    monkeypatch.setattr(client._cache_view_publisher, "synchronized", _publish_first)
+    client._mark_nodes_export_dirty(["A"])
+    assert client._nodes_export_dirty_ids == {"A"}  # the mark was NOT lost
+
+
+# ---------------------------------------------------------------------------
+# S03-B audit amendment A1 — post-commit dirty sampling INSIDE the critical section
+# ---------------------------------------------------------------------------
+
+
+def _rename(node_id: str, new_name: str):
+    def _transform(working):
+        for index, node in enumerate(working["nodes"]):
+            if node.get("id") == node_id:
+                patched = dict(node)
+                patched["name"] = new_name
+                working["nodes"][index] = patched
+                return
+        raise AssertionError(f"target {node_id} missing")
+
+    return _transform
+
+
+@async_test
+async def test_a1_dirty_sample_taken_under_publisher_mutex(tmp_path, monkeypatch):
+    """A1: the post-commit dirty sample must run INSIDE the publisher
+    critical section (view swap + dirty commit + dirty sample = ONE atomic
+    publication).  The probe sampler records whether the publisher mutex is
+    HELD at sample time — under the pre-amendment bridge (sample after
+    ``publish_with_commit`` returned) the mutex is FREE and this test fails.
+    """
+
+    from workflowy_mcp.coherence.operation_cache import (
+        cache_operation_boundary,
+        current_operation_cache,
+        publish_local_cache_view,
+    )
+
+    client, _paths = _make_lineage_client(tmp_path, monkeypatch)
+    client._mark_nodes_export_dirty(["A"])
+    publisher = client._cache_view_publisher
+    probe = {"sampled_outside_mutex": None}
+
+    def _sampler():
+        # White-box scheduling probe: a non-blocking acquire SUCCEEDS only
+        # when the mutex is free — i.e. when the sample happens outside the
+        # publication critical section (the A1 defect).
+        acquired = publisher._mutex.acquire(blocking=False)
+        if acquired:
+            probe["sampled_outside_mutex"] = True
+            publisher._mutex.release()
+        else:
+            probe["sampled_outside_mutex"] = False
+        return frozenset(client._nodes_export_dirty_ids)
+
+    async with cache_operation_boundary(client, "op-a1"):
+        published = publish_local_cache_view(
+            publisher,
+            _rename("A", "alpha-a1"),
+            reason="a1-probe",
+            commit=lambda touched: client._nodes_export_dirty_ids.discard("A"),
+            snapshot_dirty_ids=_sampler,
+        )
+        assert probe["sampled_outside_mutex"] is False
+        verifier = current_operation_cache()
+        assert verifier.nodes_by_id["A"]["name"] == "alpha-a1"
+        # The welded dirty state is the POST-COMMIT one (A discarded).
+        assert verifier.dirty_ids == frozenset()
+        first_successor_snapshot = verifier
+
+        # An interleaved LATER publication with its own dirty mutation must
+        # not rewrite the first successor's captured dirty state.
+        publish_local_cache_view(
+            publisher,
+            _rename("A", "alpha-interleaved"),
+            reason="interleaved",
+            commit=lambda touched: client._nodes_export_dirty_ids.add("Z"),
+            snapshot_dirty_ids=lambda: frozenset(client._nodes_export_dirty_ids),
+        )
+        assert first_successor_snapshot.dirty_ids == frozenset()
+        assert first_successor_snapshot.nodes_by_id["A"]["name"] == "alpha-a1"
+        # The task then advances to the interleaved successor carrying ITS
+        # own atomically captured dirty state (sequential §6.3 advance).
+        later = current_operation_cache()
+        assert later.nodes_by_id["A"]["name"] == "alpha-interleaved"
+        assert later.dirty_ids == frozenset({"Z"})
+        assert published.nodes_by_id["A"]["name"] == "alpha-a1"
+
+
+@async_test
+async def test_a1_cas_losing_attempt_leaks_no_dirty_capture(tmp_path, monkeypatch):
+    """A1 retry hygiene: the dirty-capture buffer is attempt-local — a
+    CAS-losing attempt discards its buffer, and the winning attempt's
+    welded dirty state is exactly its own post-commit sample."""
+
+    from workflowy_mcp.coherence.operation_cache import (
+        cache_operation_boundary,
+        current_operation_cache,
+    )
+
+    client, _paths = _make_lineage_client(tmp_path, monkeypatch)
+    client._mark_nodes_export_dirty(["A"])
+
+    # A rival publication wins the first CAS attempt (its commit never runs —
+    # the stale check precedes the swap inside publish_with_commit).
+    _race_once_at_cas(client, monkeypatch, _rename("B", "beta-rival"))
+
+    async with cache_operation_boundary(client, "op-a1-retry"):
+        await client.update_cached_node_name("A", "alpha-won")
+        verifier = current_operation_cache()
+        assert verifier.nodes_by_id["A"]["name"] == "alpha-won"
+        assert verifier.nodes_by_id["B"]["name"] == "beta-rival"
+        # The dirty state attached to the winner is exactly its own
+        # post-commit sample (the update patcher's dirty discard committed).
+        assert verifier.dirty_ids == client._nodes_export_dirty_ids
+
+
+# ---------------------------------------------------------------------------
+# S03-B audit amendment A2 — cross-publisher owner rejection on task advance
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_a2_foreign_publisher_publication_never_advances_snapshot(
+    tmp_path, monkeypatch
+):
+    """A2/B1.2: two same-account clients carry identical (epoch, sequence)
+    markers from the shared manifest but own SEPARATE COW chains.  A COW
+    publication through client B must never advance the task-local snapshot
+    pinned to client A — equal markers do not make a foreign chain a valid
+    successor.  Fails if the owner check in _advance_task_snapshot is
+    removed.
+    """
+
+    from workflowy_mcp.coherence.operation_cache import (
+        cache_operation_boundary,
+        current_operation_cache,
+    )
+
+    # Two clients, same credentials -> same account scope, DISTINCT
+    # publishers, both warm-started from the SAME seeded manifest/base
+    # (identical markers, separate in-memory COW chains).
+    probe, _jr, snapshot_dir = _make_client(tmp_path, monkeypatch)
+    _seed_lineage(probe, snapshot_dir)
+    client_a, _jr2, _sd2 = _make_client(tmp_path, monkeypatch)
+    client_b, _jr3, _sd3 = _make_client(tmp_path, monkeypatch)
+    assert client_a._cache_view_publisher is not client_b._cache_view_publisher
+    markers_a = (
+        client_a._cache_view_publisher.capture().epoch_id,
+        client_a._cache_view_publisher.capture().adopted_sequence,
+    )
+    markers_b = (
+        client_b._cache_view_publisher.capture().epoch_id,
+        client_b._cache_view_publisher.capture().adopted_sequence,
+    )
+    assert markers_a == markers_b  # identical markers, separate chains
+
+    from workflowy_mcp.coherence.operation_cache import OperationCacheSnapshot
+
+    async with cache_operation_boundary(client_a, "op-a"):
+        snapshot_a = current_operation_cache()
+        assert isinstance(snapshot_a, OperationCacheSnapshot)
+        view_a_before = snapshot_a.view
+        # Publish a COW successor through client B (same markers).
+        client_b.publish_local_cache_view(
+            _rename("A", "b-write"), reason="b-publication"
+        )
+        # Client A's task-local snapshot is UNCHANGED: no advance, and its
+        # pinned view/content/owner are internally consistent.
+        verifier = current_operation_cache()
+        assert verifier is snapshot_a
+        assert verifier.view is view_a_before
+        assert verifier.nodes_by_id["A"]["name"] == "alpha"
+        assert verifier.owner is snapshot_a.owner
+        # Client B published normally on its own authority.
+        assert (
+            client_b._cache_view_publisher.capture().nodes_by_id["A"]["name"]
+            == "b-write"
+        )
+        # Client A's publisher never received B's write.
+        assert (
+            client_a._cache_view_publisher.capture().nodes_by_id["A"]["name"]
+            == "alpha"
+        )
+
+
+@async_test
+async def test_a2_own_authority_publication_still_advances(tmp_path, monkeypatch):
+    """A2 companion: a publication through the SAME authority advances the
+    task-local snapshot exactly as before (no over-tightening)."""
+
+    from workflowy_mcp.coherence.operation_cache import (
+        cache_operation_boundary,
+        current_operation_cache,
+    )
+
+    client, _paths = _make_lineage_client(tmp_path, monkeypatch)
+    async with cache_operation_boundary(client, "op-own"):
+        client.publish_local_cache_view(_rename("A", "own-write"), reason="own")
+        verifier = current_operation_cache()
+        assert verifier.nodes_by_id["A"]["name"] == "own-write"

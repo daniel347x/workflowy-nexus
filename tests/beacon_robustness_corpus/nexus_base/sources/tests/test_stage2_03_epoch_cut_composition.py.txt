@@ -1,0 +1,517 @@
+"""Stage2-03 (Locked Work Order §6.3) — REAL three-process epoch-cut
+composition (PAIR-003 / PAIR-017 / PAIR-004).
+
+Three REAL OS processes on one coherence root per scenario:
+  - EPOCH OWNER  — a full-refresh or checkpoint publisher;
+  - APPENDER     — a journal appender forced across the cut;
+  - BARRIER      — a post-cut barrier raiser (generation G+1).
+
+Deterministic forcing (never probability sleeps):
+
+  TEST 1 (FOLDED, PAIR-003/PAIR-017): the refresh's fetch parks on a
+  sentinel; the parent detects the persisted cut (claim active with
+  cut_token, generation 1), then releases the appender and the barrier
+  raiser BEFORE releasing the fetch — so the append lands before the
+  incorporation-head capture and is FOLDED into the new base, while the
+  post-cut barrier (generation 2) SURVIVES (only generation 1 clears).
+
+  TEST 2 (TAIL, PAIR-003): the refresh parks at its candidate-snapshot
+  write (incorporation head already captured); the append lands after the
+  capture and is PRESERVED AS TAIL (floor 2, head 2, the record file
+  survives in the active range; base+tail replay converges).  Same
+  post-cut barrier survival.
+
+  TEST 3 (CHECKPOINT `deferred_head_advancing`, PAIR-004): a checkpoint
+  owner with ``checkpoint_max_catchup_passes=2``; the appender appends at
+  EVERY candidate write/rewrite rendezvous (an fsync seam), so the journal
+  head never stabilizes inside the bounded catch-up budget — the rotation
+  returns ``deferred_head_advancing`` with the old lineage wholly intact
+  and every record preserved contiguously.  The barrier raised mid-window
+  survives; a later rotation (appends stopped) publishes E+1 with the full
+  tail incorporated and the barrier STILL active (A3 carry-forward —
+  checkpoint never clears).
+
+Every actor logs its real PID; the parent asserts pairwise distinctness.
+"""
+
+from __future__ import annotations
+
+from coherence_harness import (
+    ACCOUNT_A,
+    make_coherence_root,
+    s02_node,
+    s02_set_barrier,
+    s04_append_n,
+    s04_checkpoint_config,
+    s04_install_base_manifest,
+    s04_write_base_snapshot,
+)
+from stage2_harness import (
+    REPO,
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp import mutation_lease_governance as mlg  # noqa: F401 — parity anchor
+from workflowy_mcp.coherence import (
+    materialize_current_payload,
+    read_manifest,
+    read_refresh_claim,
+    run_checkpoint_rotation,
+)
+from workflowy_mcp.coherence.paths import journal_record_filename
+
+
+def _based_root(root, *, records: int = 1):
+    paths = make_coherence_root(root, ACCOUNT_A)
+    snapshot_dir = root / "nodes_export_cache"
+    base = s04_write_base_snapshot(
+        paths,
+        snapshot_dir,
+        [s02_node("base")],
+        epoch_number=0,
+        epoch_id="b" * 32,
+    )
+    s04_install_base_manifest(paths, base_snapshot_path=base, epoch_id="b" * 32)
+    if records:
+        s04_append_n(paths, records)
+    return paths, snapshot_dir
+
+
+_COMMON = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import ACCOUNT_A, make_coherence_root, touch, wait_for_file\n"
+    "root = Path(sys.argv[1])\n"
+    "paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)\n"
+)
+
+# ---------------------------------------------------------------------------
+# Shared actor: the journal appender (one append, then signal)
+# ---------------------------------------------------------------------------
+
+_APPENDER_ONCE = (
+    _COMMON
+    + """
+from coherence_harness import s02_node, s04_append
+from workflowy_mcp.coherence import SemanticEffect
+
+touch(root / "pid_appender", str(os.getpid()))
+assert wait_for_file(root / sys.argv[3], timeout=120)
+s04_append(paths, effects=[SemanticEffect.node_create(s02_node(sys.argv[4]))],
+           transaction_id="a" * 32)
+touch(root / "append_done")
+"""
+)
+
+# ---------------------------------------------------------------------------
+# Shared actor: the post-cut barrier raiser
+# ---------------------------------------------------------------------------
+
+_BARRIER_RAISER = (
+    _COMMON
+    + """
+from coherence_harness import s04_raise_barrier
+
+touch(root / "pid_barrier", str(os.getpid()))
+assert wait_for_file(root / "append_done", timeout=120)
+s04_raise_barrier(paths, reason_code="ambiguous_commit_outcome",
+                  transaction_id="post-cut-barrier")
+touch(root / "barrier_done")
+"""
+)
+
+
+# ---------------------------------------------------------------------------
+# TEST 1 — the FOLDED variant (append before incorporation capture)
+# ---------------------------------------------------------------------------
+
+_REFRESH_FOLDED = (
+    _COMMON
+    + """
+from coherence_harness import s02_node
+from workflowy_mcp.coherence import run_full_refresh
+
+touch(root / "pid_refresh", str(os.getpid()))
+
+if os.environ.get("STAGE2_NEUTRALIZE_FOLD"):
+    # SENSITIVITY-ONLY (never set in the shipped test): simulate a refresh
+    # blind to the journal — in-flight records are neither folded nor
+    # preserved (the pre-S02 behavior).  "inflight" then vanishes.
+    import workflowy_mcp.coherence.refresh_authority as ra
+    ra.read_journal_records = lambda *a, **k: []
+if os.environ.get("STAGE2_NEUTRALIZE_CUT"):
+    # SENSITIVITY-ONLY: simulate the absent cut rule (a publish that
+    # clears ANY active barrier, covered or not).  Downgrade the barrier's
+    # generation as the epoch publisher reads it, so its own clearing
+    # condition masks the post-cut barrier — the pre-fix failure shape
+    # (dirty_status inactive after publication).
+    import workflowy_mcp.coherence.epoch_publisher as ep
+    from workflowy_mcp.coherence import DirtyBarrierState, manifest_with_updates
+    _real_read_manifest = ep.read_manifest
+    def _downgraded(paths, *, required=True):
+        manifest = _real_read_manifest(paths, required=required)
+        barrier = manifest.dirty_status if manifest is not None else None
+        if (
+            barrier is not None
+            and barrier.active
+            and barrier.generation > 1
+        ):
+            manifest = manifest_with_updates(
+                manifest,
+                dirty_status=DirtyBarrierState(
+                    schema_version=barrier.schema_version,
+                    account_scope_id=barrier.account_scope_id,
+                    active=barrier.active,
+                    generation=1,
+                    reason_code=barrier.reason_code,
+                    detail=barrier.detail,
+                    transaction_id=barrier.transaction_id,
+                    affected_region=barrier.affected_region,
+                    raised_at=barrier.raised_at,
+                ),
+            )
+        return manifest
+    ep.read_manifest = _downgraded
+
+async def fetch():
+    assert wait_for_file(root / "release_fetch", timeout=120)
+    return {"nodes": [s02_node("a")]}
+
+outcome = asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind="system", settle_seconds=0,
+    snapshot_dir=root / "nodes_export_cache", poll_seconds=0.05,
+))
+from stage2_harness import write_result
+write_result(root / "refresh_result.json", {
+    "status": outcome.status,
+    "epoch_number": outcome.epoch_number,
+    "node_ids": sorted(n["id"] for n in outcome.nodes_export["nodes"]),
+})
+"""
+)
+
+
+# @beacon[
+#   id=auto-beacon@test_refresh_appender_barrier_folded_record_and_surviving_barrier-vs2s,
+#   role=test_refresh_appender_barrier_folded_record_and_surviving_barrier,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_refresh_appender_barrier_folded_record_and_surviving_barrier(tmp_path):
+    """PAIR-003/PAIR-017 (folded): the append lands BEFORE the incorporation
+    capture — the record is FOLDED into the new base (never lost); the
+    post-cut barrier (G+1) SURVIVES the publication (only the pre-cut
+    generation clears)."""
+    root = tmp_path / "share"
+    paths, _sd = _based_root(root, records=1)
+    # Pre-cut barrier at generation 1 (the refresh's cut will cover it).
+    s02_set_barrier(paths, 1, active=True)
+
+    refresh = launch_actor(_REFRESH_FOLDED, str(root), str(REPO), "unused", "unused")
+    appender = launch_actor(_APPENDER_ONCE, str(root), str(REPO), "cut_ready", "inflight")
+    barrier = launch_actor(_BARRIER_RAISER, str(root), str(REPO))
+    try:
+        # Detect the persisted cut deterministically: claim active with a
+        # cut token at generation 1.
+        for _ in range(600):
+            claim = read_refresh_claim(paths)
+            if claim is not None and not claim.is_terminal and claim.cut_token is not None:
+                break
+            import time as _t
+
+            _t.sleep(0.05)
+        else:
+            raise AssertionError("refresh claim with persisted cut never became active")
+        assert claim.cut_token.hard_barrier_generation == 1
+        touch(root / "cut_ready")
+
+        # The append lands (folded), then the post-cut barrier (gen 2).
+        assert wait_for_file(root / "append_done", timeout=120)
+        assert wait_for_file(root / "barrier_done", timeout=120)
+        touch(root / "release_fetch")
+
+        result = read_result(root / "refresh_result.json", timeout=120)
+        assert result["status"] == "published", result
+        # FOLDED: the in-flight record's node is IN the new base.
+        assert "inflight" in result["node_ids"]
+
+        manifest = read_manifest(paths, required=True)
+        assert manifest.epoch_number == 1
+        assert manifest.journal_head_seq == 2
+        assert manifest.base_incorporated_through_seq == 2
+        assert manifest.journal_floor_seq == 3
+        # The pre-cut barrier (gen 1) cleared; the post-cut barrier SURVIVES.
+        assert manifest.dirty_status.active is True
+        assert manifest.dirty_status.generation == 2
+        assert manifest.dirty_status.transaction_id == "post-cut-barrier"
+
+        collect_distinct_pids(root, ["refresh", "appender", "barrier"])
+    finally:
+        finish_actor(refresh, label="refresh owner")
+        finish_actor(appender, label="appender")
+        finish_actor(barrier, label="barrier raiser")
+
+
+# ---------------------------------------------------------------------------
+# TEST 2 — the TAIL variant (append after incorporation capture)
+# ---------------------------------------------------------------------------
+
+_REFRESH_TAIL = (
+    _COMMON
+    + """
+from coherence_harness import s02_node
+from workflowy_mcp.carto_job_governance import (
+    _default_mkdir,
+    _default_replace,
+    _default_tmp_name,
+    _default_unlink,
+    _default_write_fsync,
+)
+from workflowy_mcp.coherence import DurableFileOps, run_full_refresh
+
+touch(root / "pid_refresh", str(os.getpid()))
+
+def write_fsync(path, text):
+    # Pause INSIDE the refresh at its candidate-snapshot write: the
+    # incorporation head is ALREADY captured at this point, so the
+    # appender's record lands ABOVE the watermark — preserved as tail.
+    # The seam also gates the POST-CUT BARRIER before the publish:
+    # append -> barrier -> publish (deterministic, never a race).
+    if "nodes_export_snapshot" in path.name:
+        touch(root / "refresh_at_candidate")
+        assert wait_for_file(root / "append_done", timeout=120)
+        assert wait_for_file(root / "barrier_done", timeout=120)
+    _default_write_fsync(path, text)
+
+fs_ops = DurableFileOps(
+    write_fsync=write_fsync,
+    replace=_default_replace,
+    mkdir=_default_mkdir,
+    unlink=_default_unlink,
+    tmp_name=_default_tmp_name,
+)
+
+async def fetch():
+    return {"nodes": [s02_node("a")]}
+
+outcome = asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind="system", settle_seconds=0,
+    snapshot_dir=root / "nodes_export_cache", poll_seconds=0.05, fs_ops=fs_ops,
+))
+from stage2_harness import write_result
+write_result(root / "refresh_result.json", {
+    "status": outcome.status,
+    "epoch_number": outcome.epoch_number,
+    "node_ids": sorted(n["id"] for n in outcome.nodes_export["nodes"]),
+})
+"""
+)
+
+
+# @beacon[
+#   id=auto-beacon@test_refresh_appender_barrier_tail_record_preserved_and_barrier_survives-h27f,
+#   role=test_refresh_appender_barrier_tail_record_preserved_and_barrier_survives,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_refresh_appender_barrier_tail_record_preserved_and_barrier_survives(tmp_path):
+    """PAIR-003 (tail): the append lands AFTER the incorporation capture —
+    the record is PRESERVED AS TAIL (floor 2, head 2; the record file
+    survives in the active range; base+tail replay converges); the post-cut
+    barrier SURVIVES."""
+    root = tmp_path / "share"
+    paths, _sd = _based_root(root, records=1)
+    s02_set_barrier(paths, 1, active=True)
+
+    refresh = launch_actor(_REFRESH_TAIL, str(root), str(REPO))
+    appender = launch_actor(_APPENDER_ONCE, str(root), str(REPO), "refresh_at_candidate", "tailnode")
+    barrier = launch_actor(_BARRIER_RAISER, str(root), str(REPO))
+    try:
+        result = read_result(root / "refresh_result.json", timeout=120)
+        assert result["status"] == "published", result
+        # The outcome's adopted payload = new base + surviving tail replay.
+        assert "tailnode" in result["node_ids"]
+
+        manifest = read_manifest(paths, required=True)
+        assert manifest.epoch_number == 1
+        # TAIL: the incorporation watermark is 1 (the append landed after
+        # the capture); head is 2; the record survives as the active tail.
+        assert manifest.base_incorporated_through_seq == 1
+        assert manifest.journal_floor_seq == 2
+        assert manifest.journal_head_seq == 2
+        tail_record = paths.journal_dir / journal_record_filename(2)
+        assert tail_record.exists()
+        # Base+tail replay converges on the appended node.
+        replayed = materialize_current_payload(paths, manifest).payload
+        assert "tailnode" in {n["id"] for n in replayed["nodes"]}
+        # Post-cut barrier survives; pre-cut cleared.
+        assert manifest.dirty_status.active is True
+        assert manifest.dirty_status.generation == 2
+
+        collect_distinct_pids(root, ["refresh", "appender", "barrier"])
+    finally:
+        finish_actor(refresh, label="refresh owner")
+        finish_actor(appender, label="appender")
+        finish_actor(barrier, label="barrier raiser")
+
+
+# ---------------------------------------------------------------------------
+# TEST 3 — CHECKPOINT deferred_head_advancing (bounded catch-up, PAIR-004)
+# ---------------------------------------------------------------------------
+
+_CHECKPOINT_DEFER = (
+    _COMMON
+    + """
+from coherence_harness import s04_checkpoint_config
+from workflowy_mcp.carto_job_governance import (
+    _default_mkdir,
+    _default_replace,
+    _default_tmp_name,
+    _default_unlink,
+    _default_write_fsync,
+)
+from workflowy_mcp.coherence import DurableFileOps, run_checkpoint_rotation
+
+touch(root / "pid_checkpoint", str(os.getpid()))
+
+_pass = {"n": 0}
+def write_fsync(path, text):
+    # Every candidate write/rewrite is a rendezvous: signal, then wait for
+    # this pass's append.  The head therefore advances on EVERY catch-up
+    # revalidation until the bounded budget exhausts.
+    if "nodes_export_snapshot" in path.name:
+        _pass["n"] += 1
+        n = _pass["n"]
+        touch(root / f"ck_waiting_{n}", str(n))
+        assert wait_for_file(root / f"appended_{n}", timeout=120)
+        # Gate the mid-window barrier raise into the rotation: the raise
+        # fires on ck_waiting_1 but the raiser's interpreter startup can
+        # outlast the pass dance — never let the rotation outrun it.
+        assert wait_for_file(root / "barrier_done", timeout=120)
+    _default_write_fsync(path, text)
+
+fs_ops = DurableFileOps(
+    write_fsync=write_fsync,
+    replace=_default_replace,
+    mkdir=_default_mkdir,
+    unlink=_default_unlink,
+    tmp_name=_default_tmp_name,
+)
+result = asyncio.run(run_checkpoint_rotation(
+    paths,
+    snapshot_dir=root / "nodes_export_cache",
+    config=s04_checkpoint_config(record_threshold=1, max_catchup_passes=2),
+    fs_ops=fs_ops,
+))
+from stage2_harness import write_result
+write_result(root / "ck_result.json", {"status": result.status,
+                                       "warnings": list(result.warnings)})
+"""
+)
+
+_APPENDER_LOOP = (
+    _COMMON
+    + """
+from coherence_harness import s02_node, s04_append
+from workflowy_mcp.coherence import SemanticEffect
+
+touch(root / "pid_appender", str(os.getpid()))
+if os.environ.get("STAGE2_NEUTRALIZE_APPENDS"):
+    # SENSITIVITY-ONLY: the head STOPS advancing after one append, so the
+    # catch-up stabilizes and the rotation PUBLISHES instead of deferring
+    # (proving the continuous-append forcing is what drives the defer).
+    assert wait_for_file(root / "ck_waiting_1", timeout=120)
+    s04_append(paths, effects=[SemanticEffect.node_create(s02_node("app-1"))],
+               transaction_id="b" * 32)
+    touch(root / "appended_1")
+    touch(root / "appended_2")
+    touch(root / "appended_3")
+else:
+    for n in range(1, 4):
+        assert wait_for_file(root / f"ck_waiting_{n}", timeout=120)
+        s04_append(paths, effects=[SemanticEffect.node_create(s02_node(f"app-{n}"))],
+                   transaction_id=f"{'abc'[n - 1]}" * 32)
+        touch(root / f"appended_{n}")
+touch(root / "append_loop_done")
+"""
+)
+
+_CHECKPOINT_BARRIER = (
+    _COMMON
+    + """
+from coherence_harness import s04_raise_barrier
+
+touch(root / "pid_barrier", str(os.getpid()))
+assert wait_for_file(root / "ck_waiting_1", timeout=120)
+s04_raise_barrier(paths, reason_code="ambiguous_commit_outcome",
+                  transaction_id="ck-window-barrier")
+touch(root / "barrier_done")
+"""
+)
+
+
+# @beacon[
+#   id=auto-beacon@test_checkpoint_appender_barrier_bounded_catchup_defers_head_advancing-e577,
+#   role=test_checkpoint_appender_barrier_bounded_catchup_defers_head_advancing,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_checkpoint_appender_barrier_bounded_catchup_defers_head_advancing(tmp_path):
+    """PAIR-004 (checkpoint `deferred_head_advancing`): appends at EVERY
+    catch-up rendezvous keep the head advancing past the bounded budget —
+    the rotation defers with the old lineage wholly intact and every record
+    preserved; the barrier survives; the follow-up rotation (appends
+    stopped) publishes E+1 with the full tail and the barrier STILL active
+    (A3 — checkpoint never clears)."""
+    root = tmp_path / "share"
+    paths, snapshot_dir = _based_root(root, records=3)
+
+    checkpoint = launch_actor(_CHECKPOINT_DEFER, str(root), str(REPO))
+    appender = launch_actor(_APPENDER_LOOP, str(root), str(REPO))
+    barrier = launch_actor(_CHECKPOINT_BARRIER, str(root), str(REPO))
+    try:
+        result = read_result(root / "ck_result.json", timeout=180)
+        assert result["status"] == "deferred_head_advancing", result
+
+        manifest = read_manifest(paths, required=True)
+        # Old lineage wholly intact: epoch unchanged, base intact.
+        assert manifest.epoch_number == 0
+        assert manifest.base_incorporated_through_seq == 0
+        # The 3 original records + the 3 forced appends are ALL preserved.
+        assert manifest.journal_head_seq == 6
+        for seq in range(1, 7):
+            assert (paths.journal_dir / journal_record_filename(seq)).exists()
+        # The barrier raised in the window survives (checkpoint never clears).
+        assert manifest.dirty_status.active is True
+        assert manifest.dirty_status.generation == 1
+        assert manifest.dirty_status.transaction_id == "ck-window-barrier"
+
+        collect_distinct_pids(root, ["checkpoint", "appender", "barrier"])
+    finally:
+        finish_actor(checkpoint, label="checkpoint owner")
+        finish_actor(appender, label="appender loop")
+        finish_actor(barrier, label="barrier raiser")
+
+    # Follow-up rotation with the appender stopped: publishes E+1 with the
+    # full tail incorporated; the barrier STILL survives (A3 carry-forward).
+    import asyncio
+
+    followup = asyncio.run(
+        run_checkpoint_rotation(
+            paths,
+            snapshot_dir=snapshot_dir,
+            config=s04_checkpoint_config(record_threshold=1, max_catchup_passes=2),
+        )
+    )
+    assert followup.status == "published", followup.warnings
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 1
+    assert manifest.base_incorporated_through_seq == 6
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.generation == 1

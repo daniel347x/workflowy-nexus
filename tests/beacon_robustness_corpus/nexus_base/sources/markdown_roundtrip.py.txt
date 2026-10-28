@@ -1,0 +1,1158 @@
+import json
+import re
+import sys
+import os
+import argparse
+from typing import Dict, Any, List, Optional
+from markdown_it import MarkdownIt
+
+# Force UTF-8 output for Windows console
+if sys.platform == 'win32':
+    os.system('chcp 65001 > nul')
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+"""
+markdown_roundtrip.py (v2.0 - markdown-it-py + mdformat)
+
+Purpose:
+    Convert a Workflowy NEXUS JSON export back to Markdown using battle-tested
+    markdown-it-py parser + mdformat's MDRenderer.
+
+Key improvements over v1 (hand-rolled parser):
+    - Properly handles nested code blocks (4+ backticks)
+    - Preserves HTML entities correctly
+    - CommonMark spec-compliant
+    - No manual regex parsing - relies on proven libraries
+    - Handles complex escaping automatically
+
+Input format:
+    NEXUS JSON export from workflowy_scry() / nexus_scry():
+    {
+        "export_root_id": "uuid",
+        "export_root_name": "Node Name",
+        "export_timestamp": timestamp,
+        "nodes": [ ... NEXUS node tree ... ]
+    }
+
+Algorithm:
+    1. Load NEXUS JSON
+    2. Convert NEXUS tree → markdown-it token stream
+    3. Render token stream → Markdown via MDRenderer
+    4. Convert HTML entities back to Markdown syntax (<b> → **)
+
+This produces a clean Markdown file that can be re-imported via Cartographer.
+"""
+
+
+# Sentinel node name for pre-first-heading "leading text" in a Markdown file.
+# This is the reverse-side (Workflowy -> disk) twin of the forward constant
+# nexus_map_codebase.MD_LEADING_TEXT_NODE_NAME; the two MUST stay byte-identical.
+# A node with this name holds prose that lived ABOVE the first heading on disk.
+# nexus_to_tokens emits its note body VERBATIM (no '#' heading) above the first
+# heading, exactly mirroring how "⚙️ YAML Frontmatter" is emitted — so the
+# round-trip never turns leading text into a heading and never accumulates.
+MD_LEADING_TEXT_NODE_NAME = "📄 Leading text"
+
+
+# Sentinel that marks a note body which F12+3 wrapped in a protective code
+# fence because the body itself contains Markdown headings. Without the fence,
+# injecting such a body verbatim beneath a heading on disk would let the body's
+# '#' lines become first-class document headings (SQL-injection-style), which
+# on the next F12+1 would explode into spurious, wrongly-leveled Workflowy
+# nodes and corrupt the file structure. The sentinel is an HTML comment (never
+# rendered by Markdown renderers) placed immediately above the opening fence,
+# so the F12+1 read side can recognize OUR fence (vs. a fence that is genuinely
+# the user's own content) and strip it back out — leaving the Workflowy note
+# clean (no visible fences) in the general case.
+NEXUS_FENCED_NOTE_SENTINEL = "<!-- @nexus-fenced-note -->"
+
+
+# @beacon[
+#   id=auto-beacon@_choose_backtick_fence-fnc1,
+#   role=_choose_backtick_fence(text: str),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,nexus--md-preview,
+#   kind=ast,
+#   comment=F12+3 note-fencing: pick a backtick fence longer than any run inside the body so the fence cannot be closed prematurely (CommonMark closing-fence rule). min 3 backticks.,
+# ]
+def _choose_backtick_fence(text: str) -> str:
+    """Return a backtick fence guaranteed not to be closed by ``text``.
+
+    CommonMark: a fenced code block opened with N backticks can only be closed
+    by a line whose backtick run is >= N. So we scan ``text`` for the longest
+    contiguous run of backticks anywhere and return one MORE than that (min 3).
+    By construction no interior line can prematurely close the fence.
+    """
+    max_run = 0
+    for m in re.finditer(r"`+", text or ""):
+        max_run = max(max_run, len(m.group(0)))
+    return "`" * max(3, max_run + 1)
+
+
+# @beacon[
+#   id=auto-beacon@_note_body_has_heading-fnc2,
+#   role=_note_body_has_heading(note_body: str),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,nexus--md-preview,
+#   kind=ast,
+#   comment=F12+3 note-fencing: detect whether a note body contains ANY Markdown heading, using the SAME monkey-patched markdown-it parser F12+1 uses (arbitrary hash depth, fence-aware) so detector == live recognizer.,
+# ]
+def _note_body_has_heading(note_body: str) -> bool:
+    """Return True iff ``note_body`` parses to contain at least one heading.
+
+    Uses the EXACT same parser configuration that ``parse_markdown_structure``
+    uses on the F12+1 read side: a CommonMark markdown-it with the ATX heading
+    rule replaced by ``markdown_it_heading_arbitrary_depth`` (6-hash cap lifted
+    to 64). This guarantees the detector agrees with the live recognizer:
+
+      - It is fence-aware, so a '#' line that is ALREADY inside a fenced code
+        block in the note does NOT count as a heading (no false positive — the
+        special case where the note's genuine content is a fenced block with a
+        '#' inside it is correctly treated as headless).
+      - It recognizes 7+ hash headings, matching Dan's deep-heading 99-files.
+
+    Returns False on empty input or any parse error (fail-safe: when unsure we
+    do NOT fence, preserving verbatim behavior for non-heading content).
+    """
+    if not isinstance(note_body, str) or not note_body.strip():
+        return False
+    try:
+        import importlib
+        cartographer = importlib.import_module("nexus_map_codebase")
+        md = MarkdownIt("commonmark")
+        md.block.ruler.at("heading", cartographer.markdown_it_heading_arbitrary_depth)
+        tokens = md.parse(note_body)
+        return any(getattr(t, "type", "") == "heading_open" for t in tokens)
+    except Exception:
+        return False
+
+
+# @beacon[
+#   id=auto-beacon@_maybe_fence_sentinel_note-fnc3,
+#   role=_maybe_fence_sentinel_note(note_body: str),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,nexus--md-preview,
+#   kind=ast,
+#   comment=F12+3 WRITE side: wrap a note body in sentinel + dynamic fence IFF it contains headings. Idempotent — unfences any prior wrap first so fences never accumulate across round trips.,
+# ]
+def _maybe_fence_sentinel_note(note_body: str) -> str:
+    """Protect a heading-bearing note body with a sentinel + dynamic fence.
+
+    Used on the F12+3 WRITE side (``nexus_to_tokens``). If ``note_body`` (after
+    first reversing any prior wrap, for idempotency) contains a Markdown
+    heading, wrap it as::
+
+        <!-- @nexus-fenced-note -->
+        ```` (chosen long enough)
+        <note_body verbatim>
+        ````
+
+    so that when this body is injected beneath a heading on disk, the body's
+    headings are inert fenced content rather than real document structure.
+    If the body has no heading, it is returned UNCHANGED (verbatim), so genuine
+    user content — including a note whose real content is itself a fenced code
+    block — is never needlessly wrapped.
+    """
+    if not isinstance(note_body, str):
+        return ""
+    # Idempotency: strip any wrap we previously added before re-evaluating.
+    body = _unfence_sentinel_note(note_body)
+    if not _note_body_has_heading(body):
+        return body
+    fence = _choose_backtick_fence(body)
+    return f"{NEXUS_FENCED_NOTE_SENTINEL}\n{fence}\n{body}\n{fence}"
+
+
+# @beacon[
+#   id=auto-beacon@_unfence_sentinel_note-fnc4,
+#   role=_unfence_sentinel_note(note_body: str),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,nexus--md-preview,
+#   kind=ast,
+#   comment=F12+1 READ side (and F12+3 idempotency): if a note body begins with OUR sentinel immediately followed by an opening fence, strip the sentinel + matching outer fences and return the clean interior. Only OUR sentinel-marked fence is stripped — a user's own fenced content is left intact. Bail-to-verbatim if no matching close.,
+# ]
+def _unfence_sentinel_note(note_body: str) -> str:
+    """Reverse ``_maybe_fence_sentinel_note``: strip our sentinel + outer fence.
+
+    Tight binding (so we never strip a coincidental inner fence): the sentinel
+    must be the FIRST non-blank line, and an opening backtick fence must be the
+    next non-blank line after it. We then consume to the matching closing fence
+    (a line whose backtick run is >= the opener's) and return the interior
+    verbatim. If anything doesn't match (no sentinel, no opening fence, or no
+    matching close), return ``note_body`` UNCHANGED — the conservative bail.
+    """
+    if not isinstance(note_body, str) or NEXUS_FENCED_NOTE_SENTINEL not in note_body:
+        return note_body if isinstance(note_body, str) else ""
+    lines = note_body.splitlines()
+    n = len(lines)
+    # 1. First non-blank line must be exactly the sentinel.
+    i = 0
+    while i < n and not lines[i].strip():
+        i += 1
+    if i >= n or lines[i].strip() != NEXUS_FENCED_NOTE_SENTINEL:
+        return note_body
+    # 2. Next non-blank line must be an opening backtick fence.
+    j = i + 1
+    while j < n and not lines[j].strip():
+        j += 1
+    if j >= n:
+        return note_body
+    m_open = re.match(r"^(`{3,})\s*$", lines[j].strip())
+    if not m_open:
+        return note_body
+    open_len = len(m_open.group(1))
+    # 3. Find the matching closing fence (run of >= open_len backticks, nothing else).
+    close_re = re.compile(r"^(`{" + str(open_len) + r",})\s*$")
+    k = j + 1
+    close_idx = None
+    while k < n:
+        if close_re.match(lines[k].strip()):
+            close_idx = k
+            break
+        k += 1
+    if close_idx is None:
+        # No matching close — corrupted/edge case. Bail: return verbatim.
+        return note_body
+    interior = lines[j + 1:close_idx]
+    return "\n".join(interior)
+
+
+# @beacon[
+#   id=auto-beacon@load_nexus_root-sycb,
+#   role=• ƒ load_nexus_root(data),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def load_nexus_root(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the root node from NEXUS JSON export format.
+    
+    VALIDATION: Enforces single-child requirement for round-trip.
+    Multiple children indicate stale CARTOGRAPHER runs at same target UUID.
+    
+    (Test comment for MCP validation.)
+    """
+    # NEXUS export format (from workflowy_scry / nexus_scry)
+    if "export_root_id" in data and "nodes" in data:
+        nodes = data.get("nodes") or []
+        if not nodes:
+            raise ValueError("NEXUS export contains no nodes")
+        
+        if len(nodes) > 1:
+            raise ValueError(
+                f"❌ GOTCHA DETECTED: SCRY contains {len(nodes)} root nodes (expected 1).\n"
+                f"This indicates multiple CARTOGRAPHER runs targeted the same UUID.\n"
+                f"Root nodes found: {[n.get('name', 'NO_NAME')[:50] for n in nodes]}\n\n"
+                f"ACTION REQUIRED:\n"
+                f"  1. Manually delete stale nodes from Workflowy, OR\n"
+                f"  2. SCRY from a deeper child node that has only one version\n\n"
+                f"Refusing to proceed - cannot determine which version is current."
+            )
+        
+        return nodes[0]  # First (and only) node is the root
+    
+    # Fallback: direct node tree
+    if "name" in data:
+        return data
+    
+    raise ValueError("Unrecognized JSON format - expected NEXUS export or direct node tree")
+
+
+# @beacon[
+#   id=auto-beacon@detach_yaml_frontmatter_child-7x3q,
+#   role=• ƒ detach_yaml_frontmatter_child(node),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def detach_yaml_frontmatter_child(node: Dict[str, Any]) -> tuple[str | None, Dict[str, Any]]:
+    """Return (frontmatter_text, node_without_frontmatter_child).
+
+    Looks for YAML frontmatter in two places, in priority order:
+      1. An immediate child node named ``⚙️ YAML Frontmatter`` (the canonical
+         representation produced by ``parse_markdown_structure``). If found,
+         the child is removed from the returned node copy and its note text
+         is returned separately.
+      2. (Fallback safety net, Dan 2026-04-30) The root node's own ``note``
+         field, when it begins with a ``---`` fence followed by a closing
+         ``---``. This catches the case where Workflowy lost the frontmatter
+         child node (e.g. agent edits, F12 refresh quirks) but the YAML
+         content survived inside the file root's note. Without this fallback,
+         ``nexus_to_tokens`` would emit the YAML body as a regular Markdown
+         heading, mangling the frontmatter (the root cause of the F12+3 99-file
+         corruption observed Apr 2026).
+
+    Returns (None, node) only when no frontmatter is detected by either path.
+    """
+    import sys
+
+    if not isinstance(node, dict):
+        return None, node
+
+    children = node.get("children") or []
+    if not isinstance(children, list):
+        children = []
+
+    frontmatter_text: str | None = None
+    kept_children: list[Dict[str, Any]] = []
+    found_child = False
+
+    for child in children:
+        if isinstance(child, dict) and (child.get("name") or "").strip() == "⚙️ YAML Frontmatter":
+            if frontmatter_text is None:
+                frontmatter_text = str(child.get("note") or "")
+            found_child = True
+            continue
+        kept_children.append(child)
+
+    if found_child:
+        node_copy = dict(node)
+        node_copy["children"] = kept_children
+        return frontmatter_text, node_copy
+
+    # Fallback: probe the root node's own note for a `---`-fenced YAML block.
+    root_note = node.get("note") or ""
+    if isinstance(root_note, str) and root_note:
+        note_lines = root_note.splitlines()
+        if note_lines and note_lines[0].strip() == "---":
+            for idx in range(1, len(note_lines)):
+                if note_lines[idx].strip() == "---":
+                    fm_lines = note_lines[1:idx]
+                    remaining_note_lines = note_lines[idx + 1 :]
+                    fm_text = "\n".join(fm_lines).strip("\n") or None
+                    print(
+                        "[MD-ROUNDTRIP] detach_yaml_frontmatter_child: "
+                        "recovered frontmatter from root-node note (no "
+                        "'⚙️ YAML Frontmatter' child found). This indicates "
+                        "the Workflowy frontmatter child went missing; "
+                        "falling back to root-note YAML to avoid mangling.",
+                        file=sys.stderr,
+                    )
+                    node_copy = dict(node)
+                    # Strip the YAML block from the note so it isn't emitted twice.
+                    node_copy["note"] = "\n".join(remaining_note_lines).lstrip("\n")
+                    return fm_text, node_copy
+            # First line was '---' but no closing '---' was found; treat as
+            # normal text (don't risk mangling).
+
+    return None, node
+
+
+# @beacon[
+#   id=auto-beacon@_extract_md_path_lines_from_note-z2m4,
+#   role=• ƒ _extract_md_path_lines_from_note(note),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _extract_md_path_lines_from_note(note: str | None) -> list[str]:
+    """Extract raw MD_PATH heading lines from a Workflowy note.
+
+    Bug #3 hardening (Dan, 2026-05-01): the MD_PATH section of a Workflowy
+    Markdown note is supposed to contain only Markdown heading lines
+    (lines starting with 1-6 '#' characters followed by whitespace and
+    heading text). However, an earlier corruption mode could leave
+    BEACON metadata fields ('id: ...', 'role: ...', 'slice_labels: ...',
+    'kind: ast') accidentally interleaved inside the MD_PATH block when
+    the closing '---' separator was missing or misplaced. To make F12+3
+    phase [6]/[7] resilient against such cache poisoning, this extractor
+    now skips any line inside the MD_PATH block that does NOT match the
+    Markdown heading shape '^#{1,32}\s+'. The block still terminates on
+    the first '---' as before. This is layer (1) of the defense-in-depth
+    fix; layers (2)/(3) live in nexus_to_tokens and the parse-time
+    MD_PATH builder.
+    """
+    if not isinstance(note, str):
+        return []
+    lines = note.splitlines()
+    in_block = False
+    path_lines: list[str] = []
+    for raw in lines:
+        stripped = raw.strip()
+        if not in_block:
+            if stripped == "MD_PATH:":
+                in_block = True
+            continue
+        if stripped == "---":
+            break
+        if not stripped:
+            continue
+        # Layer (1) filter: only accept actual Markdown heading lines.
+        # Drops stray BEACON metadata fields that may have leaked into
+        # the MD_PATH block due to historical corruption.
+        if not re.match(r"^#{1,32}\s+\S", stripped):
+            continue
+        path_lines.append(stripped)
+    return path_lines
+
+
+# @beacon[
+#   id=auto-beacon@_heading_name_from_note_or_name-g7v1,
+#   role=ƒ _heading_name_from_note_or_name(note, fallback_name: str),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _heading_name_from_note_or_name(note: str | None, fallback_name: str) -> str:
+    """Return the heading text to emit for a Workflowy heading node.
+
+    Policy (Dan, 2026-04-30):
+      Prefer the *Workflowy node name* (with decoration stripped) so that
+      heading rename in Workflowy is reflected in the regenerated Markdown.
+      The MD_PATH metadata block is treated as a stale snapshot; it gets
+      refreshed on the next F12 file-refresh after F12+3 anyway.
+
+      Decoration that gets stripped from raw_name:
+        - Trailing ' 🔱' / '🔱' (trident marker added by apply_markdown_beacons).
+        - Trailing '#tag' tokens (slice-label tags appended to beaconed names).
+
+      If the decoration-stripped node name is empty (shouldn't happen, but
+      guard anyway), fall back to the MD_PATH last-segment text. If both
+      are empty, return the raw fallback_name.
+
+    History:
+      Previously this function preferred MD_PATH last-segment text over the
+      node name on the rationale that decorated node names (🔱 + #tags)
+      should not leak into headings. That made heading text effectively
+      read-only in Workflowy (renaming a node had no effect on the emitted
+      Markdown heading). Stripping the decoration explicitly fixes both
+      problems.
+    """
+    import re as _re_local  # local alias to avoid shadowing module-level re
+
+    raw = (fallback_name or "").strip()
+    md_path_lines = _extract_md_path_lines_from_note(note)
+
+    # Layer (2) heading-name guard (Dan, 2026-05-01, Bug #3 hardening):
+    # Reject a fallback_name that smells like a leaked BEACON metadata
+    # block. Such a name (e.g., "BEACON (MD AST)\nid: ...\nrole: ...\n...")
+    # would otherwise be flattened to a single line via raw.split()/join(),
+    # producing a corrupt heading like
+    # '## BEACON (MD AST) id: ... role: ... slice_labels: ... kind: ast'
+    # on disk, which is the original Bug #3 corruption shape.
+    #
+    # Heuristics for "smelly":
+    #   - Contains an internal newline, OR
+    #   - Starts with the BEACON header marker (any language), OR
+    #   - Contains two or more recognizable metadata-field prefixes
+    #     ('id:', 'role:', 'slice_labels:', 'kind:').
+    def _name_is_meta_block(candidate: str) -> bool:
+        if not candidate:
+            return False
+        if "\n" in candidate or "\r" in candidate:
+            return True
+        head = candidate.lstrip()
+        if head.startswith("BEACON ("):
+            return True
+        meta_markers = ("id:", "role:", "slice_labels:", "kind:")
+        hits = sum(1 for m in meta_markers if m in candidate)
+        if hits >= 2:
+            return True
+        return False
+
+    if _name_is_meta_block(raw):
+        # Discard the poisoned name and fall through to MD_PATH fallback.
+        raw = ""
+
+    # Strip Workflowy decorations from the node name to get the canonical
+    # heading text the user typed.
+    if raw:
+        # Strip trailing '#tag' tokens (whitespace-separated).
+        tokens = raw.split()
+        while tokens and tokens[-1].startswith("#"):
+            tokens.pop()
+        # Strip trailing '🔱' marker (also handle stray whitespace before it).
+        while tokens and tokens[-1].strip() == "🔱":
+            tokens.pop()
+        # Also strip a '🔱' that's glued to the last token without whitespace.
+        if tokens:
+            last = tokens[-1]
+            if last.endswith("🔱"):
+                tokens[-1] = last[:-1].rstrip()
+                if not tokens[-1]:
+                    tokens.pop()
+        canonical_name = " ".join(tokens).strip()
+        if canonical_name:
+            return canonical_name
+
+    # Fallback: MD_PATH last-segment text (legacy behavior).
+    if md_path_lines:
+        last = md_path_lines[-1].strip()
+        m = _re_local.match(r"^#{1,32}\s*(.*)$", last)
+        if m:
+            text = (m.group(1) or "").strip()
+            # Same meta-block guard on the MD_PATH-derived fallback text:
+            # if MD_PATH itself was poisoned at some point, layer (1) should
+            # have already filtered the offending lines, but belt-and-suspenders.
+            if text and not _name_is_meta_block(text):
+                return text
+        if last and not _name_is_meta_block(last):
+            return last
+
+    return raw
+
+
+# @beacon[
+#   id=auto-beacon@_strip_md_path_block-7s8k,
+#   role=_strip_md_path_block(note),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,nexus--md-preview,
+#   kind=ast,
+# ]
+def _strip_md_path_block(note: str | None) -> str:
+    """Remove the leading MD_PATH block from a Workflowy Markdown note."""
+    if not isinstance(note, str):
+        return ""
+    note_lines = note.splitlines()
+    if note_lines and note_lines[0].strip() == "MD_PATH:":
+        cut = 1
+        while cut < len(note_lines):
+            if note_lines[cut].strip() == "---":
+                cut += 1
+                break
+            cut += 1
+        while cut < len(note_lines) and not note_lines[cut].strip():
+            cut += 1
+        return "\n".join(note_lines[cut:])
+    return note
+
+
+# @beacon[
+#   id=auto-beacon@_strip_md_ast_beacon_block-1c9p,
+#   role=• ƒ _strip_md_ast_beacon_block(note_text),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _strip_md_ast_beacon_block(note_text: str | None) -> str:
+    """Remove the BEACON (MD AST) metadata block from note text before emission."""
+    if not isinstance(note_text, str):
+        return ""
+
+    lines = note_text.splitlines()
+    start_idx: Optional[int] = None
+    for idx, raw in enumerate(lines):
+        if raw.strip().startswith("BEACON (MD AST)"):
+            start_idx = idx
+            break
+
+    if start_idx is None:
+        cleaned = lines
+    else:
+        end_idx = start_idx + 1
+        while end_idx < len(lines):
+            if lines[end_idx].strip() == "---":
+                end_idx += 1
+                break
+            end_idx += 1
+        while end_idx < len(lines) and not lines[end_idx].strip():
+            end_idx += 1
+        cleaned = lines[:start_idx] + lines[end_idx:]
+
+    while cleaned and not cleaned[0].strip():
+        cleaned.pop(0)
+    while cleaned and not cleaned[-1].strip():
+        cleaned.pop()
+    return "\n".join(cleaned)
+
+
+# @beacon[
+#   id=auto-beacon@_is_markdown_span_beacon_node-s4q6,
+#   role=• ƒ _is_markdown_span_beacon_node(node),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _is_markdown_span_beacon_node(node: Dict[str, Any]) -> bool:
+    """Return True for Workflowy child nodes that represent Markdown SPAN beacons.
+
+    Executive decision (Dan): reverse Markdown round-trip currently ignores
+    Markdown SPAN beacons entirely. Markdown structure should be modeled using
+    headings/content blocks, not exported as synthetic SPAN beacon headings.
+    """
+    note = str(node.get("note") or "")
+    return "BEACON (MD SPAN)" in note
+
+
+# @beacon[
+#   id=auto-beacon@_collect_markdown_ast_beacon_nodes-w8d3,
+#   role=ƒ _collect_markdown_ast_beacon_nodes(root_node),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,nexus--tags,
+#   kind=ast,
+# ]
+def _collect_markdown_ast_beacon_nodes(root_node: Dict[str, Any]) -> list[tuple[str, str, list[str]]]:
+    """Collect Markdown heading nodes whose *current name tags* require a beacon.
+
+    Returns a list of (name, note, md_path_lines) tuples. The returned ``note``
+    has its ``MD_PATH:`` block REBUILT from the live tree's heading hierarchy
+    rather than copied from the cached note.
+
+    Source-of-truth policy for F12+3 Phase [7]
+    ------------------------------------------
+    The current Workflowy heading name is the source of truth for whether a
+    Markdown AST beacon should exist at all:
+
+      - If the current name has trailing ``#tags`` -> emit/reapply a beacon.
+      - If the current name has no trailing ``#tags`` -> do NOT emit a beacon,
+        even if the cached note still contains stale ``BEACON (MD AST)`` text.
+
+    This makes Phase [7] the single clean materialization pass from the live
+    tree state to the final on-disk Markdown file. Existing BEACON metadata in
+    the note is still passed through to ``update_beacon_from_node_markdown``
+    when present so that stable fields such as id/comment/kind/show_span can be
+    preserved. But stale note metadata is no longer treated as evidence that a
+    beacon should continue to exist after the user removed all name tags.
+
+    Why we rebuild MD_PATH from the live tree
+    -----------------------------------------
+    Phase [7]'s downstream helper ``update_beacon_from_node_markdown`` calls
+    ``_find_markdown_heading_insert_idx`` against the JUST-EMITTED on-disk file.
+    Cached MD_PATH blocks can be stale after Workflowy heading renames, while
+    phase [6] emitted headings from the live node names. Therefore we synthesize
+    each candidate's MD_PATH from the same live ancestor chain used for emission,
+    so insertion paths match disk reality byte-for-byte.
+    """
+    collected: list[tuple[str, str, list[str]]] = []
+
+    def _name_has_trailing_tags(raw_name: str) -> bool:
+        tokens = (raw_name or "").strip().split()
+        return bool(tokens and tokens[-1].startswith("#"))
+
+    def walk(node: Dict[str, Any], depth: int, ancestor_chain: list[str]) -> None:
+        """Recurse, accumulating disk-emitted heading text at each depth."""
+        if not isinstance(node, dict):
+            return
+        # F12+3 is Workflowy -> disk. Emoji-prefixed nodes (📝, 💡, 🌟, 📌, etc.)
+        # added directly in Workflowy are heading content here and MUST be
+        # written to disk. SPAN beacons are filtered because they are
+        # Workflowy-only navigation aids, not heading content.
+        if _is_markdown_span_beacon_node(node):
+            return
+
+        raw_name = (node.get("name") or "").strip()
+        note = node.get("note") or ""
+
+        # YAML Frontmatter at depth >=1 is emitted as ---/---/blank, not a
+        # heading. Skip its descendants from the heading-tree walk.
+        if depth >= 1 and raw_name == "⚙️ YAML Frontmatter":
+            return
+
+        # Build the next chain. Depth 0 (FILE root) does NOT contribute.
+        if depth >= 1:
+            own_heading = _heading_name_from_note_or_name(note, raw_name)
+            new_chain = list(ancestor_chain)
+            new_chain.append(own_heading or raw_name)
+        else:
+            new_chain = ancestor_chain
+
+        # Phase [7] should emit a Markdown AST beacon iff the live Workflowy
+        # heading name currently has trailing #tags. Existing cached BEACON
+        # metadata is used only as stable metadata for that write, not as the
+        # existence condition.
+        if depth >= 1 and _name_has_trailing_tags(raw_name) and new_chain:
+            md_path_lines: list[str] = []
+            for idx, ancestor_text in enumerate(new_chain):
+                # Arbitrary heading depth: NEXUS Markdown supports up to 64
+                # heading levels (do NOT clamp to 6). Clamping at 6 collapses
+                # deep ancestor chains into ambiguous sibling H6 stacks, which
+                # then fail to resolve uniquely in
+                # _find_markdown_heading_insert_idx during F12+3 phase 7.
+                level = min(idx + 1, 64)
+                md_path_lines.append(f"{'#' * level} {ancestor_text}")
+            rewritten_note = _rewrite_md_path_block_in_note(str(note), md_path_lines)
+            collected.append((str(node.get("name") or ""), rewritten_note, md_path_lines))
+
+        for child in node.get("children") or []:
+            if isinstance(child, dict):
+                walk(child, depth + 1, new_chain)
+
+    walk(root_node, 0, [])
+    collected.sort(key=lambda item: (len(item[2]), item[2]))
+    return collected
+
+# @beacon[
+#   id=auto-beacon@_rewrite_md_path_block_in_note-4hni,
+#   role=_rewrite_md_path_block_in_note,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _rewrite_md_path_block_in_note(note: str, md_path_lines: list[str]) -> str:
+    """Replace the ``MD_PATH:`` block in a Workflowy note with a fresh one.
+
+    If the note has no existing ``MD_PATH:`` block, prepend a new one. The
+    BEACON block and any body text after the MD_PATH block are preserved.
+    """
+    if not isinstance(note, str):
+        note = ""
+
+    new_md_path_block_lines = ["MD_PATH:"]
+    new_md_path_block_lines.extend(md_path_lines)
+    new_md_path_block_lines.append("---")
+
+    note_lines = note.splitlines() if note else []
+
+    # Find the existing MD_PATH: block (from "MD_PATH:" line to the next "---").
+    md_path_start: int | None = None
+    md_path_end: int | None = None
+    for idx, line in enumerate(note_lines):
+        if line.strip() == "MD_PATH:":
+            md_path_start = idx
+            for j in range(idx + 1, len(note_lines)):
+                if note_lines[j].strip() == "---":
+                    md_path_end = j
+                    break
+            break
+
+    if md_path_start is not None and md_path_end is not None:
+        # Replace existing block in place.
+        rewritten = (
+            note_lines[:md_path_start]
+            + new_md_path_block_lines
+            + note_lines[md_path_end + 1:]
+        )
+    else:
+        # No MD_PATH block found; prepend.
+        rewritten = new_md_path_block_lines + note_lines
+
+    return "\n".join(rewritten)
+
+
+# @beacon[
+#   id=auto-beacon@reapply_markdown_ast_beacons-4n6x,
+#   role=ƒ reapply_markdown_ast_beacons(file_path: str, root_node, log_callback),
+#   slice_labels=nexus-md-header-path,ra-reconcile,ra-bulk-visible-apply,carto-js-ts-beacons,carto-rev-markdown-full,nexus--tags,
+#   kind=ast,
+#   comment=F12+3 phase 7 disk-write rehydrator. Walks Workflowy subtree for heading nodes whose current names carry trailing #tags and materializes exactly those as HTML-comment beacon blocks via update_beacon_from_node_markdown. Runs AFTER nexus_to_tokens emits beacon-free Markdown (phase 6).,
+# ]
+def reapply_markdown_ast_beacons(
+    file_path: str,
+    root_node: Dict[str, Any],
+    log_callback: "Callable[[str], None] | None" = None,
+) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+    """Rehydrate Markdown AST beacons onto a regenerated Markdown file.
+
+    Strategy:
+      1. Export beacon-free Markdown content from Workflowy.
+      2. Walk the Workflowy subtree for heading nodes whose current names have
+         trailing #tags. Existing BEACON (MD AST) note metadata is used only to
+         preserve stable fields (id/comment/kind/show_span), not as the beacon
+         existence condition.
+      3. Create/update the corresponding HTML comment beacon blocks on disk via
+         Cartographer's existing update_beacon_from_node_markdown helper.
+
+    Heading nodes without trailing #tags intentionally emit no beacon, even if
+    their cached note still contains stale BEACON (MD AST) metadata. Markdown
+    SPAN beacons are intentionally ignored.
+
+    Per-beacon failure policy (May 2026 hardening)
+    ----------------------------------------------
+    Individual beacon failures are NON-FATAL. If a single beacon's
+    `update_beacon_from_node_markdown` call returns an error or an
+    unexpected operation, the failure is recorded as a structured warning
+    entry (with name, error message, and md_path when available) and the
+    loop CONTINUES to the next beacon. The function only raises on
+    catastrophic conditions (helper not importable, helper not callable).
+
+    This protects long-running F12+3 runs from losing thousands of
+    successfully-written beacons because of a single anomalous node.
+    The caller is expected to:
+      - Inspect the returned warnings list.
+      - Mark the overall job status as `completed_with_warnings` if any
+        warnings are present.
+      - Persist warning details into the job log so the user can review.
+
+    Args:
+        file_path: Absolute path to the on-disk Markdown file.
+        root_node: Workflowy subtree root (from cache export).
+        log_callback: Optional callable that receives one line per beacon
+            attempt (success and skip). Designed to plug into the F12+3
+            pipeline's `_append_log` helper so each beacon's outcome is
+            captured in the per-job log file. The callable must be
+            best-effort and must not raise; this function wraps each
+            invocation in try/except.
+
+    Returns:
+        Tuple of (results, warnings) where:
+          - results: list of successful per-beacon helper result dicts
+          - warnings: list of dicts with shape
+              {"name": str, "error": str, "md_path": list[str] | None,
+               "operation": str | None}
+            One entry per skipped/failed beacon.
+    """
+    import importlib
+
+    try:
+        cartographer = importlib.import_module("nexus_map_codebase")
+    except Exception:
+        here = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.join(here, "MCP_Servers", "workflowy_mcp")
+        if os.path.isdir(candidate) and candidate not in sys.path:
+            sys.path.insert(0, candidate)
+        cartographer = importlib.import_module("nexus_map_codebase")
+
+    helper = getattr(cartographer, "update_beacon_from_node_markdown", None)
+    if helper is None:
+        raise RuntimeError("update_beacon_from_node_markdown helper not available")
+
+    def _emit_log(msg: str) -> None:
+        # Best-effort log emit. Never let logging break the pipeline.
+        if log_callback is None:
+            return
+        try:
+            log_callback(msg)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _short_name(s: str, n: int = 80) -> str:
+        s = (s or "").strip()
+        if len(s) <= n:
+            return s
+        return s[:n - 3] + "..."
+
+    candidates = _collect_markdown_ast_beacon_nodes(root_node)
+    total_candidates = len(candidates)
+    _emit_log(
+        f"Phase 7: rehydrating Markdown AST beacons "
+        f"({total_candidates} candidate(s) to process)."
+    )
+
+    # Option C duplicate-sibling disambiguation (Dan June 2026): a single
+    # MD_PATH chain may be shared by N>1 sibling headings under one parent
+    # (e.g. two '## Dump Bay' under one Curation Capsule). Precompute each
+    # candidate's 1-based document-order occurrence among candidates that
+    # share its exact MD_PATH chain, so the downstream helper anchors each
+    # duplicate's beacon to the correct heading instead of fail-closing.
+    #
+    # Ordering invariant: _collect_markdown_ast_beacon_nodes sorts with a
+    # STABLE sort keyed by (len(md_path), md_path), so candidates with an
+    # identical chain stay adjacent AND retain their relative document order
+    # (the pre-order tree-walk order). A running per-chain counter therefore
+    # yields the true disk document-order occurrence, which equals the
+    # Workflowy sibling order F12 reconcile maintains.
+    occurrence_by_index: list[Optional[int]] = []
+    _chain_counts: Dict[tuple, int] = {}
+    for _name, _note, _md_path in candidates:
+        chain_key = tuple(_md_path) if _md_path else ()
+        nth = _chain_counts.get(chain_key, 0) + 1
+        _chain_counts[chain_key] = nth
+        occurrence_by_index.append(nth)
+    # Only chains that appear MORE THAN ONCE actually need an occurrence hint;
+    # for unique chains pass None so single-heading behaviour is unchanged.
+    _chain_totals: Dict[tuple, int] = dict(_chain_counts)
+
+    results: list[Dict[str, Any]] = []
+    warnings: list[Dict[str, Any]] = []
+    for idx, (name, note, md_path) in enumerate(candidates, start=1):
+        depth = len(md_path) if md_path else 0
+        chain_key = tuple(md_path) if md_path else ()
+        occurrence = (
+            occurrence_by_index[idx - 1]
+            if _chain_totals.get(chain_key, 0) > 1
+            else None
+        )
+        try:
+            result = helper(file_path, name, note, occurrence=occurrence)
+        except Exception as exc:  # noqa: BLE001
+            warnings.append({
+                "name": name,
+                "error": f"helper raised exception: {exc!r}",
+                "md_path": list(md_path) if md_path else None,
+                "operation": None,
+            })
+            _emit_log(
+                f"  beacon[{idx}/{total_candidates}] depth={depth} "
+                f"name={_short_name(name)!r} -> SKIPPED (helper raised: {exc!r})"
+            )
+            continue
+
+        if not isinstance(result, dict):
+            warnings.append({
+                "name": name,
+                "error": f"unexpected non-dict helper result: {result!r}",
+                "md_path": list(md_path) if md_path else None,
+                "operation": None,
+            })
+            _emit_log(
+                f"  beacon[{idx}/{total_candidates}] depth={depth} "
+                f"name={_short_name(name)!r} -> SKIPPED (non-dict result: {result!r})"
+            )
+            continue
+
+        if result.get("error"):
+            err_str = str(result.get("error"))
+            warnings.append({
+                "name": name,
+                "error": err_str,
+                "md_path": list(md_path) if md_path else None,
+                "operation": str(result.get("operation") or "") or None,
+            })
+            _emit_log(
+                f"  beacon[{idx}/{total_candidates}] depth={depth} "
+                f"name={_short_name(name)!r} -> SKIPPED (error: {err_str})"
+            )
+            continue
+
+        op = str(result.get("operation") or "")
+        if op not in {"created_beacon", "updated_beacon", "noop"}:
+            warnings.append({
+                "name": name,
+                "error": f"unexpected operation: {op!r}",
+                "md_path": list(md_path) if md_path else None,
+                "operation": op or None,
+            })
+            _emit_log(
+                f"  beacon[{idx}/{total_candidates}] depth={depth} "
+                f"name={_short_name(name)!r} -> SKIPPED (unexpected operation: {op!r})"
+            )
+            continue
+
+        results.append(result)
+        beacon_id = str(result.get("beacon_id") or result.get("id") or "")
+        beacon_id_part = f" id={beacon_id}" if beacon_id else ""
+        _emit_log(
+            f"  beacon[{idx}/{total_candidates}] depth={depth} "
+            f"name={_short_name(name)!r} -> {op}{beacon_id_part}"
+        )
+
+    _emit_log(
+        f"Phase 7 complete: {len(results)} written, {len(warnings)} skipped "
+        f"({total_candidates} total)."
+    )
+    return results, warnings
+
+
+# @beacon[
+#   id=auto-beacon@nexus_to_tokens-chbp,
+#   role=nexus_to_tokens(node, depth: int),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,nexus--md-preview,
+#   kind=ast,
+# ]
+def nexus_to_tokens(node: Dict[str, Any], depth: int = 0) -> List[str]:
+    """Convert NEXUS node tree to Markdown text while preserving MD semantics.
+
+    CRITICAL:
+    - Sort children by priority (lower first) to preserve document order.
+    - Use MD_PATH as the canonical source of heading text, so Workflowy-only
+      AST-beacon decorations (🔱 and trailing #tags) do not leak into headings.
+    - Omit Markdown SPAN beacon child nodes entirely from reverse export.
+    - Strip BEACON (MD AST) metadata blocks from note bodies; these are
+      rehydrated separately as HTML comment beacon blocks after file write.
+    """
+    lines: List[str] = []
+    raw_name = (node.get("name") or "").strip()
+    note = node.get("note") or ""
+    children = [child for child in (node.get("children") or []) if isinstance(child, dict)]
+
+    # Sort children by priority (ascending) - lower values appear first.
+    children_sorted = sorted(children, key=lambda c: c.get("priority", 999999))
+
+    if depth >= 1 and raw_name == "⚙️ YAML Frontmatter":
+        lines.append("---")
+        if note:
+            lines.append(str(note))
+        lines.append("---")
+        lines.append("")
+        return lines
+
+    if depth >= 1 and raw_name == MD_LEADING_TEXT_NODE_NAME:
+        # "Leading text" is prose that lived ABOVE the first heading on disk.
+        # Emit its note body VERBATIM with NO '#' heading marker, so it lands
+        # back above the first heading exactly as authored. This mirrors the
+        # frontmatter branch above and is the reverse twin of
+        # nexus_map_codebase._extract_markdown_leading_text. Because we never
+        # emit a heading here, the F12+1 -> F12+3 -> F12+1 round-trip is
+        # idempotent: the leading text is re-parsed back into another
+        # MD_LEADING_TEXT_NODE_NAME node, never accumulating a heading.
+        if note:
+            lines.append(str(note))
+            lines.append("")
+        return lines
+
+    if depth == 0:
+        frontmatter_children = [
+            child for child in children_sorted
+            if (child.get("name") or "").strip() == "⚙️ YAML Frontmatter"
+        ]
+        leading_text_children = [
+            child for child in children_sorted
+            if (child.get("name") or "").strip() == MD_LEADING_TEXT_NODE_NAME
+        ]
+        normal_children = [
+            child for child in children_sorted
+            if (child.get("name") or "").strip() != "⚙️ YAML Frontmatter"
+            and (child.get("name") or "").strip() != MD_LEADING_TEXT_NODE_NAME
+            and not _is_markdown_span_beacon_node(child)
+            # NOTE: every non-SPAN child emits. F12+3 is Workflowy -> disk;
+            # emoji-prefixed nodes (📝, 💡, 🌟, 📌, etc.) added directly in
+            # Workflowy must be written to disk.
+        ]
+
+        # Emission order MUST match on-disk file order: frontmatter first, then
+        # any leading text, then the heading sections. (Mirrors
+        # parse_markdown_structure, which inserts frontmatter at priority 0 and
+        # leading text at priority 1, above the first heading at priority 100+.)
+        for child in frontmatter_children:
+            lines.extend(nexus_to_tokens(child, depth + 1))
+        for child in leading_text_children:
+            lines.extend(nexus_to_tokens(child, depth + 1))
+        for child in normal_children:
+            lines.extend(nexus_to_tokens(child, depth + 1))
+        return lines
+
+    # depth >= 1: emit heading
+    # Arbitrary heading depth: NEXUS Markdown supports up to 64 heading
+    # levels (do NOT clamp to 6). Clamping at 6 collapses deep Workflowy
+    # nesting into flat sibling H6 stacks on disk, which then makes the
+    # phase 7 MD_PATH lookup ambiguous and aborts F12+3.
+    level = min(depth, 64)
+    heading_name = _heading_name_from_note_or_name(note, raw_name)
+    heading = f"{'#' * level} {heading_name}" if heading_name else f"{'#' * level}"
+    lines.append(heading)
+    lines.append("")
+
+    note_body = _strip_md_ast_beacon_block(_strip_md_path_block(note))
+    # F12+3 injection guard: if this note body itself contains Markdown
+    # headings, wrap it in a sentinel-marked code fence so its '#' lines do
+    # NOT become real document headings once injected beneath this heading on
+    # disk (which would explode into spurious wrongly-leveled nodes on the next
+    # F12+1). Idempotent and a no-op for headless bodies (incl. a note whose
+    # genuine content is already a user-authored fenced block). The matching
+    # F12+1 read side strips our sentinel+fence so the Workflowy note stays
+    # clean. See _maybe_fence_sentinel_note / _unfence_sentinel_note.
+    note_body = _maybe_fence_sentinel_note(note_body)
+    if note_body:
+        lines.append(note_body)
+        lines.append("")
+
+    for child in children_sorted:
+        # Every non-SPAN child emits (F12+3 must write emoji-prefixed
+        # user-added subtrees to disk).
+        if _is_markdown_span_beacon_node(child):
+            continue
+        lines.extend(nexus_to_tokens(child, depth + 1))
+
+    return lines
+
+
+# @beacon[
+#   id=auto-beacon@clean_html_entities-rh2t,
+#   role=• ƒ clean_html_entities(markdown_text: str),
+#   slice_labels=nexus-md-header-path,carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def clean_html_entities(markdown_text: str) -> str:
+    """Convert HTML entities back to Markdown syntax.
+    
+    The forward mapper (nexus_map_codebase.py) converts Markdown **bold**
+    to HTML <b>bold</b> tags. This reverses that conversion.
+    
+    Also handles common HTML entities that should be Markdown.
+
+    Entity decoding policy (Dan, 2026-05, &nbsp; round-trip fix):
+      We intentionally do NOT use html.unescape() here. html.unescape is the
+      full Python entity decoder and decodes EVERYTHING, including exotic
+      entities like '&nbsp;' -> '\xa0' (a literal non-breaking-space CHARACTER),
+      '&copy;' -> '©', '&mdash;' -> '—', etc. That silently corrupted Markdown
+      *source* on every F12+3 write: a table cell authored as the six literal
+      characters '&nbsp;' would be rewritten to a raw U+00A0 byte on disk.
+
+      The reverse path's job is to reproduce Markdown SOURCE, not to render it.
+      The forward encoder (encode_for_workflowy_api in api_client_core.py) emits
+      a small transport-escape set for semantic '&', '<', '>', and Workflowy may
+      return ordinary double quotes as '&quot;'. So we decode ONLY that narrow set
+      (&amp;/&lt;/&gt;/&quot; plus numeric double-quote spellings), mirroring
+      _dewhiten_text's deliberate whitelist policy while preserving source-only
+      entities. All other entities ('&nbsp;', '&copy;', ...) survive verbatim as
+      literal source text, byte-identical to what the user authored. This makes
+      the full round trip symmetric:
+        disk '&nbsp;' -> wire '&amp;nbsp;' -> Workflowy shows '&nbsp;'
+          -> F12+3 decodes only '&amp;'->'&' -> disk '&nbsp;'  (identical)
+        Workflowy '&quot;quoted&quot;' -> disk '"quoted"'
+    """
+    import re
+    from nexus_map_codebase import decode_workflowy_transport_entities_for_markdown_source
+    
+    # Decode ONLY the shared narrow transport/readability entity set. This is
+    # the same helper used by Phase 7 beacon metadata rehydration, so Markdown
+    # body/frontmatter and beacon role/comment fields follow one policy.
+    text = decode_workflowy_transport_entities_for_markdown_source(markdown_text)
+    
+    # Convert <b>text</b> → **text** (bold)
+    text = re.sub(r'<b>(.*?)</b>', r'**\1**', text, flags=re.DOTALL)
+    
+    # Convert <i>text</i> → *text* (italic)
+    text = re.sub(r'<i>(.*?)</i>', r'*\1*', text, flags=re.DOTALL)
+    
+    # Convert <em>text</em> → *text* (emphasis)
+    text = re.sub(r'<em>(.*?)</em>', r'*\1*', text, flags=re.DOTALL)
+    
+    # Convert <strong>text</strong> → **text** (strong)
+    text = re.sub(r'<strong>(.*?)</strong>', r'**\1**', text, flags=re.DOTALL)
+    
+    return text
+
+
+# @beacon[
+#   id=auto-beacon@main-am67,
+#   role=main,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Convert NEXUS JSON to normalized Markdown (round-trip test)"
+    )
+    parser.add_argument(
+        "json_path",
+        help="Path to NEXUS JSON file (enchanted_terrain.json or phantom_gem.json)"
+    )
+    parser.add_argument(
+        "--output", "-o",
+        required=True,
+        help="Output Markdown file path"
+    )
+    
+    args = parser.parse_args()
+    
+    nexus_path = args.json_path
+    output_path = args.output
+
+    # Load NEXUS JSON
+    with open(nexus_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    root = load_nexus_root(data)
+    frontmatter_text, root_for_render = detach_yaml_frontmatter_child(root)
+    
+    print(f"\n{'='*60}")
+    print(f"MARKDOWN ROUND-TRIP v2.1 (preserve raw Workflowy Markdown)")
+    print(f"Root node: {root.get('name', 'NO_NAME')}")
+    print(f"Root children: {len(root.get('children', []))}")
+    print(f"{'='*60}\n")
+
+    # Convert NEXUS tree → Markdown text (excluding YAML frontmatter child).
+    raw_markdown = "\n".join(nexus_to_tokens(root_for_render, depth=0))
+
+    # Parse once for validation/debug visibility, but DO NOT render back through
+    # mdformat's MDRenderer. MDRenderer normalizes ordered-list markers to "1."
+    # for every item, which destroys explicit numbering preserved in Workflowy
+    # notes (e.g. 1/2/3/4 collapses to 1/1/1/1).
+    md = MarkdownIt("commonmark")
+    tokens = md.parse(raw_markdown)
+
+    print(f"Parsed {len(tokens)} tokens from NEXUS tree")
+
+    # Preserve the raw Workflowy-authored Markdown structure verbatim, while
+    # still cleaning HTML entities/tags that may have come from Workflowy.
+    final_markdown = clean_html_entities(raw_markdown)
+    if frontmatter_text is not None:
+        frontmatter_clean = clean_html_entities(frontmatter_text).strip("\n")
+        body_clean = final_markdown.lstrip("\n")
+        final_markdown = f"---\n{frontmatter_clean}\n---\n\n{body_clean}"
+    
+    # Write output
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(final_markdown)
+
+    beacon_results = reapply_markdown_ast_beacons(output_path, root_for_render)
+
+    print(f"\n{'='*60}")
+    print(f"ROUND-TRIP COMPLETE")
+    print(f"Output file: {output_path}")
+    print(f"Output size: {len(final_markdown)} chars")
+    print(f"Markdown AST beacons reapplied: {len(beacon_results)}")
+    print(f"{'='*60}\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,817 @@
+"""S03 §11 permanent bypass/alias fence scanner (AST, production source).
+
+Scans production Python source for cache-coherence bypasses and mutable-alias
+violations.  The allowlist and boundary/consumer dispositions come from ONE
+data source — ``tests/coherence_s03b_registry.json`` (H1/H2): the §6.4
+loud-failure exception set and the §11 allowlist are one set in one place.
+
+Rules enforced (each maps to a named violation class):
+
+- ``attr_access``        — ``._nodes_export_cache`` / ``._nodes_export_cache_timestamp``
+                           / ``._cache_view_publisher`` attribute access not covered by
+                           the EXACT enclosing function's allowlist entry AND its
+                           declared ``access_kind`` permission (S03-B audit A4.4/A4.5:
+                           exact full dotted function identity, never final-name
+                           equivalence; access_kind is enforced, never discarded).
+- ``accessor_bypass``    — ``_get_nodes_export_cache_nodes(...)`` called outside the
+                           allowlist in a function with no registry boundary
+                           disposition.
+- ``loader_bypass``      — ``load_nodes_by_id_from_cache(client-ish)`` old
+                           self-loading form outside registry-dispositioned functions.
+- ``mutable_alias``      — subscript assignment/deletion or mutating-method calls on a
+                           name TAINTED from a cache view / snapshot / accessor /
+                           export map — with taint propagated through simple name
+                           aliases, subscripts, ``.get(...)`` container extraction,
+                           awaited cached exports, and ``nodes_export``/``nodes_by_id``
+                           attribute reads (A4.1).  Copy constructors
+                           (``list()``/``dict()``/``copy()``/...) and plain
+                           reassignment clear taint, so sanctioned private-copy
+                           mutations stay clean.
+- ``timestamp_selector`` — newest-timestamp snapshot selection
+                           (``_find_latest_nodes_export_snapshot_path``) or direct
+                           snapshot writes (``_save_nodes_export_cache_to_disk`` /
+                           ``save_nodes_export_cache``) outside the S02 authority.
+- ``unclassified_spawn`` — task-spawn forms in production scope not registered in
+                           the registry's task-spawn dispositions: ``asyncio.create_task``
+                           / ``loop.create_task`` / ``asyncio.ensure_future`` (A4.2:
+                           including IMPORTED/ALIASED forms — ``from asyncio import
+                           create_task``, ``import asyncio as aio``), loop-producing
+                           expression spawns such as
+                           ``asyncio.get_running_loop().create_task(...)`` (A4.3),
+                           and project-level ``create_isolated_context_task(...)``
+                           calls (A4.6: safe with respect to ContextVar isolation,
+                           but still ledgered — a new site needs its H1 disposition).
+
+Limitation (W5/O3, recorded honestly): the taint analysis is per-function —
+a published alias passed as an argument into another function that mutates
+its parameter is NOT tracked; runtime discipline and code review remain the
+guard there.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+SRC = REPO / "src" / "workflowy_mcp"
+ROOT_MODULES = [
+    REPO / "nexus_map_codebase.py",
+    REPO / "beacon_obtain_code_snippet.py",
+    REPO / "markdown_roundtrip.py",
+    REPO / "glimpse_deploy_trampoline.py",
+    REPO / "beacon_mutation_contract.py",
+]
+REGISTRY_PATH = REPO / "tests" / "coherence_s03b_registry.json"
+
+FORBIDDEN_ATTRS = frozenset(
+    {"_nodes_export_cache", "_nodes_export_cache_timestamp", "_cache_view_publisher"}
+)
+ACCESSOR = "_get_nodes_export_cache_nodes"
+LOADER = "load_nodes_by_id_from_cache"
+TIMESTAMP_SELECTORS = frozenset({"_find_latest_nodes_export_snapshot_path"})
+DIRECT_SNAPSHOT_WRITERS = frozenset({"_save_nodes_export_cache_to_disk"})
+SPAWN_ATTRS = frozenset({"create_task", "ensure_future"})
+ISOLATED_SPAWNER = "create_isolated_context_task"
+LOOP_PRODUCERS = frozenset({"get_running_loop", "get_event_loop", "new_event_loop"})
+MUTATING_METHODS = frozenset(
+    {"append", "extend", "insert", "update", "setdefault", "pop", "remove", "clear", "sort", "reverse"}
+)
+CACHE_ORIGIN_CALLS = frozenset(
+    {
+        "_get_nodes_export_cache_nodes",
+        "load_nodes_by_id_from_cache",
+        "export_nodes",
+        "export_nodes_impl",
+        "current_operation_cache",
+        "capture_operation_cache",
+    }
+)
+VIEW_ATTRS = frozenset({"nodes_by_id", "nodes_export"})
+# Copy constructors produce caller-owned containers.  SHALLOW copies
+# (list/dict/set/...) own ONLY the outer container: descendant objects are
+# retained by reference and remain published (mutating them is forbidden).
+# DEEP copies own the whole graph (mutating anything is safe).
+SHALLOW_COPY_CONSTRUCTORS = frozenset(
+    {"list", "dict", "set", "frozenset", "tuple", "sorted", "copy"}
+)
+DEEP_COPY_CONSTRUCTORS = frozenset({"deepcopy"})
+
+# A4.4 — machine-checkable permission atoms derived from the registry's
+# ``access_kind`` vocabulary.  An allowlist entry clears ONLY the forbidden-
+# attribute accesses its access_kind permits, at its EXACT function scope.
+PERM_PUBLISHER_LOAD = "publisher_load"
+PERM_PUBLISHER_STORE = "publisher_store"
+PERM_ATTR_LOAD = "attribute_load"
+PERM_ATTR_STORE = "attribute_store"
+ACCESS_KIND_PERMISSIONS: dict[str, frozenset] = {
+    "publisher_write": frozenset({PERM_PUBLISHER_LOAD, PERM_PUBLISHER_STORE}),
+    "publisher_read": frozenset({PERM_PUBLISHER_LOAD}),
+    "attribute_read": frozenset({PERM_ATTR_LOAD}),
+    # W2c: ONE vocabulary entry granting BOTH attribute and publisher load —
+    # never a silent inflation of plain ``attribute_read``'s meaning.
+    "attribute_read+publisher_read": frozenset({PERM_ATTR_LOAD, PERM_PUBLISHER_LOAD}),
+    "attribute_write": frozenset({PERM_ATTR_LOAD, PERM_ATTR_STORE}),
+    "cow_transform": frozenset({PERM_PUBLISHER_LOAD}),
+    "accessor+snapshot_read": frozenset({PERM_PUBLISHER_LOAD, PERM_ATTR_LOAD}),
+    "adoption_adapter": frozenset({PERM_PUBLISHER_LOAD}),
+    "bootstrap_warmstart": frozenset({PERM_PUBLISHER_LOAD}),
+    "epoch_publication": frozenset({PERM_PUBLISHER_LOAD}),
+    "manifest_read": frozenset({PERM_PUBLISHER_LOAD}),
+    "snapshot_capture": frozenset({PERM_PUBLISHER_LOAD}),
+}
+
+
+def _required_permission(attr: str, ctx: ast.expr_context) -> str:
+    """The permission atom one forbidden-attribute access requires."""
+
+    if attr == "_cache_view_publisher":
+        return PERM_PUBLISHER_LOAD if isinstance(ctx, ast.Load) else PERM_PUBLISHER_STORE
+    return PERM_ATTR_LOAD if isinstance(ctx, ast.Load) else PERM_ATTR_STORE
+
+
+@dataclass(frozen=True)
+class Violation:
+    kind: str
+    file: str
+    line: int
+    function: str
+    detail: str
+
+
+def load_registry(path: Path | None = None) -> dict:
+    return json.loads((path or REGISTRY_PATH).read_text(encoding="utf-8"))
+
+
+def _allowlist_entries(registry: dict) -> dict[tuple[str, str], frozenset]:
+    """The H2 allowlist as ``{(repo-relative file, EXACT dotted function): permissions}``.
+
+    A4.4/A4.5: entries are keyed by the EXACT full dotted function identity
+    (class-nested, ``"WorkFlowyClientCore._cache_populated"``) — never by
+    final-name equivalence — and carry the machine-checkable permission set
+    derived from the registry's ``access_kind``.  An unknown ``access_kind``
+    yields an EMPTY permission set (fail-closed: every forbidden access in
+    that function then violates; the registry hygiene fence separately
+    requires all kinds to belong to the known vocabulary).
+    """
+
+    out: dict[tuple[str, str], frozenset] = {}
+    for entry in registry.get("allowlist", []):
+        fname = str(entry.get("function") or "")
+        # Strip display annotations like " (property)".
+        exact = fname.split("(")[0].strip()
+        permissions = ACCESS_KIND_PERMISSIONS.get(
+            str(entry.get("access_kind") or ""), frozenset()
+        )
+        out[(str(entry.get("file") or ""), exact)] = permissions
+    return out
+
+
+def _allowlist_functions(registry: dict) -> set[tuple[str, str]]:
+    """Back-compat view of the H2 allowlist as exact (file, function) keys."""
+
+    return set(_allowlist_entries(registry))
+
+
+def _classify_spawn_call(node: ast.Call, imports: _ImportTable) -> str | None:
+    """ONE shared spawn-form predicate (R4 + R3.3 single source of truth).
+
+    Returns the spawn form label (``create_task`` / ``ensure_future`` /
+    ``create_isolated_context_task``) or None.  Posture:
+
+    - ANY attribute-call ``.<create_task|ensure_future>(...)`` is a spawn
+      form, whatever the owner (``asyncio.``, ``loop.``, ``self._loop.``,
+      ``tg.``, ``factory().``): H5 closure is fail-closed, and a non-asyncio
+      project object with a coincidentally named method registers its
+      disposition instead of bypassing the fence (R4 preferred option).
+    - A bare-name call is a spawn only when import analysis binds it to
+      asyncio (``from asyncio import create_task [as x]``); a project-local
+      same-named helper with no asyncio binding is never misflagged.
+    - ``create_isolated_context_task`` is ContextVar-safe but still
+      ledgered (A4.6).
+    """
+
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        if func.attr in SPAWN_ATTRS:
+            return func.attr
+        if func.attr == ISOLATED_SPAWNER:
+            return ISOLATED_SPAWNER
+        return None
+    if isinstance(func, ast.Name):
+        if func.id in imports.asyncio_spawn_names:
+            return func.id
+        if func.id == ISOLATED_SPAWNER:
+            return ISOLATED_SPAWNER
+    return None
+
+
+def _identity_cleared(rel: str, fn: str, entries) -> bool:
+    """THE ONE shared exact-or-genuine-nested identity-clearing rule
+    (W3/W4/R2-2 — single-sourced for every registry-clearing consumer).
+
+    Clears ONLY on an exact dotted function match or genuine nested scope
+    beneath a registered function (``fn == registered`` or
+    ``fn.startswith(registered + ".")``) — never by bare-final-name or
+    substring borrowing (``websocket_handler_evil`` and ``class Evil: def
+    websocket_handler`` are NOT the registered ``websocket_handler``).
+    Entries are ``(repo_relative_file, registered_dotted_function)`` pairs.
+    """
+
+    for entry_rel, registered in entries:
+        if entry_rel != rel or not registered:
+            continue
+        if fn == registered or fn.startswith(registered + "."):
+            return True
+    return False
+
+
+def _spawn_site_cleared(rel: str, fn: str, spawns: set[tuple[str, str]]) -> bool:
+    """ONE shared registry-clearing predicate for spawn sites — the
+    exact-or-genuine-nested identity rule (W4/R2-2), single-sourced through
+    ``_identity_cleared``.  Registry-side annotation stripping happens in
+    ``_spawn_dispositions``."""
+
+    return _identity_cleared(rel, fn, spawns)
+
+
+def collect_spawn_sites(rel: str, text: str) -> list[tuple[int, str, str]]:
+    """Enumerate every spawn-form call site in one source file as
+    ``(line, enclosing_function, form)`` — the shared census used by the
+    registry-completeness fence and the machine inventory (R3.3)."""
+
+    tree = ast.parse(text, filename=rel)
+    mapper = _FunctionMapper()
+    mapper.visit(tree)
+    imports = _collect_imports(tree)
+    sites: list[tuple[int, str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            form = _classify_spawn_call(node, imports)
+            if form is not None:
+                sites.append((node.lineno, mapper.map.get(node.lineno, "<module>"), form))
+    return sites
+
+
+class _ImportTable:
+    """Per-file asyncio import analysis (A4.2).
+
+    Tracks local names bound to the ``asyncio`` module, to its spawn
+    functions, and to its loop producers — including aliased and
+    from-imported forms (``import asyncio as aio``, ``from asyncio import
+    create_task as ct``).  File-scoped by design: a fence that flags an
+    unknown spawn form is fail-closed, and local shadowing of these exact
+    names is vanishingly unlikely in production.
+    """
+
+    def __init__(self) -> None:
+        self.asyncio_module_names: set[str] = {"asyncio"}
+        self.asyncio_spawn_names: set[str] = set()
+        self.asyncio_loop_producer_names: set[str] = set()
+
+
+def _collect_imports(tree: ast.AST) -> _ImportTable:
+    table = _ImportTable()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "asyncio":
+                    table.asyncio_module_names.add(alias.asname or "asyncio")
+        elif isinstance(node, ast.ImportFrom) and node.module == "asyncio":
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if alias.name in SPAWN_ATTRS:
+                    table.asyncio_spawn_names.add(local)
+                elif alias.name in LOOP_PRODUCERS:
+                    table.asyncio_loop_producer_names.add(local)
+                elif alias.name == "*":
+                    # Star-import: conservatively treat canonical spawn/loop
+                    # names as potentially asyncio-bound (fail-closed).
+                    table.asyncio_spawn_names.update(SPAWN_ATTRS)
+                    table.asyncio_loop_producer_names.update(LOOP_PRODUCERS)
+    return table
+
+
+def _resolve_registry_file(parts: list[str]) -> tuple[str, str]:
+    """Resolve a dotted registry key to (repo-relative file, dotted function).
+
+    Keys mix path segments and class names (e.g.
+    ``client.api_client_nexus.WorkFlowyClientNexus.resolve_node_handle``):
+    the longest prefix that names a REAL file under ``src/workflowy_mcp``
+    wins; the remainder is the function path.
+    """
+
+    for i in range(len(parts) - 1, 0, -1):
+        candidate = "src/workflowy_mcp/" + "/".join(parts[:i]) + ".py"
+        if (REPO / candidate).is_file():
+            return candidate, ".".join(parts[i:])
+    return "src/workflowy_mcp/" + "/".join(parts[:-1]) + ".py", parts[-1]
+
+
+def _disposition_functions(registry: dict) -> set[tuple[str, str]]:
+    """H1 consumer dispositions as (repo-relative file, function) pairs."""
+
+    out: set[tuple[str, str]] = set()
+    for key in registry.get("consumer_dispositions", {}):
+        if "." not in key:
+            continue
+        parts = key.split(".")
+        rel, fn = _resolve_registry_file(parts)
+        out.add((rel, fn))
+    return out
+
+
+def _spawn_dispositions(registry: dict) -> set[tuple[str, str]]:
+    out: set[tuple[str, str]] = set()
+    for key in registry.get("task_spawns", {}):
+        file_part, _, fn_part = key.partition("::")
+        fn = fn_part.split("(")[0].strip() if fn_part else ""
+        out.add((file_part, fn))
+    return out
+
+
+class _FunctionMapper(ast.NodeVisitor):
+    """Map every line to its enclosing function (innermost)."""
+
+    def __init__(self) -> None:
+        self.stack: list[str] = []
+        self.map: dict[int, str] = {}
+
+    def _visit_fn(self, node: ast.AST) -> None:
+        name = getattr(node, "name", "<fn>")
+        self.stack.append(name)
+        for child in ast.iter_child_nodes(node):
+            self.visit(child)
+        self.stack.pop()
+
+    visit_FunctionDef = _visit_fn
+    visit_AsyncFunctionDef = _visit_fn
+    visit_ClassDef = _visit_fn
+
+    def generic_visit(self, node: ast.AST) -> None:
+        lineno = getattr(node, "lineno", None)
+        if lineno is not None and self.stack:
+            self.map[lineno] = ".".join(self.stack)
+        super().generic_visit(node)
+
+
+class _FenceVisitor(ast.NodeVisitor):
+    def __init__(
+        self,
+        rel: str,
+        fn_map: dict[int, str],
+        allow: dict[tuple[str, str], frozenset],
+        dispo: set[tuple[str, str]],
+        spawns: set[tuple[str, str]],
+        imports: _ImportTable,
+    ) -> None:
+        self.rel = rel
+        self.fn_map = fn_map
+        self.allow = allow
+        self.dispo = dispo
+        self.spawns = spawns
+        self.imports = imports
+        self.violations: list[Violation] = []
+        self.fn_stack: list[str] = []
+        # Per-function taint scopes (R1 three-state model):
+        # - ``alias_names``: PUBLISHED containers (view-owned — structural
+        #   AND descendant mutations are forbidden);
+        # - ``shallow_names``: OWNED shallow-copy outer containers whose
+        #   descendants are retained published references (outer structural
+        #   mutation safe; descendant mutation forbidden);
+        # - ``owned_subscripts``: ``name -> {constant keys}`` overridden with
+        #   owned values (the H4 ``working["nodes"] = list(...)`` shape), so
+        #   deeper writes through an overridden key read as owned.
+        self.alias_names: list[set[str]] = []
+        self.shallow_names: list[set[str]] = []
+        self.owned_subscripts: list[dict[str, set]] = []
+
+    # -- helpers ---------------------------------------------------------
+    def _fn(self, lineno: int) -> str:
+        return self.fn_map.get(lineno, "<module>")
+
+    def _dispo_cleared(self, lineno: int) -> bool:
+        """W3 (exact-identity clearing): a consumer call clears ONLY on an
+        exact dotted function match or genuine nested scope beneath a
+        registered function — never by bare-final-name borrowing (a
+        same-named method on another class is NOT the dispositioned
+        function).  Single-sourced through ``_identity_cleared`` (R2-2)."""
+
+        return _identity_cleared(self.rel, self._fn(lineno), self.dispo)
+
+    def _allow_cleared(self, lineno: int, attr: str, ctx: ast.expr_context) -> bool:
+        """A4.4/A4.5: exact dotted function match + access_kind permission.
+
+        The allowlist NEVER matches by final-name equivalence: an entry for
+        ``ClassA.method`` clears neither ``ClassB.method`` nor a nested
+        closure ``other.method``, and an entry's permission set (derived
+        from its declared ``access_kind``) must cover this access.
+        """
+
+        fn = self._fn(lineno)
+        permissions = self.allow.get((self.rel, fn))
+        if permissions is None:
+            return False
+        return _required_permission(attr, ctx) in permissions
+
+    def _spawn_cleared(self, lineno: int) -> bool:
+        return _spawn_site_cleared(self.rel, self._fn(lineno), self.spawns)
+
+    # -- tracking --------------------------------------------------------
+    def _visit_fn(self, node: ast.AST) -> None:
+        name = getattr(node, "name", "<fn>")
+        self.fn_stack.append(name)
+        self.alias_names.append(set())
+        self.shallow_names.append(set())
+        self.owned_subscripts.append({})
+        for child in ast.iter_child_nodes(node):
+            self.visit(child)
+        self.owned_subscripts.pop()
+        self.shallow_names.pop()
+        self.alias_names.pop()
+        self.fn_stack.pop()
+
+    visit_FunctionDef = _visit_fn
+    visit_AsyncFunctionDef = _visit_fn
+
+    def _current_aliases(self) -> set[str]:
+        return self.alias_names[-1] if self.alias_names else set()
+
+    def _current_shallow(self) -> set[str]:
+        return self.shallow_names[-1] if self.shallow_names else set()
+
+    def _current_owned_subscripts(self) -> dict[str, set]:
+        return self.owned_subscripts[-1] if self.owned_subscripts else {}
+
+    def _is_cache_origin_expr(self, node: ast.AST) -> bool:
+        """True for direct cache-originating calls or view-structure attribute reads."""
+        # Unwrap ``await`` so awaited client export/cache calls are caught too.
+        while isinstance(node, ast.Await):
+            node = node.value
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else ""
+            )
+            if name in CACHE_ORIGIN_CALLS:
+                return True
+            # W2b: ONLY the dynamic string-form read of the cache payload
+            # itself is a cache-data origin — the timestamp attribute is a
+            # scalar and the publisher attribute is permission-governed
+            # (reads through a captured view are caught by VIEW_ATTRS), so
+            # neither is a taint origin.
+            if name == "getattr" and len(node.args) >= 2:
+                second = node.args[1]
+                if (
+                    isinstance(second, ast.Constant)
+                    and second.value == "_nodes_export_cache"
+                ):
+                    return True
+            return False
+        if isinstance(node, ast.Attribute) and node.attr in VIEW_ATTRS:
+            return True
+        return False
+
+    def _copy_kind(self, node: ast.AST) -> str | None:
+        """'shallow' | 'deep' for copy-constructor calls, else None."""
+        while isinstance(node, ast.Await):
+            node = node.value
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else ""
+            )
+            if name in DEEP_COPY_CONSTRUCTORS:
+                return "deep"
+            if name in SHALLOW_COPY_CONSTRUCTORS:
+                return "shallow"
+        return None
+
+    def _taint_of_expr(self, node: ast.AST) -> str | None:
+        """'tainted' (published) | 'shallow' (owned outer, published
+        descendants) | None (clean) — the ASSIGNMENT-time classification.
+
+        Taint flows through simple aliases, subscripts, ``.get(...)``
+        container extraction, awaited cached exports, and
+        ``nodes_export``/``nodes_by_id`` reads.  A subscript/extraction of a
+        SHALLOW name is TAINTED (the retained descendant is a published
+        reference).  Copy constructors reclassify: shallow copies are
+        'shallow'; deep copies are clean; unknown calls break taint.
+        """
+        while isinstance(node, ast.Await):
+            node = node.value
+        if self._is_cache_origin_expr(node):
+            return "tainted"
+        if isinstance(node, ast.Name):
+            if node.id in self._current_aliases():
+                return "tainted"
+            if node.id in self._current_shallow():
+                return "shallow"
+            return None
+        if isinstance(node, ast.Subscript):
+            base = self._taint_of_expr(node.value)
+            # A subscript of a shallow copy yields a retained published
+            # descendant — tainted, never shallow.
+            return "tainted" if base in {"tainted", "shallow"} else None
+        if isinstance(node, ast.Dict):
+            # W1b(i): the {**x} unpacking display retains the unpacked
+            # mapping's published descendants — the new outer dict is
+            # OWNED-SHALLOW.  A plain display is NOT tainted merely for
+            # holding cache-derived scalar elements.
+            for key, value in zip(node.keys, node.values, strict=True):
+                if key is None and self._taint_of_expr(value) in {"tainted", "shallow"}:
+                    return "shallow"
+            return None
+        if isinstance(node, (ast.List, ast.Set, ast.Tuple)):
+            # W1b(ii): [*x] / {*x} / (*x,) starred unpacking — the new outer
+            # container is OWNED-SHALLOW; the unpacked elements stay
+            # published descendants.
+            for elt in node.elts:
+                if isinstance(elt, ast.Starred) and self._taint_of_expr(elt.value) in {
+                    "tainted",
+                    "shallow",
+                }:
+                    return "shallow"
+            return None
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr == "get":
+                base = self._taint_of_expr(func.value)
+                return "tainted" if base in {"tainted", "shallow"} else None
+            copy_kind = self._copy_kind(node)
+            if copy_kind is not None:
+                if node.args:
+                    arg_taint = self._taint_of_expr(node.args[0])
+                    if arg_taint is None:
+                        return None
+                    return "shallow" if copy_kind == "shallow" else None
+                # W1a: a zero-arg receiver method copy — X.copy() — mirrors
+                # the dict(x)/list(x) rule with the RECEIVER as the copied
+                # object; copy.deepcopy(x) remains the only deep form.
+                if (
+                    copy_kind == "shallow"
+                    and isinstance(func, ast.Attribute)
+                    and func.attr == "copy"
+                    and not node.keywords
+                ):
+                    receiver_taint = self._taint_of_expr(func.value)
+                    return "shallow" if receiver_taint in {"tainted", "shallow"} else None
+                return None
+            return None  # other calls break taint
+        return None
+
+    def _taint_state_of(self, node: ast.AST) -> str:
+        """'tainted' | 'shallow' | 'clean' — the state of the OBJECT the
+        expression denotes (R1 mutation-sink evaluation, recursive).
+
+        A shallow name itself is OWNED (outer structural mutation is the
+        sanctioned COW pattern); a subscript/extraction BELOW a shallow
+        container is a retained published descendant ('tainted').  The
+        key-override ledger records the state of an overridden key —
+        ``working["nodes"] = list(view_list)`` installs an OWNED-SHALLOW
+        list, so ``working["nodes"][i] = patched`` is safe while
+        ``working["nodes"][i]["name"] = x`` remains forbidden.
+        """
+        while isinstance(node, ast.Await):
+            node = node.value
+        if isinstance(node, ast.Name):
+            if node.id in self._current_aliases():
+                return "tainted"
+            if node.id in self._current_shallow():
+                return "shallow"
+            return "clean"
+        if isinstance(node, ast.Attribute):
+            if node.attr in VIEW_ATTRS:
+                return "tainted"  # view-structure read: published regardless
+            return "tainted" if self._taint_state_of(node.value) == "tainted" else "clean"
+        if isinstance(node, ast.Subscript):
+            base = node.value
+            if isinstance(base, ast.Name) and isinstance(node.slice, ast.Constant):
+                override = self._current_owned_subscripts().get(base.id, {}).get(
+                    node.slice.value
+                )
+                if override is not None:
+                    return override
+            base_state = self._taint_state_of(base)
+            # A subscript of anything published-or-shallow yields a retained
+            # published descendant; a subscript of clean data is clean.
+            return "tainted" if base_state in {"tainted", "shallow"} else "clean"
+        return "clean"
+
+    def _is_published_derived(self, node: ast.AST) -> bool:
+        """True when the object ACTUALLY being mutated is published state."""
+        return self._taint_state_of(node) == "tainted"
+
+    def _track_alias_assignment(self, targets: list[ast.expr], value: ast.AST) -> None:
+        taint = self._taint_of_expr(value)
+        for target in targets:
+            if isinstance(target, ast.Name):
+                if taint == "tainted":
+                    self._current_aliases().add(target.id)
+                    self._current_shallow().discard(target.id)
+                elif taint == "shallow":
+                    self._current_shallow().add(target.id)
+                    self._current_aliases().discard(target.id)
+                else:
+                    # Plain reassignment (or a deep copy) clears taint.
+                    self._current_aliases().discard(target.id)
+                    self._current_shallow().discard(target.id)
+                # Reassignment invalidates the key-override ledger.
+                self._current_owned_subscripts().pop(target.id, None)
+            elif isinstance(target, ast.Subscript):
+                # Key-override ledger: name["k"] = <owned value> records the
+                # override WITH ITS STATE (clean | shallow); a published
+                # value discards any prior override.
+                if (
+                    isinstance(target.value, ast.Name)
+                    and isinstance(target.slice, ast.Constant)
+                ):
+                    ledger = self._current_owned_subscripts().setdefault(
+                        target.value.id, {}
+                    )
+                    if taint in {None, "shallow"}:
+                        ledger[target.slice.value] = (
+                            "clean" if taint is None else "shallow"
+                        )
+                    else:
+                        ledger.pop(target.slice.value, None)
+
+    def _check_subscript_writes(self, targets: list[ast.expr], lineno: int, verb: str) -> None:
+        for target in targets:
+            if isinstance(target, ast.Subscript) and self._is_published_derived(
+                target.value
+            ):
+                self.violations.append(
+                    Violation("mutable_alias", self.rel, lineno, self._fn(lineno),
+                              f"{verb} on published cache structure")
+                )
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self._track_alias_assignment(node.targets, node.value)
+        self._check_subscript_writes(node.targets, node.lineno, "subscript assignment")
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self._track_alias_assignment([node.target], node.value)
+        self._check_subscript_writes([node.target], node.lineno, "subscript assignment")
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self._check_subscript_writes([node.target], node.lineno, "augmented subscript assignment")
+        # W1c: ``name += ...`` on a TAINTED bare name is an in-place
+        # mutation of the published structure (__iadd__); a SHALLOW name's
+        # outer container is owned and stays clean.
+        if (
+            isinstance(node.target, ast.Name)
+            and self._taint_state_of(node.target) == "tainted"
+        ):
+            self.violations.append(
+                Violation(
+                    "mutable_alias",
+                    self.rel,
+                    node.lineno,
+                    self._fn(node.lineno),
+                    "augmented assignment mutates published cache structure",
+                )
+            )
+        self.generic_visit(node)
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        self._check_subscript_writes(node.targets, node.lineno, "del")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in FORBIDDEN_ATTRS and not self._allow_cleared(
+            node.lineno, node.attr, node.ctx
+        ):
+            self.violations.append(
+                Violation("attr_access", self.rel, node.lineno, self._fn(node.lineno),
+                          f"forbidden attribute access .{node.attr} "
+                          f"({type(node.ctx).__name__}; requires permission "
+                          f"{_required_permission(node.attr, node.ctx)!r})")
+            )
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else (
+            func.attr if isinstance(func, ast.Attribute) else ""
+        )
+        lineno = node.lineno
+
+        if name == ACCESSOR and (self.rel, self._fn(lineno)) not in self.allow and not self._dispo_cleared(lineno):
+            self.violations.append(
+                Violation("accessor_bypass", self.rel, lineno, self._fn(lineno),
+                          "accessor call outside allowlist with no boundary disposition")
+            )
+        if name == LOADER and (
+            self.rel, self._fn(lineno)
+        ) not in self.allow and not self._dispo_cleared(lineno):
+            arg_form = ""
+            if node.args:
+                first = node.args[0]
+                if isinstance(first, ast.Name):
+                    arg_form = first.id
+                elif isinstance(first, ast.Call) and isinstance(first.func, ast.Name):
+                    arg_form = f"{first.func.id}()"
+                elif isinstance(first, ast.Attribute):
+                    arg_form = f"self.{first.attr}" if isinstance(first.value, ast.Name) else "attr"
+            if arg_form in {"client", "self", "get_client()", "_client"}:
+                self.violations.append(
+                    Violation("loader_bypass", self.rel, lineno, self._fn(lineno),
+                              f"old self-loading loader form load_nodes_by_id_from_cache({arg_form})")
+                )
+        if name in TIMESTAMP_SELECTORS:
+            self.violations.append(
+                Violation("timestamp_selector", self.rel, lineno, self._fn(lineno),
+                          f"newest-timestamp snapshot selector {name}")
+            )
+        if name in DIRECT_SNAPSHOT_WRITERS and (
+            self.rel, self._fn(lineno)
+        ) not in self.allow:
+            self.violations.append(
+                Violation("timestamp_selector", self.rel, lineno, self._fn(lineno),
+                          f"direct snapshot writer {name} outside the S02 authority")
+            )
+        # W2a: dynamic string-form attribute access — a getattr/setattr call
+        # whose second argument is a constant forbidden-attribute name is
+        # governed by the SAME exact-function allowlist + access_kind
+        # permission rules as visit_Attribute (getattr -> the attr's load
+        # permission; setattr -> its store permission; _cache_view_publisher
+        # maps to publisher_load/store).
+        if name in {"getattr", "setattr"} and len(node.args) >= 2:
+            second = node.args[1]
+            if (
+                isinstance(second, ast.Constant)
+                and isinstance(second.value, str)
+                and second.value in FORBIDDEN_ATTRS
+            ):
+                dyn_attr = second.value
+                dyn_ctx = ast.Load() if name == "getattr" else ast.Store()
+                if not self._allow_cleared(lineno, dyn_attr, dyn_ctx):
+                    self.violations.append(
+                        Violation(
+                            "attr_access",
+                            self.rel,
+                            lineno,
+                            self._fn(lineno),
+                            f"forbidden dynamic attribute access "
+                            f"{name}(..., {dyn_attr!r}) (requires permission "
+                            f"{_required_permission(dyn_attr, dyn_ctx)!r})",
+                        )
+                    )
+        spawn_form = _classify_spawn_call(node, self.imports)
+        if spawn_form is not None and not self._spawn_cleared(lineno):
+            detail = (
+                "unregistered create_isolated_context_task spawn"
+                if spawn_form == ISOLATED_SPAWNER
+                else f"unregistered task spawn {spawn_form}"
+            )
+            self.violations.append(
+                Violation("unclassified_spawn", self.rel, lineno, self._fn(lineno), detail)
+            )
+        # Mutating-method call on a published structure: X.append(...) etc.
+        # R1: the receiver is evaluated RECURSIVELY (a published view list,
+        # a retained node dict, or a descendant of a shallow copy) — never
+        # only when the receiver is a bare name.
+        if isinstance(func, ast.Attribute) and func.attr in MUTATING_METHODS:
+            if self._is_published_derived(func.value):
+                self.violations.append(
+                    Violation("mutable_alias", self.rel, lineno, self._fn(lineno),
+                              f"mutating method {func.attr} on published cache structure")
+                )
+        self.generic_visit(node)
+
+
+def production_files() -> list[Path]:
+    files = [p for p in SRC.rglob("*.py") if p.is_file()]
+    files.extend(p for p in ROOT_MODULES if p.is_file())
+    return files
+
+
+def scan_source(rel: str, text: str, registry: dict) -> list[Violation]:
+    tree = ast.parse(text, filename=rel)
+    mapper = _FunctionMapper()
+    mapper.visit(tree)
+    visitor = _FenceVisitor(
+        rel,
+        mapper.map,
+        _allowlist_entries(registry),
+        _disposition_functions(registry),
+        _spawn_dispositions(registry),
+        _collect_imports(tree),
+    )
+    visitor.visit(tree)
+    return visitor.violations
+
+
+def scan_production(registry: dict | None = None) -> list[Violation]:
+    registry = registry or load_registry()
+    violations: list[Violation] = []
+    for path in production_files():
+        rel = str(path.relative_to(REPO)).replace("\\", "/")
+        violations.extend(scan_source(rel, path.read_text(encoding="utf-8"), registry))
+    return violations

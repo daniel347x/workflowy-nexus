@@ -1,0 +1,1648 @@
+#!/usr/bin/env python3
+"""code_map: read and maintain this repository's beacon code map.
+
+Commands:
+  labels   every label in use, with its count and its catalog description
+  slice    print one or more labels' slices, gathered fresh from the source
+  read     print one function, class, method, or a marked region, by name
+  tag      add labels to a symbol's beacon block, creating it when missing
+  untag    remove labels from a symbol's beacon block
+  check    report problems in the blocks, the catalog and the slice files
+  init     first-time setup of the code-map/ folder
+
+Standalone: needs Python 3.10+ and git.  JavaScript/TypeScript symbols also
+need the tree-sitter parser; the script prints the one install command when
+it is missing.  No cache: each run reads and maps only what it needs.
+
+A slice this script prints is plain Markdown: one file per heading (as a
+repository-relative path), one heading per tagged symbol or region, its
+labels, the block's comment, and (in the full form) the docstring, comments
+and span text found beside the block, fenced as text.
+"""
+
+from __future__ import annotations
+
+import argparse
+from bisect import bisect_right
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import _engine
+
+V1_EXTENSIONS = (
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".sql", ".sh", ".yml", ".yaml",
+)
+JS_TS_EXTENSIONS = frozenset({".js", ".jsx", ".ts", ".tsx"})
+SPAN_LANGUAGE_BY_EXT = {".sql": "sql", ".sh": "shell", ".yml": "yaml", ".yaml": "yaml"}
+# The engine's block parsers and appliers are named per language; the shell
+# pair uses the short form, and the span-extent helpers the long one.
+SPAN_PARSER_NAME_BY_EXT = {".sql": "sql", ".sh": "sh", ".yml": "yaml", ".yaml": "yaml"}
+LANGUAGE_BY_EXT = {
+    ".py": "python",
+    ".js": "js_ts", ".jsx": "js_ts", ".ts": "js_ts", ".tsx": "js_ts",
+    **SPAN_LANGUAGE_BY_EXT,
+}
+BLOCK_PARSER_BY_EXT = {
+    ".py": "parse_python_beacon_blocks",
+    ".js": "parse_js_beacon_blocks",
+    ".jsx": "parse_js_beacon_blocks",
+    ".ts": "parse_js_beacon_blocks",
+    ".tsx": "parse_js_beacon_blocks",
+    ".sql": "parse_sql_beacon_blocks",
+    ".sh": "parse_sh_beacon_blocks",
+    ".yml": "parse_yaml_beacon_blocks",
+    ".yaml": "parse_yaml_beacon_blocks",
+}
+TREE_SITTER_INSTALL_CMD = (
+    'python -m pip install "tree-sitter>=0.25.2" "tree-sitter-language-pack==1.8.1"'
+)
+CODE_MAP_DIR = "code-map"
+CATALOG_REL = "code-map/CATALOG.md"
+SLICES_REL = "code-map/slices"
+MAX_READ_LINES = 64
+NOT_IN_CATALOG = "(not in catalog)"
+UNPORTABLE_NAME_CHARS = set('<>:"/\\|?*')
+BEACON_MARKER = "@beacon["
+# block-format.md's label grammar: lowercase letters, digits and hyphens
+# (a run of hyphens is allowed, so the doubled form is a legal label).
+LABEL_GRAMMAR = re.compile(r"^[a-z0-9]+(-+[a-z0-9]+)*$")
+
+
+def _identity(text: str) -> str:
+    return text
+
+
+# ---------------------------------------------------------------------------
+# The repository and its files
+# ---------------------------------------------------------------------------
+
+
+def find_repository_root() -> str | None:
+    """The repository root holding the current directory, or None."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=os.getcwd(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    root = proc.stdout.decode("utf-8", "replace").strip()
+    return root or None
+
+
+def _skill_folder_relative_to(root: str) -> str | None:
+    """This script's skill folder (the one holding SKILL.md above scripts/),
+    as a '/'-separated path relative to the repository root, or None.
+
+    Every file under it is dropped wherever the skill is installed, so a
+    target repository's map never includes the skill's own files.
+    """
+    folder = Path(__file__).resolve().parent.parent
+    if not (folder / "SKILL.md").is_file():
+        return None
+    try:
+        rel = folder.relative_to(Path(root).resolve())
+    except ValueError:
+        return None
+    return rel.as_posix()
+
+
+def list_repository_files(root: str) -> list[str]:
+    """Every v1 file git sees: tracked, plus untracked but not ignored."""
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return []
+    if proc.returncode != 0:
+        return []
+    skip_prefix = _skill_folder_relative_to(root)
+    root_abs = Path(root)
+    names: list[str] = []
+    for raw in proc.stdout.split(b"\0"):
+        if not raw:
+            continue
+        name = raw.decode("utf-8", "surrogateescape")
+        if name.startswith("/") or ".." in name.split("/"):
+            continue
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in V1_EXTENSIONS:
+            continue
+        if skip_prefix is not None and (
+            name == skip_prefix or name.startswith(skip_prefix + "/")
+        ):
+            continue
+        if not (root_abs / name).is_file():
+            continue
+        names.append(name)
+    names.sort()
+    return names
+
+
+_PARSER_STATE = {"key": None, "ready": False}
+
+
+def parser_ready() -> bool:
+    """True when the engine's tree-sitter parser imports and works.
+
+    Probed once per engine state: the pack that ships an incompatible
+    parser fails the probe here, loudly turning the feature off.
+    """
+    key = bool(getattr(_engine, "_HAVE_TREE_SITTER", False))
+    if _PARSER_STATE["key"] != key:
+        ready = False
+        if key:
+            try:
+                probe = _engine.Parser()
+                probe.language = _engine.get_language("javascript")
+                ready = True
+            except Exception:
+                ready = False
+        _PARSER_STATE["key"] = key
+        _PARSER_STATE["ready"] = ready
+    return _PARSER_STATE["ready"]
+
+
+class Repository:
+    """Files observed once; text, mapping and edit fingerprints share the bytes."""
+
+    def __init__(self, root: str, files: list[str]) -> None:
+        self.root = root
+        self.files = files
+        self._texts: dict[str, str | None] = {}
+        self._snapshots: dict[str, _engine.SourceSnapshot] = {}
+        self._children: dict[str, list | None] = {}
+        self._map_errors: dict[str, list[dict]] = {}
+        self.unreadable: list[tuple[str, str]] = []
+
+    def text(self, rel: str) -> str | None:
+        """Decode and retain one immutable observation, including its raw hash."""
+        if rel not in self._texts:
+            try:
+                path = Path(self.root) / rel
+                data = path.read_bytes()
+                snapshot = _engine.source_snapshot_from_bytes(data, os.path.realpath(path))
+                self._snapshots[rel] = snapshot
+                self._texts[rel] = snapshot.parse_text
+            except (OSError, UnicodeDecodeError, ValueError) as exc:
+                self._texts[rel] = None
+                self.unreadable.append((rel, str(exc)))
+        return self._texts[rel]
+
+    def has_beacon_marker(self, rel: str) -> bool:
+        text = self.text(rel)
+        return text is not None and BEACON_MARKER in text
+
+    def children(self, rel: str) -> list | None:
+        """Map retained bytes; keep parse exceptions for shared check diagnostics."""
+        if rel in self._children:
+            return self._children[rel]
+        nodes: list | None = None
+        text = self.text(rel)
+        if text is not None:
+            ext = os.path.splitext(rel)[1].lower()
+            abs_path = str(Path(self.root) / rel)
+            try:
+                if ext == ".py":
+                    nodes = _engine.parse_file_outline_core(abs_path, snapshot=self._snapshots[rel])[0]
+                elif ext in JS_TS_EXTENSIONS:
+                    nodes = _engine.parse_js_ts_outline_core(abs_path, snapshot=self._snapshots[rel])[0]
+                else:
+                    language = SPAN_PARSER_NAME_BY_EXT[ext]
+                    lines = list(self._snapshots[rel].physical_lines)
+                    nodes = []
+                    beacons = getattr(_engine, "parse_" + language + "_beacon_blocks")(lines)
+                    getattr(_engine, "apply_" + language + "_beacons")(lines, nodes, beacons)
+            except Exception as exc:
+                self.unreadable.append((rel, str(exc)))
+                self._map_errors[rel] = [{"exception": f"{type(exc).__name__}: {exc}"}]
+                nodes = None
+        self._children[rel] = nodes
+        return nodes
+
+    def blocks(self, rel: str) -> list[dict]:
+        """Parse retained physical rows, or [] when the file cannot be read."""
+        text = self.text(rel)
+        if text is None:
+            return []
+        ext = os.path.splitext(rel)[1].lower()
+        parser = getattr(_engine, BLOCK_PARSER_BY_EXT[ext])
+        return parser(list(self._snapshots[rel].physical_lines))
+
+    def findings(self, rel: str) -> list[dict]:
+        """Delegate the retained map and snapshot to the shared findings core."""
+        children = self.children(rel)
+        snapshot = self._snapshots[rel]
+        inputs = _engine.beacon_snapshot_analysis_inputs(
+            snapshot, LANGUAGE_BY_EXT[os.path.splitext(rel)[1].lower()], _engine,
+            outline=children or [], parse_note=_engine.parse_mapped_note,
+            mapper_errors=self._map_errors.get(rel, ()))
+        rows = _engine.analyze_beacon_snapshot(
+            snapshot, **inputs, display_path=rel, producer="code-map.check",
+            writer_authority="code-map metadata capability (tag/untag: Python and JS/TS)")
+        return sorted(rows, key=lambda row: (
+            ("error", "warning", "info").index(row["severity"]), row["line"], row["code"], row["finding_id"]))
+
+
+def report_unreadable(repo: Repository) -> None:
+    """One stderr line per file that could not be read or mapped."""
+    for rel, reason in repo.unreadable:
+        print(f"skipping unreadable file {rel}: {reason}", file=sys.stderr)
+
+
+def unparsed_js_ts_count(repo: Repository) -> int:
+    """JS/TS files holding beacon blocks while the parser is unavailable."""
+    if parser_ready():
+        return 0
+    return sum(
+        1
+        for rel in repo.files
+        if os.path.splitext(rel)[1].lower() in JS_TS_EXTENSIONS
+        and repo.has_beacon_marker(rel)
+    )
+
+
+def parser_gate_line(count: int) -> str:
+    return (
+        f"JavaScript/TypeScript parser not installed: {count} file(s) with "
+        f"beacon blocks skipped. Install it with: {TREE_SITTER_INSTALL_CMD}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Entries, labels, selection
+# ---------------------------------------------------------------------------
+
+
+def iter_entries(nodes) -> list:
+    """Every mapped node whose note marks it as a mapped source entry."""
+    found: list = []
+    for node in nodes or []:
+        note = str(node.get("note") or "")
+        if _engine.repository_view_note_is_entry(note):
+            found.append(node)
+        found.extend(iter_entries(node.get("children")))
+    return found
+
+
+def entry_labels(note: str) -> list[str]:
+    """The labels of the note's first beacon block: the slice Labels: line."""
+    items = _engine.parse_mapped_note(note)
+    labels, _comment = _engine.repository_view_labels_and_comment(items, _identity)
+    return labels
+
+
+def trailing_name_tags(name: str) -> list[str]:
+    _base, tags = _engine.split_name_and_tags(name)
+    return [tag[1:] for tag in tags if tag.startswith("#")]
+
+
+def entry_selected_by(name: str, wanted_labels: list[str]) -> bool:
+    """The slice membership rule: a trailing name tag matches the label under
+    the family rule (label, then label-anything, case-sensitively)."""
+    tags = trailing_name_tags(name)
+    for tag in tags:
+        for label in wanted_labels:
+            if _engine.slice_tag_variant_match(tag, label, postfix_words=()):
+                return True
+    return False
+
+
+def collect_entries(repo: Repository) -> list:
+    """(file, node) for every entry of every mapped file, in file order."""
+    skip_js_ts = not parser_ready()
+    entries: list = []
+    for rel in repo.files:
+        ext = os.path.splitext(rel)[1].lower()
+        if skip_js_ts and ext in JS_TS_EXTENSIONS:
+            continue
+        if not repo.has_beacon_marker(rel):
+            continue
+        children = repo.children(rel)
+        if children is None:
+            continue
+        for node in iter_entries(children):
+            entries.append((rel, node))
+    return entries
+
+
+def label_counts(entries) -> dict[str, int]:
+    """How many entries carry each label: one entry carrying a label counts
+    once, however many times the label repeats in its block."""
+    counts: dict[str, int] = {}
+    for _rel, node in entries:
+        labels = entry_labels(str(node.get("note") or ""))
+        for label in dict.fromkeys(labels):
+            counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# The slice document
+# ---------------------------------------------------------------------------
+
+
+def _collect_selected(nodes, wanted_labels: list[str], selected_ids: set) -> bool:
+    """Mark every entry of this subtree that is selected or encloses a
+    selected one; True when the subtree holds any marked entry."""
+    any_marked = False
+    for node in nodes:
+        note = str(node.get("note") or "")
+        is_entry = _engine.repository_view_note_is_entry(note)
+        child_marked = _collect_selected(
+            node.get("children") or [], wanted_labels, selected_ids
+        )
+        if is_entry and entry_selected_by(str(node.get("name") or ""), wanted_labels):
+            child_marked = True
+        if child_marked:
+            any_marked = True
+            if is_entry:
+                selected_ids.add(id(node))
+    return any_marked
+
+
+def _project(nodes, parent_kind: str | None, selected_ids: set, headings_only: bool) -> list[dict]:
+    projected: list[dict] = []
+    for node in nodes:
+        note = str(node.get("note") or "")
+        if id(node) in selected_ids:
+            heading, body = _engine.repository_view_entry_display(
+                str(node.get("name") or ""),
+                note,
+                parent_kind,
+                headings_only=headings_only,
+                strip_text=_identity,
+            )
+            projected.append(
+                {
+                    "name": heading,
+                    "note": body,
+                    "children": _project(
+                        node.get("children") or [],
+                        _engine.repository_view_heading_kind(heading),
+                        selected_ids,
+                        headings_only,
+                    ),
+                }
+            )
+        else:
+            projected.extend(
+                _project(node.get("children") or [], parent_kind, selected_ids, headings_only)
+            )
+    return projected
+
+
+def build_document(repo: Repository, wanted_labels: list[str], headings_only: bool) -> str:
+    """The slice document for the labels' families, in both-symbol parity
+    with the upstream renderer: one projected node per file, composed
+    depth-first with one heading per node and the body as the note."""
+    skip_js_ts = not parser_ready()
+    forest: list[dict] = []
+    for rel in repo.files:
+        ext = os.path.splitext(rel)[1].lower()
+        if skip_js_ts and ext in JS_TS_EXTENSIONS:
+            continue
+        if not repo.has_beacon_marker(rel):
+            continue
+        children = repo.children(rel)
+        if children is None:
+            continue
+        selected_ids: set = set()
+        if not _collect_selected(children, wanted_labels, selected_ids):
+            continue
+        forest.append(
+            {
+                "name": _engine._repository_view_span(rel),
+                "note": "",
+                "children": _project(children, None, selected_ids, headings_only),
+            }
+        )
+
+    lines: list[str] = []
+
+    def emit(nodes, depth: int) -> None:
+        for node in nodes:
+            lines.append("#" * min(depth + 1, 6) + " " + node["name"])
+            note = node.get("note") or ""
+            if note.strip():
+                lines.append("")
+                lines.append(note.strip())
+            lines.append("")
+            emit(node.get("children") or [], depth + 1)
+
+    emit(forest, 0)
+    document = "\n".join(lines).strip()
+    return document + "\n" if document else ""
+
+
+# ---------------------------------------------------------------------------
+# The catalog
+# ---------------------------------------------------------------------------
+
+
+def catalog_row_label(line: str) -> str | None:
+    """The label of a catalog row: a line whose first cell, trimmed, is one
+    backticked label.  Anything else (headings, separators, prose) is None."""
+    if not line.lstrip().startswith("|"):
+        return None
+    start = line.find("|")
+    end_label = line.find("|", start + 1)
+    if end_label < 0:
+        return None
+    first_cell = line[start + 1 : end_label].strip()
+    match = re.fullmatch(r"`([^`]+)`", first_cell)
+    return match.group(1) if match else None
+
+
+def parse_catalog_rows(catalog_text: str) -> list[dict]:
+    rows: list[dict] = []
+    for line_no, line in enumerate(catalog_text.splitlines(), 1):
+        label = catalog_row_label(line)
+        if label is None:
+            continue
+        start = line.find("|")
+        end_label = line.find("|", start + 1)
+        end_count = line.find("|", end_label + 1)
+        count_cell = line[end_label + 1 : end_count].strip() if end_count >= 0 else ""
+        if end_count >= 0 and "|" in line[end_count + 1 :]:
+            description = line[end_count + 1 : line.rfind("|")].strip()
+        else:
+            description = line[end_count + 1 :].strip() if end_count >= 0 else ""
+        rows.append(
+            {
+                "label": label,
+                "count_cell": count_cell,
+                "description": description,
+                "line_no": line_no,
+            }
+        )
+    return rows
+
+
+def load_catalog(root: str) -> str | None:
+    try:
+        return (Path(root) / CATALOG_REL).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def catalog_description(catalog_text: str | None, label: str) -> str | None:
+    if not catalog_text:
+        return None
+    for row in parse_catalog_rows(catalog_text):
+        if row["label"] == label:
+            return row["description"]
+    return None
+
+
+def newline_style(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def write_catalog(root: str, catalog_text: str, counts: dict[str, int]) -> int:
+    """Rewrite each row's Symbols count, appending rows for labels in use
+    that no row lists.  Rows are never deleted; descriptions never change;
+    the file is written only when it changes."""
+    newline = newline_style(catalog_text)
+    lines = catalog_text.splitlines()
+    listed: set[str] = set()
+    for index, line in enumerate(lines):
+        label = catalog_row_label(line)
+        if label is None:
+            continue
+        listed.add(label)
+        start = line.find("|")
+        end_label = line.find("|", start + 1)
+        end_count = line.find("|", end_label + 1)
+        if end_count < 0:
+            continue
+        count = counts.get(label, 0)
+        lines[index] = line[: end_label + 1] + f" {count} " + line[end_count:]
+    new_labels = sorted(label for label in counts if label not in listed)
+    if new_labels:
+        insert_at = _new_labels_insert_index(lines)
+        rows = [f"| `{label}` | {counts[label]} |  |" for label in new_labels]
+        lines[insert_at:insert_at] = rows
+    updated = newline.join(lines)
+    if updated and not updated.endswith("\n"):
+        updated += newline
+    if updated != catalog_text:
+        (Path(root) / CATALOG_REL).write_bytes(updated.encode("utf-8"))
+    return 0
+
+
+def _new_labels_insert_index(lines: list[str]) -> int:
+    """Rows join the last table under the last '## New labels' heading;
+    a section with no table gains the header pair first; with no heading,
+    the file gains the whole section at its end, after one blank line."""
+    heading_index = None
+    for index, line in enumerate(lines):
+        if line.strip() == "## New labels":
+            heading_index = index
+    if heading_index is None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines.extend(
+            [
+                "",
+                "## New labels",
+                "",
+                "| Label | Symbols | What it covers |",
+                "|---|---:|---|",
+            ]
+        )
+        return len(lines)
+    last_table = None
+    for index in range(heading_index + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped.startswith("#") and stripped != "## New labels":
+            break
+        if stripped.startswith("|"):
+            last_table = index
+    if last_table is None:
+        insert_at = heading_index + 1
+        lines[insert_at:insert_at] = [
+            "",
+            "| Label | Symbols | What it covers |",
+            "|---|---:|---|",
+        ]
+        return insert_at + 3
+    return last_table + 1
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+
+def _open_repository() -> tuple[str, Repository] | int:
+    root = find_repository_root()
+    if root is None:
+        print("error: not inside a git repository", file=sys.stderr)
+        return 1
+    return root, Repository(root, list_repository_files(root))
+
+
+def cmd_labels(args) -> int:
+    opened = _open_repository()
+    if isinstance(opened, int):
+        return opened
+    root, repo = opened
+    unparsed = unparsed_js_ts_count(repo)
+    if unparsed and args.write:
+        print(parser_gate_line(unparsed), file=sys.stderr)
+        return 1
+    if unparsed:
+        print(parser_gate_line(unparsed), file=sys.stderr)
+    catalog_text = load_catalog(root)
+    if args.write and catalog_text is None:
+        print(f"{CATALOG_REL} not found; run init first", file=sys.stderr)
+        return 1
+    entries = collect_entries(repo)
+    report_unreadable(repo)
+    counts = label_counts(entries)
+    if args.write:
+        return write_catalog(root, catalog_text or "", counts)
+    out = sys.stdout.buffer
+    for label in sorted(counts):
+        description = catalog_description(catalog_text, label) or NOT_IN_CATALOG
+        out.write(f"{label}\t{counts[label]}\t{description}\n".encode("utf-8"))
+    out.flush()
+    return 0
+
+
+def _label_is_portable(label: str) -> bool:
+    if any(ch in UNPORTABLE_NAME_CHARS for ch in label):
+        return False
+    return all(ord(ch) >= 32 and ord(ch) != 127 for ch in label)
+
+
+def _case_collisions(labels) -> list[str]:
+    seen: dict[str, str] = {}
+    collisions: list[str] = []
+    for label in sorted(labels):
+        key = label.lower()
+        if key in seen:
+            collisions.append(f"{seen[key]} / {label}")
+        else:
+            seen[key] = label
+    return collisions
+
+
+def cmd_slice(args) -> int:
+    opened = _open_repository()
+    if isinstance(opened, int):
+        return opened
+    root, repo = opened
+    if args.write and args.headings:
+        # argparse-level conflict, kept explicit for the exit code.
+        print("error: --headings cannot be combined with --write", file=sys.stderr)
+        return 2
+    unparsed = unparsed_js_ts_count(repo)
+    if unparsed:
+        print(parser_gate_line(unparsed), file=sys.stderr)
+        if args.write:
+            return 1
+    entries = collect_entries(repo)
+    report_unreadable(repo)
+    counts = label_counts(entries)
+    if args.write:
+        return _slice_write(root, repo, counts, args.labels)
+    if not args.labels:
+        # argparse enforces at least one label without --write; this is a
+        # backstop for in-process callers.
+        print("error: slice needs at least one label", file=sys.stderr)
+        return 2
+    document = build_document(repo, args.labels, headings_only=args.headings)
+    if not document:
+        print(
+            "no symbols carry these labels: " + ", ".join(args.labels),
+            file=sys.stderr,
+        )
+        return 1
+    sys.stdout.buffer.write(document.encode("utf-8"))
+    sys.stdout.buffer.flush()
+    return 0
+
+
+def _slice_write(root: str, repo: Repository, counts: dict[str, int], labels: list[str]) -> int:
+    root_path = Path(root)
+    if not (root_path / CODE_MAP_DIR).is_dir():
+        print(f"error: {CODE_MAP_DIR}/ not found; run init first", file=sys.stderr)
+        return 1
+    targets = list(labels) if labels else sorted(counts)
+    for label in labels:
+        if label not in counts:
+            print(f"error: no symbol carries the label `{label}`", file=sys.stderr)
+            return 1
+    unportable = [label for label in targets if not _label_is_portable(label)]
+    if unportable:
+        print(
+            "error: not a portable file name: " + ", ".join(f"`{l}`" for l in unportable),
+            file=sys.stderr,
+        )
+        return 1
+    collisions = _case_collisions(counts)
+    if collisions:
+        print(
+            "error: labels differing only in case: " + "; ".join(collisions),
+            file=sys.stderr,
+        )
+        return 1
+    slices_dir = root_path / SLICES_REL
+    slices_dir.mkdir(parents=True, exist_ok=True)
+    wrote = unchanged = 0
+    for label in targets:
+        document = build_document(repo, [label], headings_only=False)
+        target = slices_dir / f"{label}.md"
+        data = document.encode("utf-8")
+        if target.exists() and target.read_bytes() == data:
+            unchanged += 1
+            continue
+        target.write_bytes(data)
+        wrote += 1
+    deleted = 0
+    if not labels:
+        for stale in sorted(slices_dir.glob("*.md")):
+            if stale.stem not in counts:
+                stale.unlink()
+                deleted += 1
+    print(f"wrote {wrote}, deleted {deleted}, unchanged {unchanged}")
+    return 0
+
+
+def _iter_ast_nodes(nodes):
+    for node in nodes or []:
+        if node.get("ast_qualname"):
+            yield node
+        yield from _iter_ast_nodes(node.get("children"))
+
+
+def _node_span(node: dict, ext: str) -> tuple[int, int] | None:
+    """The node's source span, 1-based inclusive; decorators included on
+    Python when the mapper recorded where they start."""
+    start = node.get("orig_lineno_start_unused")
+    end = node.get("orig_lineno_end_unused")
+    if ext == ".py":
+        decor = node.get("decor_start_lineno")
+        if isinstance(decor, int) and decor > 0:
+            start = decor
+    if not isinstance(start, int) or not isinstance(end, int):
+        return None
+    return start, end
+
+
+def _find_symbol_for_block_id(nodes, block_id: str):
+    """The AST node whose mapped note carries the block id in a generated
+    beacon record.  Prose that merely quotes ``id: <id>`` (a docstring or
+    comment line) is never an identity."""
+    matches = []
+    for node in _iter_ast_nodes(nodes):
+        records = _note_beacon_records(node)
+        if any(str(record.get("id") or "") == block_id for record in records):
+            matches.append(node)
+    return matches
+
+
+def _normalize_file_filter(root: str, value: str) -> str:
+    """A --file value as a '/'-separated path relative to the root."""
+    norm = value.replace("\\", "/").strip()
+    while norm.startswith("./"):
+        norm = norm[2:]
+    candidate = Path(norm)
+    if candidate.is_absolute():
+        try:
+            return candidate.resolve().relative_to(Path(root).resolve()).as_posix()
+        except ValueError:
+            return norm
+    return norm
+
+
+# @beacon[
+#   id=beacon-kit@cmd_read,
+#   slice_labels=ra-read-text-snippet,
+#   kind=ast,
+#   comment=Resolves exact CLI block or symbol targets from retained source; span reads do not require a successful AST map, while ambiguous targets and the existing JS parser capability remain explicit.,
+# ]
+def cmd_read(args) -> int:
+    """Read retained source: block geometry survives an unrelated outline error."""
+    opened = _open_repository()
+    if isinstance(opened, int):
+        return opened
+    root, repo = opened
+    name = args.name
+    last_part = name.rsplit(".", 1)[-1]
+    word_re = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(last_part) + r"(?![A-Za-z0-9_])")
+    skip_js_ts = not parser_ready()
+    skipped_js_ts = 0
+    candidate_rels: list[str] = []
+    for rel in repo.files:
+        ext = os.path.splitext(rel)[1].lower()
+        text = repo.text(rel)
+        if text is None:
+            continue
+        if skip_js_ts and ext in JS_TS_EXTENSIONS:
+            if word_re.search(text) or (name != last_part and name in text):
+                skipped_js_ts += 1
+            continue
+        if word_re.search(text) or (name != last_part and name in text):
+            candidate_rels.append(rel)
+    report_unreadable(repo)
+    if skipped_js_ts:
+        print(parser_gate_line(skipped_js_ts), file=sys.stderr)
+    if args.file:
+        wanted_file = _normalize_file_filter(root, args.file)
+        if wanted_file not in repo.files:
+            print(f"error: {args.file} is not a file of this repository", file=sys.stderr)
+            return 1
+        candidate_rels = [rel for rel in candidate_rels if rel == wanted_file]
+
+    block_matches: list[tuple[str, dict]] = []
+    ast_matches: list[tuple[str, dict]] = []
+    for rel in candidate_rels:
+        for block in repo.blocks(rel):
+            if str(block.get("id") or "") == name:
+                block_matches.append((rel, block))
+        children = repo.children(rel)
+        if children is None:
+            continue
+        for node in _iter_ast_nodes(children):
+            qualname = str(node.get("ast_qualname") or "")
+            if qualname == name or qualname.endswith("." + name):
+                ast_matches.append((rel, node))
+
+    resolved = None
+    if block_matches:
+        if len(block_matches) > 1:
+            _print_candidates(
+                [
+                    (rel, (block.get("comment_line") or 0), str(block.get("id") or ""))
+                    for rel, block in block_matches
+                ]
+            )
+            return 1
+        rel, block = block_matches[0]
+        resolved = _resolve_block_span(repo, rel, block, name)
+        if resolved is None:
+            return 1
+    else:
+        if not ast_matches:
+            print(f"error: no symbol or block named {name}", file=sys.stderr)
+            return 1
+        if len(ast_matches) > 1:
+            _print_candidates(
+                [
+                    (
+                        rel,
+                        (_node_span(node, os.path.splitext(rel)[1].lower()) or (0, 0))[0],
+                        str(node.get("ast_qualname") or ""),
+                    )
+                    for rel, node in ast_matches
+                ]
+            )
+            return 1
+        rel, node = ast_matches[0]
+        span = _node_span(node, os.path.splitext(rel)[1].lower())
+        if span is None:
+            print(f"error: no source lines recorded for {name}", file=sys.stderr)
+            return 1
+        resolved = (rel, span[0], span[1])
+
+    rel, start, end = resolved
+    return _print_span(repo, rel, start, end, args)
+
+
+# @beacon[
+#   id=beacon-kit@_resolve_block_span,
+#   slice_labels=ra-read-text-snippet,
+#   kind=ast,
+#   comment=Projects U01 records from the repository snapshot: CLI closed spans retain opener-through-whole-close presentation, empty spans stay closed and open-only spans read to EOF; AST reads keep their intentional symbol-only scope.,
+# ]
+def _resolve_block_span(repo: Repository, rel: str, block: dict, name: str):
+    """A block id's read span.  kind=ast: the attached symbol's lines.
+    kind=span: the opening block's first line through the closing block's
+    last line. Open-only spans reach EOF. All bounds come from shared records,
+    never a writer-only extent or a separate close/end scan."""
+    ext = os.path.splitext(rel)[1].lower()
+    if str(block.get("kind") or "") == "span":
+        text = repo.text(rel)
+        if text is None:
+            print(f"error: cannot read {rel}", file=sys.stderr)
+            return None
+        snapshot = repo._snapshots[rel]
+        language = LANGUAGE_BY_EXT[ext]
+        records = _engine._beacon_edit_records(snapshot, language)
+        own = next((record for record in records if record["marker"] == "open"
+                    and record["line"] == block.get("comment_line") and record["fields"].get("id") == name), None)
+        if own is None:
+            print(f"error: span block {name} has no readable extent", file=sys.stderr)
+            return None
+        start, _opening_end = _record_read_lines(snapshot, own)
+        end = own["section"]["end_line"]
+        if own["closed"]:
+            close = next(record for record in records if record["marker"] == "close"
+                         and record["line"] == own["close_line"] and record["section"] == own["section"])
+            _close_start, end = _record_read_lines(snapshot, close)
+        return rel, start, end
+    children = repo.children(rel)
+    if children is None:
+        print(f"error: cannot map {rel}", file=sys.stderr)
+        return None
+    symbols = _find_symbol_for_block_id(children, name)
+    if not symbols:
+        print(
+            f"error: block {name} attaches to no definition", file=sys.stderr
+        )
+        return None
+    if len(symbols) > 1:
+        print(f"error: block {name} attaches to more than one definition", file=sys.stderr)
+        return None
+    span = _node_span(symbols[0], ext)
+    if span is None:
+        print(f"error: no source lines recorded for {name}", file=sys.stderr)
+        return None
+    return rel, span[0], span[1]
+
+
+def _record_read_lines(snapshot, record):
+    """Project U01 owned wrapper bytes into physical display lines, not write bounds."""
+    start, end = record["line"], record["read_end_line"]
+    if record["wrapper_dedicated"] and record["wrapper_open_range"]:
+        start = bisect_right(snapshot.byte_offsets, record["wrapper_open_range"][0])
+        if record["wrapper_range"]:
+            end = bisect_right(snapshot.byte_offsets, record["wrapper_range"][1] - 1)
+    return start, end
+
+
+def _print_candidates(candidates) -> None:
+    ordered = sorted((str(path), int(line), str(qual)) for path, line, qual in candidates)
+    print("error: ambiguous name; candidates:", file=sys.stderr)
+    for path, line, qual in ordered:
+        print(f"  {path}:{line}  {qual}", file=sys.stderr)
+
+
+def _print_span(repo: Repository, rel: str, start: int, end: int, args) -> int:
+    """Print the retained snapshot's physical lines under the unchanged guard."""
+    text = repo.text(rel)
+    if text is None:
+        print(f"error: cannot read {rel}", file=sys.stderr)
+        return 1
+    lines = list(repo._snapshots[rel].physical_lines)
+    total = len(lines)
+    start = max(1, int(args.start) if args.start is not None else start)
+    end = min(total, int(args.end) if args.end is not None else end)
+    start = min(start, max(total, 1))
+    end = max(end, 0)
+    if start > end:
+        print("error: --start is after --end", file=sys.stderr)
+        return 2
+    header = _engine.format_snippet_header(f"{rel} | ", lines, start, end)
+    out = sys.stdout.buffer
+    if args.size:
+        out.write((header + "\n").encode("utf-8"))
+        out.flush()
+        return 0
+    explicit_window = args.start is not None or args.end is not None
+    window = list(range(start, end + 1))
+    rows: list[str] = []
+    if len(window) > MAX_READ_LINES and not explicit_window:
+        head_end, tail_start, elided_start, elided_end, elided_count = (
+            _engine.clamp_span_to_head_tail(start, end, MAX_READ_LINES)
+        )
+        window = list(range(start, head_end + 1)) + list(range(tail_start, end + 1))
+        width = len(str(max(window))) if window else 1
+        for number in range(start, head_end + 1):
+            rows.append(f"{number:>{width}} | {lines[number - 1]}")
+        rows.append(
+            f"{'...':>{width}} | ... {elided_count} lines not shown "
+            f"({elided_start}-{elided_end}); read them with "
+            f"--start {elided_start} --end {elided_end}"
+        )
+        for number in range(tail_start, end + 1):
+            rows.append(f"{number:>{width}} | {lines[number - 1]}")
+    else:
+        width = len(str(max(window))) if window else 1
+        for number in window:
+            rows.append(f"{number:>{width}} | {lines[number - 1]}")
+    out.write((header + "\n" + "\n".join(rows) + "\n").encode("utf-8"))
+    out.flush()
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Tagging and untagging
+# ---------------------------------------------------------------------------
+
+
+def _note_beacon_records(node: dict) -> list[dict]:
+    """The beacon records the engine attached to the node's note."""
+    note = str(node.get("note") or "")
+    return [payload for kind, payload in _engine.parse_mapped_note(note) if kind == "beacon"]
+
+
+def _canonical_label_list(raw) -> list[str]:
+    """A labels string as the canonical label list (empty parts dropped)."""
+    text = raw if isinstance(raw, str) else ""
+    return [t for t in _engine._canonicalize_slice_labels(text, None).split(",") if t]
+
+
+def _label_grammar_problem(labels: list[str]) -> str | None:
+    for label in labels:
+        if not LABEL_GRAMMAR.match(label):
+            return label
+    return None
+
+
+def _resolve_edit_target(
+    repo: Repository, root: str, name: str, file_filter: str | None
+) -> tuple[str, dict] | int:
+    """Resolve a tag/untag NAME the way read does, over Python and JS/TS
+    symbols only.  Returns (file, node) or an exit code."""
+    last_part = name.rsplit(".", 1)[-1]
+    word_re = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(last_part) + r"(?![A-Za-z0-9_])")
+    skip_js_ts = not parser_ready()
+    skipped_js_ts = 0
+    candidate_rels: list[str] = []
+    for rel in repo.files:
+        ext = os.path.splitext(rel)[1].lower()
+        if ext != ".py" and ext not in JS_TS_EXTENSIONS:
+            continue
+        text = repo.text(rel)
+        if text is None:
+            continue
+        if skip_js_ts and ext in JS_TS_EXTENSIONS:
+            if word_re.search(text) or (name != last_part and name in text):
+                skipped_js_ts += 1
+            continue
+        if word_re.search(text) or (name != last_part and name in text):
+            candidate_rels.append(rel)
+    report_unreadable(repo)
+    if skipped_js_ts:
+        print(parser_gate_line(skipped_js_ts), file=sys.stderr)
+    if file_filter:
+        wanted_file = _normalize_file_filter(root, file_filter)
+        if wanted_file not in repo.files:
+            print(f"error: {file_filter} is not a file of this repository", file=sys.stderr)
+            return 1
+        candidate_rels = [rel for rel in candidate_rels if rel == wanted_file]
+
+    block_matches: list[tuple[str, dict]] = []
+    ast_matches: list[tuple[str, dict]] = []
+    for rel in candidate_rels:
+        children = repo.children(rel)
+        if children is None:
+            continue
+        for block in repo.blocks(rel):
+            if str(block.get("id") or "") == name:
+                block_matches.append((rel, block))
+        for node in _iter_ast_nodes(children):
+            qualname = str(node.get("ast_qualname") or "")
+            if qualname == name or qualname.endswith("." + name):
+                ast_matches.append((rel, node))
+
+    if block_matches:
+        if len(block_matches) > 1:
+            _print_candidates(
+                [
+                    (rel, (block.get("comment_line") or 0), str(block.get("id") or ""))
+                    for rel, block in block_matches
+                ]
+            )
+            return 1
+        rel, block = block_matches[0]
+        if str(block.get("kind") or "") == "span":
+            print(
+                f"error: {name} is a span block; span blocks are edited by hand",
+                file=sys.stderr,
+            )
+            return 1
+        children = repo.children(rel)
+        if children is None:
+            print(f"error: cannot map {rel}", file=sys.stderr)
+            return 1
+        symbols = _find_symbol_for_block_id(children, name)
+        if not symbols:
+            print(f"error: block {name} attaches to no definition", file=sys.stderr)
+            return 1
+        if len(symbols) > 1:
+            print(f"error: block {name} attaches to more than one definition", file=sys.stderr)
+            return 1
+        return rel, symbols[0]
+    if not ast_matches:
+        if skipped_js_ts:
+            # The name may live in a file this run could not read; the gate
+            # line above is the refusal.
+            return 1
+        print(f"error: no symbol or block named {name}", file=sys.stderr)
+        return 1
+    if len(ast_matches) > 1:
+        _print_candidates(
+            [
+                (
+                    rel,
+                    (_node_span(node, os.path.splitext(rel)[1].lower()) or (0, 0))[0],
+                    str(node.get("ast_qualname") or ""),
+                )
+                for rel, node in ast_matches
+            ]
+        )
+        return 1
+    return ast_matches[0]
+
+
+def _edit_target_or_fail(repo: Repository, root: str, args) -> tuple[str, dict, str, str] | int:
+    """The resolved (file, node, qualname, language) for tag/untag, or an
+    exit code."""
+    resolved = _resolve_edit_target(repo, root, args.name, args.file)
+    if isinstance(resolved, int):
+        return resolved
+    rel, node = resolved
+    ext = os.path.splitext(rel)[1].lower()
+    qualname = str(node.get("ast_qualname") or "")
+    return rel, node, qualname, LANGUAGE_BY_EXT[ext]
+
+
+def _attached_block(
+    repo: Repository, rel: str, language: str, lines: list[str], node: dict, qualname: str
+) -> dict | int:
+    """Consume the shared physical selector on the retained snapshot/outline.
+
+    Id multiplicity elsewhere is diagnostic, not a veto on this symbol. An
+    unresolved target prints its physical candidates and returns exit 1; no
+    private extent finder or first-id selection remains here.
+    """
+    records = _note_beacon_records(node)
+    snapshot = repo._snapshots[rel]
+    structures = {"language": language, "records": _engine._beacon_edit_records(snapshot, language),
+                  "outline": repo.children(rel)}
+    selection = _engine.select_beacon_block_for_node(snapshot, structures,
+        {"language": language, "ast_qualname": qualname, "operation": "delta_ensure",
+         "note_beacon_id": str(records[0].get("id") or "") if len(records) == 1 else None})
+    if selection["status"] in {"conflict", "candidates"}:
+        if len(records) > 1:
+            ids = ", ".join(str(record.get("id") or "") for record in records)
+            print(f"error: two beacon blocks attach to {qualname} in {rel} ({ids})", file=sys.stderr)
+        else:
+            print(f"error: {selection['error_kind']}: {selection['error']}", file=sys.stderr)
+        print("candidates: " + json.dumps(selection["candidates"], ensure_ascii=False), file=sys.stderr)
+        return 1
+    return selection
+
+
+def _atomic_replace(path: Path, data: bytes, *, expected_sha256: str, language: str) -> dict:
+    """Restore only our just-published bytes, through the shared publisher.
+
+    This observation must match our successful publication, and the publisher
+    checks it again immediately before replace. A newer save is never restored
+    over. The final check-to-replace instruction gap is not an OS compare/swap.
+    """
+    try:
+        snapshot = _engine.read_source_snapshot(path)
+        if snapshot.sha256 != expected_sha256:
+            return {"success": False, "error_kind": "source_changed_since_plan",
+                    "evidence": {"expected": expected_sha256, "actual": snapshot.sha256}}
+        start = snapshot.byte_offsets[0]
+        return _engine.commit_beacon_edit_plan(_engine.BeaconEditPlan(
+            snapshot, language, (_engine.BeaconEdit(start, len(snapshot.raw_bytes), data[start:], "document"),),
+            permitted_structural_effects=("whole_document",),
+        ))
+    except (FileNotFoundError, UnicodeDecodeError) as exc:
+        return {"success": False, "error_kind": "source_changed_since_plan",
+                "evidence": {"expected": expected_sha256, "actual": str(exc)}}
+    except OSError as exc:
+        return {"success": False, "error_kind": "disk_write_failed", "error": str(exc)}
+
+
+# @beacon[
+#   id=code-map@_source_edit_plan,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+#   comment=Projects kit creation's decorator-aware insertion row into a shared byte plan; ordinary updates and deletes consume the field planner directly and never reach this adapter.,
+# ]
+def _source_edit_plan(snapshot, language, start, rows, expected):
+    """Adapt only a create insertion; no existing-block range policy lives here."""
+    bid, labels = expected
+    intent = {"owner": "insertion", "operation": "present", "complete": True,
+              "fields": {"id": bid, "kind": "ast", "slice_labels": ",".join(labels)}}
+    return _engine.BeaconEditPlan(snapshot, language,
+        (_engine.source_line_edit(snapshot, start, start, rows, "insertion"),), (), (intent,),
+        insertion_slots=(snapshot.byte_offsets[start],))
+
+
+def _mutation_problem(mutation: dict) -> bool:
+    """Print shared item/field answers without imposing another mutation policy."""
+    if mutation.get("comment_warning"):
+        print(mutation["comment_warning"], file=sys.stderr)
+    if mutation.get("field_errors"):
+        print("field errors: " + json.dumps(mutation["field_errors"], ensure_ascii=False), file=sys.stderr)
+    if not mutation["success"]:
+        print(f"error: {mutation['error_kind']}: {mutation['error']}", file=sys.stderr)
+        print("candidates: " + json.dumps(mutation["candidates"], ensure_ascii=False), file=sys.stderr)
+        return True
+    return False
+
+
+# @beacon[
+#   id=code-map@_write_source_text,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+#   comment=Publishes a snapshot-owned edit through the shared proof and binary publisher; checks attachment afterward and restores only if the file still holds this invocation's own bytes; newer saves are reported and preserved.,
+# ]
+def _write_source_text(root: str, rel: str, plan, qualname: str, expected) -> bool:
+    """Publish the observed plan; retain the attachment check with guarded restore."""
+    result = _engine.commit_beacon_edit_plan(plan)
+    if not result["success"]:
+        print(f"error: cannot write {rel}: {result.get('error_kind')}: "
+              f"{result.get('error', '')}; {result.get('evidence', {})}", file=sys.stderr)
+        return False
+    if _verify_written_block(root, rel, qualname, expected):
+        return True
+    restored = _atomic_replace(Path(root) / rel, plan.snapshot.raw_bytes,
+                               expected_sha256=result["after_sha256"], language=plan.language)
+    if restored["success"]:
+        detail = "the original file was restored"
+    elif restored.get("error_kind") == "source_changed_since_plan":
+        detail = f"restore conflict: newer content left unchanged; {restored.get('evidence', {})}"
+    else:
+        detail = f"restore failed; current content left unchanged: {restored}"
+    print(f"error: the written change did not attach to {qualname} on the re-read; {detail}", file=sys.stderr)
+    return False
+
+
+def _verify_written_block(
+    root: str, rel: str, qualname: str, expected: tuple[str, list[str]] | None
+) -> bool:
+    """Re-map the file: the symbol's note must show exactly the expected
+    block (its id and labels), or no block at all when expected is None."""
+    ext = os.path.splitext(rel)[1].lower()
+    abs_path = str(Path(root) / rel)
+    try:
+        if ext == ".py":
+            nodes = _engine.parse_file_outline_core(abs_path)[0]
+        else:
+            nodes = _engine.parse_js_ts_outline_core(abs_path)[0]
+    except Exception:
+        return False
+    for node in _iter_ast_nodes(nodes):
+        if str(node.get("ast_qualname") or "") != qualname:
+            continue
+        records = _note_beacon_records(node)
+        if expected is None:
+            return not records
+        bid, labels = expected
+        if len(records) != 1:
+            return False
+        record = records[0]
+        if str(record.get("id") or "") != bid:
+            return False
+        return _canonical_label_list(record.get("slice_labels")) == labels
+    return False
+
+
+def _comment_intent(args):
+    """The intent for tag's --comment / --replace-comment; ValueError (a
+    rejected text, or an empty one) is the caller's exit 2."""
+    if args.replace_comment:
+        return _engine.BeaconCommentIntent.replace(args.comment)
+    if args.comment is not None:
+        return _engine.BeaconCommentIntent.fill_if_empty(args.comment)
+    return _engine.BeaconCommentIntent.preserve()
+
+
+def _python_insert_row(text: str, lines: list[str], node: dict) -> int | None:
+    """Insert above the first decorator or definition on shared physical rows.
+
+    The outline and decorator authority already use these same coordinates;
+    Unicode separators inside strings never create extra edit rows.
+    """
+    def_line = node.get("orig_lineno_start_unused")
+    if not isinstance(def_line, int) or def_line < 1:
+        return None
+    def_row = def_line - 1
+    if def_row >= len(lines):
+        return None
+    ranges = _engine._python_decorator_ranges_by_definition(lines).get(def_row, [])
+    if ranges:
+        return ranges[0][0]
+    return def_row
+
+
+def cmd_tag(args) -> int:
+    """Tag the shared physical selection with scoped field edits, or create.
+
+    Creates retain kit naming and decorator-aware placement; ordinary updates
+    publish the shared planner's byte plan without rebuilding the block.
+    """
+    problem = _label_grammar_problem(args.labels)
+    if problem:
+        print(
+            f"error: not a valid label: {problem} (labels are lowercase "
+            "letters, digits and hyphens)",
+            file=sys.stderr,
+        )
+        return 2
+    requested_labels = list(dict.fromkeys(args.labels))
+    if args.replace_comment and args.comment is None:
+        print("error: --replace-comment needs --comment", file=sys.stderr)
+        return 2
+    if args.comment is not None:
+        try:
+            _comment_intent(args)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    opened = _open_repository()
+    if isinstance(opened, int):
+        return opened
+    root, repo = opened
+    target = _edit_target_or_fail(repo, root, args)
+    if isinstance(target, int):
+        return target
+    rel, node, qualname, language = target
+    text = repo.text(rel)
+    if text is None:
+        print(f"error: cannot read {rel}", file=sys.stderr)
+        return 1
+    snapshot = repo._snapshots[rel]
+    lines = list(snapshot.physical_lines)
+    state = _attached_block(repo, rel, language, lines, node, qualname)
+    if isinstance(state, int):
+        return state
+    try:
+        intent = _comment_intent(args)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if state.get("block") is not None:
+        mutation = _engine.plan_beacon_node_mutation(snapshot, state,
+            {"kind": "delta_ensure", "tags": requested_labels, "comment_intent": intent})
+        if _mutation_problem(mutation):
+            return 1
+        bid = str(mutation["beacon_id"] or "")
+        new_labels = list(mutation["intended_slice_labels"])
+        if mutation["planned_operation"] == "noop":
+            print(f"unchanged {rel} {qualname}: {', '.join(new_labels)} (block {bid})")
+            return 0
+        expected = (bid, new_labels)
+        plan = mutation["edit_plan"]
+    else:
+        new_labels = requested_labels
+        taken = {o["value"] for r in _engine._beacon_edit_records(snapshot, language)
+                 for o in r.get("occurrences", ()) if o["key"] == "id"}
+        first_label = new_labels[0]
+        bid = _engine.allocate_beacon_id(taken, base_id=f"{first_label}@{qualname}")
+        resolution = _engine.resolve_beacon_comment(
+            intent=intent, note_comment=None, disk_comment=None, beacon_exists_on_disk=False
+        )
+        rebuilt = _engine._build_beacon_block_for_language(
+            language,
+            bid=bid,
+            role=None,
+            slice_labels=",".join(new_labels),
+            kind="ast",
+            show_span=None,
+            comment_text=resolution.resolved,
+        )
+        if language == "python":
+            insert_idx = _python_insert_row(text, lines, node)
+        else:
+            start_line = node.get("orig_lineno_start_unused")
+            if not isinstance(start_line, int) or start_line < 1 or start_line > len(lines):
+                print(f"error: no source line recorded for {qualname}", file=sys.stderr)
+                return 1
+            insert_idx = start_line - 1
+        indented = _engine._indent_beacon_block(rebuilt, lines, insert_idx)
+        expected = (bid, new_labels)
+        plan = _source_edit_plan(snapshot, language, insert_idx, indented, expected)
+    if not _write_source_text(root, rel, plan, qualname, expected):
+        return 1
+    print(f"tagged {rel} {qualname}: {', '.join(new_labels)} (block {bid})")
+    return 0
+
+
+def cmd_untag(args) -> int:
+    """Remove exact labels or last-label metadata with the shared field planner.
+
+    Existing wrappers, implicit kind and opaque fields are not re-rendered;
+    publication and restore-only-our-own-bytes behavior remain unchanged.
+    """
+    problem = _label_grammar_problem(args.labels)
+    if problem:
+        print(
+            f"error: not a valid label: {problem} (labels are lowercase "
+            "letters, digits and hyphens)",
+            file=sys.stderr,
+        )
+        return 2
+    opened = _open_repository()
+    if isinstance(opened, int):
+        return opened
+    root, repo = opened
+    target = _edit_target_or_fail(repo, root, args)
+    if isinstance(target, int):
+        return target
+    rel, node, qualname, language = target
+    text = repo.text(rel)
+    if text is None:
+        print(f"error: cannot read {rel}", file=sys.stderr)
+        return 1
+    snapshot = repo._snapshots[rel]
+    lines = list(snapshot.physical_lines)
+    state = _attached_block(repo, rel, language, lines, node, qualname)
+    if isinstance(state, int):
+        return state
+    if state.get("block") is None:
+        print(f"error: {qualname} in {rel} has no beacon block", file=sys.stderr)
+        return 1
+    mutation = _engine.plan_beacon_node_mutation(snapshot, state,
+        {"kind": "delta_remove", "tags": args.labels, "comment_intent": _engine.BeaconCommentIntent.preserve()})
+    if _mutation_problem(mutation):
+        return 1
+    bid = str(mutation["beacon_id"] or "")
+    kept = list(mutation["intended_slice_labels"])
+    if mutation["planned_operation"] == "noop":
+        print(
+            f"unchanged {rel} {qualname}: no such label(s): "
+            f"{', '.join(args.labels)} (block {bid})"
+        )
+        return 0
+    if mutation["planned_operation"] == "update":
+        expected = (bid, kept)
+        message = f"untagged {rel} {qualname}: {', '.join(kept)} (block {bid})"
+    else:
+        expected = None
+        message = f"untagged {rel} {qualname}: removed block {bid}"
+    plan = mutation["edit_plan"]
+    if not _write_source_text(root, rel, plan, qualname, expected):
+        return 1
+    print(message)
+    return 0
+
+
+def cmd_check(args) -> int:
+    """Print shared findings (including close-only files); info is nonfailing.
+
+    Source and mapping failures retain their existing lines and parser gate.
+    All beacon classifications, witnesses and suggested actions come from the
+    generated common core; this command owns only the kit's catalog checks.
+    """
+    opened = _open_repository()
+    if isinstance(opened, int):
+        return opened
+    root, repo = opened
+    problems: list[str] = []
+    findings: list[dict] = []
+
+    unparsed = unparsed_js_ts_count(repo)
+    if unparsed:
+        print(parser_gate_line(unparsed), file=sys.stderr)
+        return 1
+
+    catalog_text = load_catalog(root)
+    if catalog_text is None:
+        print(
+            f"{CATALOG_REL} not found; run init to create it",
+            file=sys.stderr,
+        )
+        return 1
+
+    for rel in repo.files:
+        text = repo.text(rel)
+        if text is None:
+            problems.append(f"{rel}:0: file cannot be read or mapped")
+            continue
+        if "@beacon" not in text:
+            continue
+        children = repo.children(rel)
+        if children is None:
+            problems.append(f"{rel}:0: file cannot be read or mapped")
+        findings.extend(repo.findings(rel))
+
+    entries = collect_entries(repo)
+    counts = label_counts(entries)
+
+    rows = parse_catalog_rows(catalog_text)
+    by_label: dict[str, list[dict]] = {}
+    for row in rows:
+        by_label.setdefault(row["label"], []).append(row)
+    for label in sorted(counts):
+        if label not in by_label:
+            problems.append(f"catalog: label `{label}` is in use but not listed")
+    for label in sorted(by_label):
+        group = by_label[label]
+        if len(group) > 1:
+            problems.append(
+                f"catalog: label `{label}` is listed in {len(group)} rows"
+            )
+        if label not in counts:
+            problems.append(f"catalog: row `{label}` is listed but not in use")
+    for row in rows:
+        label = row["label"]
+        if label not in counts:
+            continue
+        try:
+            stated = int(row["count_cell"])
+        except ValueError:
+            stated = None
+        if stated != counts[label]:
+            problems.append(
+                f"catalog: row `{label}` says {row['count_cell'] or 'nothing'} "
+                f"symbols but {counts[label]} carry it"
+            )
+        if not row["description"]:
+            problems.append(f"catalog: row `{label}` has an empty description")
+
+    slices_dir = Path(root) / SLICES_REL
+    existing = sorted(slices_dir.glob("*.md")) if slices_dir.is_dir() else []
+    for label in sorted(counts):
+        target = slices_dir / f"{label}.md"
+        if not target.exists():
+            problems.append(f"slices: missing slice file for `{label}`")
+    for path in existing:
+        stem = path.stem
+        if stem not in counts:
+            problems.append(f"slices: {path.name} is for a label no longer in use")
+            continue
+        expected = build_document(repo, [stem], headings_only=False).encode("utf-8")
+        if path.read_bytes() != expected:
+            problems.append(f"slices: {path.name} is stale; run slice --write")
+
+    out = sys.stdout.buffer
+    for row in findings:
+        out.write((f"{row['file']}:{row['line']}: {row['severity']} {row['code']}: "
+                   f"{row['message']}\n").encode("utf-8"))
+    for problem in problems:
+        out.write((problem + "\n").encode("utf-8"))
+    out.flush()
+    return 1 if problems or any(row["severity"] in {"error", "warning"} for row in findings) else 0
+
+
+def cmd_init(args) -> int:
+    opened = _open_repository()
+    if isinstance(opened, int):
+        return opened
+    root, repo = opened
+    unparsed = unparsed_js_ts_count(repo)
+    if unparsed:
+        print(parser_gate_line(unparsed), file=sys.stderr)
+        return 1
+    root_path = Path(root)
+    catalog_path = root_path / CATALOG_REL
+    if catalog_path.exists():
+        print(f"error: {CATALOG_REL} already exists", file=sys.stderr)
+        return 1
+    template = Path(__file__).resolve().parent.parent / "assets" / "CATALOG.template.md"
+    try:
+        template_bytes = template.read_bytes()
+    except OSError as exc:
+        print(f"error: cannot read the catalog template: {exc}", file=sys.stderr)
+        return 1
+    (root_path / CODE_MAP_DIR).mkdir(parents=True, exist_ok=True)
+    (root_path / SLICES_REL).mkdir(parents=True, exist_ok=True)
+    catalog_path.write_bytes(template_bytes)
+    entries = collect_entries(repo)
+    report_unreadable(repo)
+    counts = label_counts(entries)
+    write_catalog(root, template_bytes.decode("utf-8"), counts)
+    script = os.path.relpath(Path(__file__).resolve(), root_path).replace(os.sep, "/")
+    out = sys.stdout.buffer
+    out.write(
+        (
+            f"created {CODE_MAP_DIR}/ with {CATALOG_REL} and {CODE_MAP_DIR}/slices/\n"
+            "next steps:\n"
+            f"  1. write a description for every row in {CATALOG_REL}\n"
+            f"  2. python {script} slice --write\n"
+            f"  3. python {script} check\n"
+        ).encode("utf-8")
+    )
+    out.flush()
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# The command line
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="code_map.py",
+        description="Read and maintain this repository's beacon code map.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    labels_parser = sub.add_parser("labels", help="every label in use, with its count and catalog description")
+    labels_parser.add_argument("--write", action="store_true", help="update counts in CATALOG.md and add rows for new labels")
+    labels_parser.set_defaults(func=cmd_labels)
+
+    slice_parser = sub.add_parser("slice", help="print one or more labels' slices from the source")
+    slice_parser.add_argument("labels", nargs="*", help="the labels to print")
+    slice_parser.add_argument("--headings", action="store_true", help="leave out docstrings, comments and span source")
+    slice_parser.add_argument("--write", action="store_true", help="write code-map/slices/<label>.md instead of printing")
+    slice_parser.set_defaults(func=cmd_slice)
+
+    read_parser = sub.add_parser("read", help="print one function, class, method or region")
+    read_parser.add_argument("name", help="a symbol name, Class.method, or a block id")
+    read_parser.add_argument("--file", help="restrict to one file when the name occurs in several")
+    read_parser.add_argument("--start", type=int, help="first line of the window")
+    read_parser.add_argument("--end", type=int, help="last line of the window")
+    read_parser.add_argument("--size", action="store_true", help="the header line only")
+    read_parser.set_defaults(func=cmd_read)
+
+    tag_parser = sub.add_parser(
+        "tag", help="add labels to a symbol's beacon block, creating it when missing"
+    )
+    tag_parser.add_argument("name", help="a symbol name, Class.method, or an ast block id")
+    tag_parser.add_argument(
+        "labels", nargs="+", help="the labels to add: lowercase letters, digits, hyphens"
+    )
+    tag_parser.add_argument("--file", help="restrict to one file when the name occurs in several")
+    tag_parser.add_argument(
+        "--comment",
+        help="the block's comment; a different existing one is kept unless --replace-comment",
+    )
+    tag_parser.add_argument(
+        "--replace-comment",
+        action="store_true",
+        dest="replace_comment",
+        help="overwrite the block's existing comment with --comment",
+    )
+    tag_parser.set_defaults(func=cmd_tag)
+
+    untag_parser = sub.add_parser("untag", help="remove labels from a symbol's beacon block")
+    untag_parser.add_argument("name", help="a symbol name, Class.method, or an ast block id")
+    untag_parser.add_argument("labels", nargs="+", help="the labels to remove")
+    untag_parser.add_argument("--file", help="restrict to one file when the name occurs in several")
+    untag_parser.set_defaults(func=cmd_untag)
+
+    check_parser = sub.add_parser("check", help="report problems in blocks, catalog and slices")
+    check_parser.set_defaults(func=cmd_check)
+
+    init_parser = sub.add_parser("init", help="first-time setup of the code-map/ folder")
+    init_parser.set_defaults(func=cmd_init)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "slice" and not args.write and not args.labels:
+        parser.error("slice needs at least one label (or --write)")
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

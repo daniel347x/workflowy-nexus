@@ -1,0 +1,861 @@
+"""S03-B2 Gate (c) — detached-worker manifest bootstrap tests (§10/§14.5).
+
+The governed worker adopts the CURRENT coherence manifest (base + contiguous
+journal through head) after exact claim adoption and before any mutation
+work.  The launcher-selected job-basis snapshot remains job-premise
+validation (preparation lineage), never the cache authority.  Claim adoption
+precedes coherence adoption; mismatch/gap fails before mutation with zero
+mutation and the existing job-failure + claim finalization path; no
+/nodes-export call, no newest-timestamp search; one view for the entire
+worker operation.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import NOW, s02_node
+
+from workflowy_mcp.coherence import (
+    initialize_manifest_if_absent,
+    manifest_with_updates,
+    new_bootstrap_manifest,
+    write_manifest,
+)
+from workflowy_mcp.coherence.effects import SemanticEffect
+from workflowy_mcp.coherence.journal_store import append_journal_transaction
+from workflowy_mcp.coherence.operation_cache import (
+    current_operation_cache,
+    pin_worker_operation_cache,
+)
+from workflowy_mcp.coherence.schema import JournalProducer
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+BASE_NODES = [s02_node("A", name="alpha"), s02_node("B", name="beta", parent_id="A")]
+
+
+def _producer() -> JournalProducer:
+    return JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+    )
+
+
+def _make_client(tmp_path: Path, monkeypatch):
+    from pydantic import SecretStr
+
+    from workflowy_mcp.client.api_client_core import WorkFlowyClientCore
+    from workflowy_mcp.models import APIConfiguration
+
+    jobs_root = tmp_path / "cartographer_jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.get_cartographer_jobs_dir",
+        lambda: jobs_root,
+    )
+
+    def _runtime_subdir(*parts):
+        if parts == ("nodes_export_cache",):
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            return snapshot_dir
+        return tmp_path.joinpath(*parts)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.client.api_client_core.get_runtime_subdir", _runtime_subdir
+    )
+    config = APIConfiguration(
+        api_key=SecretStr("test-key-1234"), base_url="https://workflowy.com/api/v1"
+    )
+    return WorkFlowyClientCore(config), jobs_root, snapshot_dir
+
+
+def _make_lineage_client(tmp_path: Path, monkeypatch, nodes=BASE_NODES):
+    probe, _jr, snapshot_dir = _make_client(tmp_path, monkeypatch)
+    paths = probe._coherence_paths()
+    manifest = initialize_manifest_if_absent(
+        paths, new_bootstrap_manifest(paths.account_root.name, now=NOW)
+    )
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": list(nodes)},
+        account_scope_id=paths.account_root.name,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=candidate, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    client, _jr2, _sd2 = _make_client(tmp_path, monkeypatch)
+    return client, paths, candidate
+
+
+# ---------------------------------------------------------------------------
+# §10.1/§10.2 — current-head adoption (never merely the job basis)
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_worker_adopts_current_head_not_just_job_basis(tmp_path, monkeypatch):
+    """The job-basis publish alone (the S03-A path) leaves the worker behind
+    the journal head; Gate-(c) adoption replays the tail to head BEFORE any
+    mutation work.  Chain-3 W3 honesty shape: NO direct
+    ``_adopt_coherence_head()`` call precedes the pin — the pin itself must
+    perform the ONE current-head adoption."""
+    client, paths, _candidate = _make_lineage_client(tmp_path, monkeypatch)
+
+    # A pre-pin journal record (a governed mutation committed elsewhere).
+    append_journal_transaction(
+        paths,
+        operation_kind="test",
+        effects=[SemanticEffect.node_create(s02_node("C", name="gamma", parent_id="B"))],
+        producer=_producer(),
+    )
+
+    # The worker's fresh client warm-started at the base (adopted seq 0);
+    # WITHOUT current-head adoption it would miss C entirely.
+    warm = client._cache_view_publisher.capture()
+    assert warm.adopted_sequence == 0
+    assert "C" not in warm.nodes_by_id
+
+    adoptions = {"count": 0}
+    real_adopt = client._adopt_coherence_head
+
+    async def _counting(**kwargs):
+        adoptions["count"] += 1
+        return await real_adopt(**kwargs)
+
+    monkeypatch.setattr(client, "_adopt_coherence_head", _counting)
+
+    # The PIN ITSELF adopts the tail (exactly once) and installs the worker
+    # snapshot — the pre-pin record is present in the pinned view.
+    pinned = await pin_worker_operation_cache(client, "worker:carto_refresh:job-1")
+    assert adoptions["count"] == 1
+    assert pinned.view.adopted_sequence == 1
+    assert pinned.nodes_by_id["C"]["name"] == "gamma"
+    # One view for the entire worker operation: the accessor serves it.
+    assert client._get_nodes_export_cache_nodes() is pinned.view.nodes_export["nodes"]
+
+    # A POST-pin record remains invisible for the whole job (§10.3).
+    append_journal_transaction(
+        paths,
+        operation_kind="test",
+        effects=[SemanticEffect.node_create(s02_node("Z", name="zulu"))],
+        producer=_producer(),
+    )
+    assert "Z" not in pinned.nodes_by_id
+    assert "Z" not in {
+        node.get("id") for node in client._get_nodes_export_cache_nodes()
+    }
+
+
+@async_test
+async def test_worker_does_not_re_adopt_mid_job(tmp_path, monkeypatch):
+    """§10.3: unrelated records appended AFTER the worker's adoption are not
+    picked up mid-job — the pinned snapshot is the whole job's view."""
+    client, paths, _candidate = _make_lineage_client(tmp_path, monkeypatch)
+    await client._adopt_coherence_head()
+    pinned = await pin_worker_operation_cache(client, "worker:job-2")
+
+    append_journal_transaction(
+        paths,
+        operation_kind="test",
+        effects=[SemanticEffect.node_create(s02_node("C", name="gamma"))],
+        producer=_producer(),
+    )
+    # The pinned worker snapshot is unchanged; the accessor serves it.
+    assert "C" not in pinned.nodes_by_id
+    assert "C" not in {
+        node.get("id") for node in client._get_nodes_export_cache_nodes()
+    }
+
+
+@async_test
+async def test_worker_bootstrap_gap_fails_before_mutation(tmp_path, monkeypatch):
+    """§10.2: a journal gap/corruption fails the adoption loudly — zero
+    mutation, no pinned snapshot, and the worker's own view never advances
+    past the base.  (Helper-level scope: this test drives the adoption
+    engine directly; the FULL worker-main failure path — claim adoption,
+    job-failed recording, and claim finalization — is covered by the
+    worker-main tests below.)"""
+    from workflowy_mcp.coherence.errors import JournalIntegrityError
+    from workflowy_mcp.coherence.paths import journal_record_filename
+
+    client, paths, _candidate = _make_lineage_client(tmp_path, monkeypatch)
+    append_journal_transaction(
+        paths,
+        operation_kind="test",
+        effects=[SemanticEffect.node_create(s02_node("C", name="gamma"))],
+        producer=_producer(),
+    )
+    # Corrupt the lineage: delete the committed record above the head so the
+    # manifest points past a MISSING artifact, and force the head forward so
+    # the gap is real.
+    record = paths.journal_dir / journal_record_filename(1)
+    assert record.exists()
+    record.unlink()
+    manifest = paths.manifest_path
+    import json as _json
+
+    raw = _json.loads(manifest.read_text(encoding="utf-8"))
+    raw["journal_head_seq"] = 1
+    manifest.write_text(_json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(JournalIntegrityError):
+        await client._adopt_coherence_head()
+    assert current_operation_cache(required=False) is None
+    # The worker's own view never advanced past the base.
+    assert client._cache_view_publisher.capture().adopted_sequence == 0
+
+
+@async_test
+async def test_worker_pin_refuses_unpopulated_bootstrap(tmp_path, monkeypatch):
+    """§10.2 + seal item 8: a bootstrap manifest with no base fails the
+    worker's pin with actionable refresh-required guidance before mutation."""
+    from workflowy_mcp.coherence.errors import CoherenceStateMissingError
+
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)  # no manifest at all
+    with pytest.raises(CoherenceStateMissingError, match="cache refresh"):
+        await pin_worker_operation_cache(client, "worker:job-3")
+    assert current_operation_cache(required=False) is None
+
+
+# ---------------------------------------------------------------------------
+# §10.1 ordering + job-basis validation retention
+# ---------------------------------------------------------------------------
+
+
+def test_worker_source_order_claim_then_validation_then_single_adoption_pin() -> None:
+    """§10.1 ordering lock on the shipped worker bootstrap (A3): exact claim
+    adoption FIRST, then client init, then job-basis lineage validation,
+    then the worker pin — the SINGLE manifest-head adoption authority —
+    then dispatch.  No separate direct adoption call may survive."""
+    source = (Path(__file__).resolve().parents[1] / "src/workflowy_mcp/weave_worker.py").read_text(
+        encoding="utf-8"
+    )
+    adoption = source.index("adopt_carto_worker_claim(args.carto_job_file)")
+    client_import = source.index(
+        "from workflowy_mcp.client.api_client import WorkFlowyClient"
+    )
+    validation = source.index("load_usable_nodes_export_snapshot(")
+    worker_pin = source.index("pin_worker_operation_cache(")
+    dispatch = source.index('if mode == "carto_refresh":')
+    assert adoption < client_import < validation < worker_pin < dispatch
+    # A3: the pin is the SINGLE adoption authority — the redundant direct
+    # adoption call that preceded it is removed.
+    assert "client._adopt_coherence_head(" not in source
+    # The S03-A job-basis-only publish is retired from the worker bootstrap.
+    assert "client._publish_lineage_view(" not in source
+    # No /nodes-export call, no newest-timestamp search in the worker.
+    assert "nodes-export" not in source.split("pin_worker_operation_cache(")[1].split("log_worker")[0]
+
+
+def test_job_basis_lineage_validation_rejects_mismatch(tmp_path) -> None:
+    """§10.2: the retained job-basis validation fails loudly when the job's
+    declared lineage does not match its snapshot wrapper."""
+    from workflowy_mcp.carto_job_governance import load_usable_nodes_export_snapshot
+    from workflowy_mcp.coherence.snapshot_store import (
+        new_snapshot_candidate_path,
+        write_snapshot_candidate,
+    )
+
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(tmp_path / "snapshots"),
+        {"nodes": [{"id": "A"}]},
+        account_scope_id="a" * 32,
+        epoch_number=3,
+        epoch_id="e" * 32,
+        incorporated_through_seq=7,
+        publication_kind="full_refresh",
+    )
+    from workflowy_mcp.coherence.errors import CoherenceSchemaError
+
+    usable = load_usable_nodes_export_snapshot(candidate)
+    assert usable["payload"]["nodes_export"]["nodes"] == [{"id": "A"}]
+    with pytest.raises(CoherenceSchemaError):
+        load_usable_nodes_export_snapshot(
+            candidate,
+            expected_lineage={
+                "account_scope_id": "a" * 32,
+                "epoch_number": 3,
+                "epoch_id": "f" * 32,  # wrong epoch identity
+                "incorporated_through_seq": 7,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# Worker-MAIN bootstrap tests (A3 exactly-once; A5 failure + finalization)
+#
+# These run the REAL weave_worker.main end-to-end in-process (argv +
+# spawning claim + seeded coherence lineage + monkeypatched config/dispatch),
+# per the audit's "isolated subprocess or equivalent real bootstrap-path
+# test" allowance.  The mutation dispatch is a sentinel; all governance and
+# coherence artifacts are real filesystem state under the isolated roots.
+# ---------------------------------------------------------------------------
+
+
+def _build_worker_environment(
+    tmp_path: Path, monkeypatch, *, journal_records: int = 0, corrupt_head: bool = False
+):
+    """Full isolated worker environment: spawning claim + job file + seeded
+    coherence lineage (manifest + base candidate + optional journal tail)."""
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    import psutil
+
+    from workflowy_mcp import carto_job_governance as gov
+    from workflowy_mcp.coherence.paths import journal_record_filename
+
+    probe, jobs_root, snapshot_dir = _make_client(tmp_path, monkeypatch)
+    paths = probe._coherence_paths()
+    account = paths.account_root.name
+    manifest = initialize_manifest_if_absent(
+        paths, new_bootstrap_manifest(account, now=NOW)
+    )
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": [dict(n) for n in BASE_NODES]},
+        account_scope_id=account,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=candidate, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    for index in range(journal_records):
+        append_journal_transaction(
+            paths,
+            operation_kind="test",
+            effects=[
+                SemanticEffect.node_create(
+                    s02_node(f"J{index}", name=f"j-{index}", parent_id="B")
+                )
+            ],
+            producer=_producer(),
+        )
+    if corrupt_head and journal_records:
+        # Delete the committed record and force the manifest head past it —
+        # a genuine contiguous-replay gap at adoption time.
+        (paths.journal_dir / journal_record_filename(1)).unlink()
+        raw = json.loads(paths.manifest_path.read_text(encoding="utf-8"))
+        raw["journal_head_seq"] = journal_records
+        paths.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    process = psutil.Process(os.getpid())
+    job_id = "worker-main-job"
+    cache = {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "file": {"id": "file", "parent_id": "repo"},
+    }
+    claim = gov.build_claim(
+        job_id=job_id,
+        job_type="CARTO_REFRESH",
+        dedupe_key=hashlib.sha256(job_id.encode("utf-8")).hexdigest(),
+        account_scope_id=account,
+        footprint=gov.compute_footprint(
+            tmp_path / "repo" / f"{job_id}.py", "file", cache, kind="file"
+        ),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=os.getpid(),
+        pid_create_time=process.create_time(),
+        handoff_state="spawning",
+        spawn_started_at=gov.utc_now_iso(),
+        execution_owner="launcher",
+    )
+    gov.write_claim(claim, jobs_root)
+    job_file = jobs_root / f"{job_id}.json"
+    gov.atomic_write_json(
+        job_file,
+        {
+            "id": job_id,
+            "type": "CARTO_REFRESH",
+            "status": "spawning",
+            "claim_id": claim["claim_id"],
+            "pid": claim["pid"],
+            "pid_create_time": claim["pid_create_time"],
+            "execution_owner": "launcher",
+            "handoff_state": "spawning",
+            "mode": "file",
+            "root_uuid": "file",
+            "created_at": "2026-01-01T00:00:00",
+            "account_scope_id": account,
+            "snapshot_path": str(candidate),
+            "snapshot_lineage": {
+                "account_scope_id": account,
+                "epoch_number": manifest.epoch_number,
+                "epoch_id": manifest.epoch_id,
+                "incorporated_through_seq": 0,
+            },
+        },
+    )
+    return SimpleNamespace(
+        paths=paths,
+        account=account,
+        manifest=manifest,
+        candidate=candidate,
+        jobs_root=jobs_root,
+        snapshot_dir=snapshot_dir,
+        job_file=job_file,
+        job_id=job_id,
+        claim=claim,
+    )
+
+
+def _install_worker_main_mocks(monkeypatch, env, *, client_key: str = "test-key-1234"):
+    """Monkeypatch argv/config/dispatch + recorders for a worker-main run."""
+    import sys
+    from types import SimpleNamespace
+
+    from pydantic import SecretStr
+
+    from workflowy_mcp import carto_job_governance as gov
+    from workflowy_mcp.client import api_client_nexus
+    from workflowy_mcp.client.api_client_core import WorkFlowyClientCore
+    from workflowy_mcp.models import APIConfiguration
+
+    sentinels = {
+        "claim_adoptions": 0,
+        "adoptions": 0,
+        "refresh_calls": [],
+        "pinned_has_zz": None,
+        "pinned_has_j0": None,
+    }
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["weave_worker.py", "--mode", "carto_refresh", "--carto-job-file", str(env.job_file)],
+    )
+    api_config = APIConfiguration(
+        api_key=SecretStr(client_key), base_url="https://workflowy.com/api/v1"
+    )
+    fake_config = SimpleNamespace(
+        get_api_config=lambda: api_config,
+        write_governor=None,
+        governance=None,
+    )
+    monkeypatch.setattr(
+        "workflowy_mcp.config.get_server_config", lambda reload=False: fake_config
+    )
+    monkeypatch.setattr(
+        "workflowy_mcp.config.get_server_config_meta",
+        lambda: {"source": "test", "config_path": None},
+    )
+
+    real_claim_adopt = gov.adopt_carto_worker_claim
+
+    def _recording_claim_adopt(job_file, **kwargs):
+        sentinels["claim_adoptions"] += 1
+        return real_claim_adopt(job_file, **kwargs)
+
+    monkeypatch.setattr(gov, "adopt_carto_worker_claim", _recording_claim_adopt)
+
+    real_adopt = WorkFlowyClientCore._adopt_coherence_head
+
+    async def _counting_adopt(self, **kwargs):
+        sentinels["adoptions"] += 1
+        return await real_adopt(self, **kwargs)
+
+    monkeypatch.setattr(WorkFlowyClientCore, "_adopt_coherence_head", _counting_adopt)
+
+    async def _sentinel_refresh(self, **kwargs):
+        sentinels["refresh_calls"].append(kwargs)
+        # A journal record committed by ANOTHER writer AFTER the worker pin
+        # must never be adopted mid-job (§10.3): the pinned snapshot is the
+        # whole job's view.
+        append_journal_transaction(
+            env.paths,
+            operation_kind="test",
+            effects=[SemanticEffect.node_create(s02_node("ZZ", name="zz"))],
+            producer=_producer(),
+        )
+        from workflowy_mcp.coherence.operation_cache import current_operation_cache
+
+        pinned = current_operation_cache(required=False)
+        sentinels["pinned_has_zz"] = pinned is not None and "ZZ" in pinned.nodes_by_id
+        # Chain-3 W3: the FIRST real mutation/refresh sentinel must observe
+        # the PRE-PIN seeded journal record (the pin adopted the tail).
+        sentinels["pinned_has_j0"] = pinned is not None and "J0" in pinned.nodes_by_id
+        return {"success": True, "refreshed_file_nodes": 1, "warnings": []}
+
+    monkeypatch.setattr(
+        api_client_nexus.WorkFlowyClientNexus,
+        "refresh_file_node_beacons",
+        _sentinel_refresh,
+    )
+    return sentinels
+
+
+def _run_worker_main_to_exit() -> int:
+    """Run the REAL weave_worker.main; return its SystemExit code."""
+    from workflowy_mcp import weave_worker
+
+    old_env = {key: os.environ.get(key) for key in ("CARTO_JOB_DIR", "CARTO_JOB_FILE")}
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            asyncio.run(weave_worker.main())
+        return int(excinfo.value.code or 0)
+    finally:
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_worker_main_adopts_manifest_exactly_once(tmp_path, monkeypatch):
+    """A3: the full worker bootstrap performs EXACTLY ONE manifest-head
+    adoption — the pin is the single adoption authority (a redundant direct
+    ``client._adopt_coherence_head()`` call makes the counter reach 2 and
+    fails this test).  A post-pin journal append is never adopted mid-job."""
+    import json
+
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = _build_worker_environment(tmp_path, monkeypatch, journal_records=1)
+    sentinels = _install_worker_main_mocks(monkeypatch, env)
+
+    assert _run_worker_main_to_exit() == 0
+    assert sentinels["claim_adoptions"] == 1  # claim adoption FIRST
+    assert sentinels["adoptions"] == 1  # A3: exactly one manifest-head adoption
+    assert len(sentinels["refresh_calls"]) == 1
+    # Chain-3 W3: the first real mutation sentinel SEES the pre-pin seeded
+    # journal record (proof the pin adopted the tail before mutation work).
+    assert sentinels["pinned_has_j0"] is True
+    # The post-pin journal record was never adopted into the pinned view.
+    assert sentinels["pinned_has_zz"] is False
+    # The job completed and the claim finalized (claim gone, tombstone written).
+    job = json.loads(env.job_file.read_text(encoding="utf-8"))
+    assert job["status"] == "completed"
+    paths = gov.governance_paths(env.jobs_root)
+    assert list(paths.claims_dir.glob("*.lock.json")) == []
+    assert list(paths.tombstones_dir.glob("*.json")) != []
+
+
+def test_worker_main_journal_gap_fails_job_and_finalizes_claim(tmp_path, monkeypatch):
+    """A5: a current-manifest journal gap fails the worker BEFORE any
+    mutation/path/progress work — claim adoption happened first, the job is
+    recorded failed, the claim is finalized (gone + cooldown tombstone),
+    and no mutation dispatch sentinel ever fired."""
+    import json
+
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = _build_worker_environment(
+        tmp_path, monkeypatch, journal_records=1, corrupt_head=True
+    )
+    sentinels = _install_worker_main_mocks(monkeypatch, env)
+
+    assert _run_worker_main_to_exit() == 1
+    # Claim adoption happened FIRST (the heartbeat proof also exists).
+    assert sentinels["claim_adoptions"] == 1
+    # The adoption/pin failed: zero mutation dispatch, zero progress paths.
+    assert sentinels["refresh_calls"] == []
+    # The job is recorded failed via the existing failure path.
+    job = json.loads(env.job_file.read_text(encoding="utf-8"))
+    assert job["status"] == "failed"
+    assert "snapshot" in str(job.get("error", "")).lower() or "adoption" in str(
+        job.get("error", "")
+    ).lower()
+    # The claim finalized: no live claim remains; a cooldown tombstone exists.
+    paths = gov.governance_paths(env.jobs_root)
+    assert list(paths.claims_dir.glob("*.lock.json")) == []
+    assert list(paths.tombstones_dir.glob("*.json")) != []
+    # Post-adoption evidence: the diagnostic heartbeat identity was written.
+    assert (paths.heartbeats_dir / f"{env.job_id}.json").exists()
+
+
+def test_worker_main_finalize_failure_leaves_blocking_claim(tmp_path, monkeypatch):
+    """A5 (fail-closed twin): when claim finalization ITSELF fails after a
+    bootstrap adoption failure, the ownership artifact SURVIVES as
+    deliberately blocking evidence (the CARTO cleanup doctrine) — never
+    silently discarded."""
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = _build_worker_environment(
+        tmp_path, monkeypatch, journal_records=1, corrupt_head=True
+    )
+    sentinels = _install_worker_main_mocks(monkeypatch, env)
+
+    def _failing_finalize(*_args, **_kwargs):
+        raise RuntimeError("injected finalization failure")
+
+    monkeypatch.setattr(gov, "finalize_claim", _failing_finalize)
+
+    assert _run_worker_main_to_exit() == 1
+    assert sentinels["claim_adoptions"] == 1
+    assert sentinels["refresh_calls"] == []
+    # The claim artifact SURVIVES (blocking) — the only durable evidence of
+    # the adopted-then-failed job is never discarded.
+    paths = gov.governance_paths(env.jobs_root)
+    claims = list(paths.claims_dir.glob("*.lock.json"))
+    assert claims != []
+
+
+# ---------------------------------------------------------------------------
+# Chain-3 W2 — explicit four-way account binding at detached-worker bootstrap
+#
+# After exact claim adoption and BEFORE current-head pinning (and any
+# mutation/path/progress work), the worker now verifies exact equality
+# across: the adopted CLAIM's account (primary ownership authority), the
+# admitted job's top-level account_scope_id (written by admit_carto_job —
+# the REAL admitted shape, never a hand-written pre-admission payload), the
+# launcher-recorded snapshot_lineage account, and the client/coherence-paths
+# account derivation.  A mismatch fails loudly with the distinct
+# account-mismatch diagnostic, zero mutation, via the existing
+# job-failure + claim-finalization path.
+# ---------------------------------------------------------------------------
+
+
+async def _build_w2_worker_environment(
+    tmp_path: Path, monkeypatch, *, tamper: str | None = None
+):
+    """Full isolated worker environment whose job is constructed through the
+    REAL admission authority (admit_carto_job) — the admitted payload shape
+    (top-level ``account_scope_id``) is production-real."""
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    from workflowy_mcp import carto_job_governance as gov
+
+    probe, jobs_root, snapshot_dir = _make_client(tmp_path, monkeypatch)
+    paths = probe._coherence_paths()
+    account = paths.account_root.name
+    manifest = initialize_manifest_if_absent(
+        paths, new_bootstrap_manifest(account, now=NOW)
+    )
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": [dict(n) for n in BASE_NODES]},
+        account_scope_id=account,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=candidate, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    # One pre-pin journal record (adopted by the worker pin in the positive case).
+    append_journal_transaction(
+        paths,
+        operation_kind="test",
+        effects=[SemanticEffect.node_create(s02_node("J0", name="j-0", parent_id="B"))],
+        producer=_producer(),
+    )
+
+    job_id = "w2-worker-job"
+    job_file = jobs_root / f"{job_id}.json"
+    cache = {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "file": {"id": "file", "parent_id": "repo"},
+    }
+    admission = await gov.admit_carto_job(
+        job_file=job_file,
+        job_payload={
+            "id": job_id,
+            "type": "CARTO_REFRESH",
+            "mode": "file",
+            "root_uuid": "file",
+            "created_at": "2026-01-01T00:00:00",
+            "snapshot_path": str(candidate),
+            "snapshot_lineage": {
+                "account_scope_id": account,
+                "epoch_number": manifest.epoch_number,
+                "epoch_id": manifest.epoch_id,
+                "incorporated_through_seq": 0,
+            },
+        },
+        job_type="CARTO_REFRESH",
+        dedupe_key=hashlib.sha256(job_id.encode("utf-8")).hexdigest(),
+        account_scope_id=account,
+        footprint=gov.compute_footprint(
+            tmp_path / "repo" / "file.py", "file", cache, kind="file"
+        ),
+        launcher="system",
+        parent_job_id=None,
+        prepared=False,
+        jobs_root=jobs_root,
+    )
+    assert admission.get("admitted") is True, admission
+    # Real admitted-shape provenance: the admission authority itself wrote
+    # the top-level account_scope_id into the job file.
+    admitted_job = json.loads(job_file.read_text(encoding="utf-8"))
+    assert admitted_job["account_scope_id"] == account
+    if tamper == "job_account":
+        admitted_job["account_scope_id"] = "b" * 32
+        gov.atomic_write_json(job_file, admitted_job)
+    elif tamper == "lineage_account":
+        admitted_job["snapshot_lineage"] = {
+            **admitted_job["snapshot_lineage"],
+            "account_scope_id": "b" * 32,
+        }
+        gov.atomic_write_json(job_file, admitted_job)
+    return SimpleNamespace(
+        paths=paths,
+        account=account,
+        manifest=manifest,
+        candidate=candidate,
+        jobs_root=jobs_root,
+        job_file=job_file,
+        job_id=job_id,
+    )
+
+
+def test_w2_positive_four_way_binding_proceeds_and_pins_once(tmp_path, monkeypatch):
+    """W2 positive: claim = admitted job = snapshot lineage = client (all
+    Account A) — the worker proceeds, pins exactly once, mutates, and the
+    exact claim finalizes (gone + cooldown tombstone)."""
+    import json
+
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = asyncio.run(_build_w2_worker_environment(tmp_path, monkeypatch))
+    sentinels = _install_worker_main_mocks(monkeypatch, env)
+
+    assert _run_worker_main_to_exit() == 0
+    assert sentinels["claim_adoptions"] == 1
+    assert sentinels["adoptions"] == 1  # pinned exactly once
+    assert len(sentinels["refresh_calls"]) == 1
+    assert sentinels["pinned_has_j0"] is True
+    job = json.loads(env.job_file.read_text(encoding="utf-8"))
+    assert job["status"] == "completed"
+    paths = gov.governance_paths(env.jobs_root)
+    assert list(paths.claims_dir.glob("*.lock.json")) == []
+    assert list(paths.tombstones_dir.glob("*.json")) != []
+
+
+def test_w2_client_account_mismatch_fails_before_mutation(tmp_path, monkeypatch):
+    """W2 client mismatch: Account-A claim/job/snapshot-lineage with an
+    Account-B client — fail loudly BEFORE current-head adoption and any
+    mutation/path/progress work, with the distinct account-mismatch
+    diagnostic; the exact claim finalizes."""
+    import json
+
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = asyncio.run(_build_w2_worker_environment(tmp_path, monkeypatch))
+    sentinels = _install_worker_main_mocks(monkeypatch, env, client_key="test-key-9999")
+
+    assert _run_worker_main_to_exit() == 1
+    assert sentinels["claim_adoptions"] == 1  # claim adoption happened FIRST
+    assert sentinels["refresh_calls"] == []  # zero mutation dispatch
+    job = json.loads(env.job_file.read_text(encoding="utf-8"))
+    assert job["status"] == "failed"
+    assert "account mismatch" in str(job.get("error", ""))
+    paths = gov.governance_paths(env.jobs_root)
+    assert list(paths.claims_dir.glob("*.lock.json")) == []
+    assert list(paths.tombstones_dir.glob("*.json")) != []
+
+
+def test_w2_job_account_mismatch_fails_before_mutation(tmp_path, monkeypatch):
+    """W2 job mismatch: Account-A claim with an admitted job carrying
+    Account-B top-level account_scope_id — the job field is never trusted
+    over the claim; fail before current-head adoption/mutation."""
+    import json
+
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = asyncio.run(
+        _build_w2_worker_environment(tmp_path, monkeypatch, tamper="job_account")
+    )
+    sentinels = _install_worker_main_mocks(monkeypatch, env)
+
+    assert _run_worker_main_to_exit() == 1
+    assert sentinels["refresh_calls"] == []
+    job = json.loads(env.job_file.read_text(encoding="utf-8"))
+    assert job["status"] == "failed"
+    assert "account mismatch" in str(job.get("error", ""))
+    paths = gov.governance_paths(env.jobs_root)
+    assert list(paths.claims_dir.glob("*.lock.json")) == []
+    assert list(paths.tombstones_dir.glob("*.json")) != []
+
+
+def test_w2_snapshot_lineage_mismatch_loud_failure(tmp_path, monkeypatch):
+    """W2 snapshot mismatch: Account-A claim with a snapshot_lineage field
+    naming Account B — a loud lineage/account failure before mutation (the
+    existing loud lineage-validation posture is preserved)."""
+    import json
+
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = asyncio.run(
+        _build_w2_worker_environment(tmp_path, monkeypatch, tamper="lineage_account")
+    )
+    sentinels = _install_worker_main_mocks(monkeypatch, env)
+
+    assert _run_worker_main_to_exit() == 1
+    assert sentinels["refresh_calls"] == []
+    job = json.loads(env.job_file.read_text(encoding="utf-8"))
+    assert job["status"] == "failed"
+    assert "account mismatch" in str(job.get("error", ""))
+    paths = gov.governance_paths(env.jobs_root)
+    assert list(paths.claims_dir.glob("*.lock.json")) == []
+    assert list(paths.tombstones_dir.glob("*.json")) != []
+
+
+def test_w2_mismatch_finalize_failure_leaves_blocking_claim(tmp_path, monkeypatch):
+    """W2 cleanup outcome (fail-closed twin): when claim finalization
+    ITSELF fails after the account-mismatch refusal, the exact adopted claim
+    SURVIVES as deliberately blocking evidence (existing CARTO cleanup
+    doctrine) — never silently discarded."""
+    from workflowy_mcp import carto_job_governance as gov
+
+    env = asyncio.run(
+        _build_w2_worker_environment(tmp_path, monkeypatch, tamper="job_account")
+    )
+    sentinels = _install_worker_main_mocks(monkeypatch, env)
+
+    def _failing_finalize(*_args, **_kwargs):
+        raise RuntimeError("injected finalization failure")
+
+    monkeypatch.setattr(gov, "finalize_claim", _failing_finalize)
+
+    assert _run_worker_main_to_exit() == 1
+    assert sentinels["refresh_calls"] == []
+    paths = gov.governance_paths(env.jobs_root)
+    assert list(paths.claims_dir.glob("*.lock.json")) != []

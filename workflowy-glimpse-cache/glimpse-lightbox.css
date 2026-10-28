@@ -1,0 +1,125 @@
+/* The image lightbox (glimpse-lightbox.js): the contact sheet inside a rendered document, then the lightbox's own
+   chrome over PhotoSwipe's sheet (photoswipe/photoswipe.css, loaded before this one). Host geometry stays with each host. */
+
+/* ---- in the document: a paragraph of images becomes a grid of captioned tiles (two across a phone held upright,
+   about 220 px each on a wide screen); a tap opens the lightbox there */
+.glimpse-md-render .glimpse-lb-sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, calc(50% - 4px)), 1fr));
+  gap: 10px 8px; margin: 0 0 0.9em 0; }
+.glimpse-md-render .glimpse-lb-tile { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; cursor: zoom-in;
+  -webkit-tap-highlight-color: transparent; }
+.glimpse-md-render .glimpse-lb-tile img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: contain;
+  background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; }
+.glimpse-md-render .glimpse-lb-tile:hover img { border-color: rgba(158,203,255,0.55); }
+.glimpse-md-render .glimpse-lb-tile:active img { border-color: #9ecbff; }
+.glimpse-md-render .glimpse-lb-tile figcaption { font-size: 0.9em; line-height: 1.3; color: #c9ccd1; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.glimpse-md-render img[data-glimpse-lb] { cursor: zoom-in; }
+/* A missing file, or a folder/glob line its host has not expanded: a dim labelled box with the path, never a broken icon. */
+.glimpse-md-render .glimpse-lb-tile:is([data-missing="true"], [data-live]) img { display: none; }
+.glimpse-md-render .glimpse-lb-tile[data-missing="true"] { cursor: default; }
+.glimpse-md-render .glimpse-lb-note { display: grid; place-items: center; aspect-ratio: 16 / 10; padding: 8px; border: 1px dashed rgba(255,255,255,0.25);
+  border-radius: 6px; background: rgba(255,255,255,0.03); color: #ffbdad; font: 0.82em/1.35 "SFMono-Regular", Consolas, monospace;
+  text-align: center; overflow-wrap: anywhere; overflow: hidden; }
+.glimpse-md-render .glimpse-lb-tile[data-live] .glimpse-lb-note { color: #c9e0ff; }
+/* … a live folder or glob with nothing to show (dim), or one its host could not list (why, in the warning colour) */
+.glimpse-md-render .glimpse-lb-tile[data-live-state="empty"] .glimpse-lb-note { color: #aab2bf; }
+.glimpse-md-render .glimpse-lb-tile[data-live-state="error"] .glimpse-lb-note { color: #ffbdad; }
+.glimpse-md-render img[data-glimpse-missing] { opacity: 0.35; }
+
+/* ---- the lightbox: black, the image fitted; the chrome (a tap hides it) is the top bar and the foot */
+.pswp.glimpse-lb { --pswp-bg: #000; font: 14px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.glimpse-lb .pswp__top-bar { align-items: center; background: linear-gradient(rgba(0,0,0,0.78), rgba(0,0,0,0.5)); }
+.glimpse-lb .glimpse-lb-pos { flex: 0 0 auto; margin-inline-start: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 1; }
+/* The group chips: Opus 42 · Fable 33 · Astra 70; the current one lit; a tap jumps to the group; scrolls sideways. */
+.glimpse-lb .glimpse-lb-chips { flex: 1 1 auto; min-width: 0; height: 100%; display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; touch-action: pan-x; overscroll-behavior: contain; }
+.glimpse-lb .glimpse-lb-chips::-webkit-scrollbar { display: none; }
+.glimpse-lb .glimpse-lb-chip { flex: 0 0 auto; min-height: 34px; margin: 0; padding: 4px 12px; border: 1px solid rgba(255,255,255,0.35); border-radius: 17px;
+  background: rgba(255,255,255,0.08); color: #fff; font: inherit; font-size: 14px; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.glimpse-lb .glimpse-lb-chip:hover { background: rgba(255,255,255,0.16); }
+.glimpse-lb .glimpse-lb-chip[aria-current="true"] { border-color: #9ac3ff; background: #2f5fa8; font-weight: 600; }
+.glimpse-lb .glimpse-lb-chip-n { opacity: 0.8; font-size: 0.86em; font-weight: 400; }
+.glimpse-lb .pswp__button--glimpse-actual, .glimpse-lb .pswp__button--glimpse-full { display: grid; place-items: center; }
+.glimpse-lb .glimpse-lb-actual-text { color: var(--pswp-icon-color); font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
+  text-shadow: 0 0 2px rgba(0,0,0,0.8); }
+.glimpse-lb .pswp__button--glimpse-full .pswp__icn { fill: none; color: var(--pswp-icon-color); filter: drop-shadow(0 0 1px rgba(0,0,0,0.8)); }
+/* The foot: caption, title line, file name and heading (dim), then the group's filmstrip. */
+.glimpse-lb .glimpse-lb-foot { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; flex-direction: column; gap: 6px;
+  padding: 6px 10px max(8px, env(safe-area-inset-bottom)); background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.82)); color: #f1f4f9; }
+.glimpse-lb .glimpse-lb-text { display: grid; gap: 1px; min-width: 0; }
+.glimpse-lb .glimpse-lb-caption { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.glimpse-lb .glimpse-lb-title { font-size: 13.5px; color: #dbe1ea; overflow-wrap: anywhere; }
+.glimpse-lb .glimpse-lb-file { font-size: 12px; color: #a9b2c1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.glimpse-lb .glimpse-lb-strip { display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; touch-action: pan-x;
+  overscroll-behavior: contain; padding-bottom: 1px; }
+.glimpse-lb .glimpse-lb-strip::-webkit-scrollbar { display: none; }
+.glimpse-lb .glimpse-lb-thumb { flex: 0 0 auto; width: 64px; height: 42px; margin: 0; padding: 0; border: 2px solid transparent; border-radius: 4px;
+  background: #111; opacity: 0.62; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.glimpse-lb .glimpse-lb-thumb[aria-current="true"] { border-color: #9ac3ff; opacity: 1; }
+.glimpse-lb .glimpse-lb-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 2px; }
+/* Slides that are not an image: still loading its size, a missing file, an image that failed. */
+.glimpse-lb :is(.glimpse-lb-gone, .glimpse-lb-wait) { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px;
+  padding: 72px 20px 120px; text-align: center; color: #f1f4f9; font-size: 15px; }
+.glimpse-lb .glimpse-lb-gone code { color: #ffd0c8; font-size: 13px; overflow-wrap: anywhere; }
+.glimpse-lb .glimpse-lb-wait { color: #a9b2c1; }
+@media (min-width: 900px) and (pointer: fine) {
+  .glimpse-lb .glimpse-lb-thumb { width: 84px; height: 54px; }
+}
+/* A touch screen zooms by pinch and double-tap: the magnifier button gives its room to the group chips. */
+@media (pointer: coarse) { .glimpse-lb .pswp__button--zoom { display: none; } }
+/* A phone held upright: every chip in view where it can be (Opus 4 · Fable 3 · Astra 70 beside ✕ and 1:1). */
+@media (max-width: 480px) {
+  .glimpse-lb .glimpse-lb-pos { margin-inline-start: 10px; }
+  .glimpse-lb .glimpse-lb-chips { gap: 4px; padding: 0 4px; }
+  .glimpse-lb .glimpse-lb-chip { padding: 4px 9px; font-size: 13.5px; }
+  .glimpse-lb .pswp__top-bar .pswp__button { width: 44px; }
+}
+
+/* ---- side by side (compare): two or three groups in panels over the page, under a lightbox opened from one of them.
+   The bar: the group chips (lit with their panel's number), the shared step, Line up, zoom, ⛶, ✕; each panel: its group,
+   position and nudge ‹ › on top, the image fitted (or at the shared zoom) in the middle, caption and file name below. */
+.glimpse-cmp { position: fixed; inset: 0; z-index: 99990; display: flex; flex-direction: column; background: #000; color: #f1f4f9;
+  font: 14px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; outline: none; }
+.glimpse-cmp [hidden] { display: none !important; }  /* whatever the host's own rules */
+.glimpse-cmp .glimpse-cmp-btn { flex: 0 0 auto; min-height: 32px; margin: 0; padding: 3px 10px; border: 1px solid rgba(255,255,255,0.3); border-radius: 8px;
+  background: rgba(255,255,255,0.08); color: #fff; font: inherit; font-size: 14px; line-height: 1.2; white-space: nowrap; cursor: pointer; }
+.glimpse-cmp .glimpse-cmp-btn:hover:not(:disabled) { background: rgba(255,255,255,0.16); }
+.glimpse-cmp .glimpse-cmp-btn:disabled { opacity: 0.35; cursor: default; }
+.glimpse-cmp .glimpse-cmp-btn:focus-visible { outline: 2px solid #9ac3ff; outline-offset: 1px; }
+.glimpse-cmp-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.12);
+  background: #0d1015; }
+.glimpse-cmp-title { flex: 0 0 auto; margin-inline: 4px 2px; font-weight: 600; white-space: nowrap; }
+.glimpse-cmp-chips { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.glimpse-cmp-chips::-webkit-scrollbar { display: none; }
+.glimpse-cmp .glimpse-cmp-chip { border-radius: 16px; }
+.glimpse-cmp .glimpse-cmp-chip[aria-pressed="true"] { border-color: #9ac3ff; background: #2f5fa8; font-weight: 600; }
+.glimpse-cmp-chip-n { opacity: 0.8; font-size: 0.86em; font-weight: 400; }
+.glimpse-cmp-chip-k { display: inline-grid; place-items: center; min-width: 1.35em; height: 1.35em; margin-inline-end: 5px; border-radius: 50%;
+  background: #9ac3ff; color: #0b1a33; font-size: 0.78em; font-weight: 700; }
+.glimpse-cmp-step { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.glimpse-cmp-steppos { min-width: 5.2em; text-align: center; font-variant-numeric: tabular-nums; }
+.glimpse-cmp .glimpse-cmp-close { min-width: 40px; font-size: 16px; }
+/* The panels: one column each, the same width; the image area takes what the head and foot leave. */
+.glimpse-cmp-panels { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(var(--glimpse-cmp-n, 2), minmax(0, 1fr)); gap: 4px; padding: 4px; }
+.glimpse-cmp-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+  overflow: hidden; background: #08090b; }
+.glimpse-cmp-head { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 3px 6px; background: rgba(255,255,255,0.05); }
+.glimpse-cmp-name { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glimpse-cmp-pos { min-width: 4.6em; text-align: center; font-variant-numeric: tabular-nums; }
+.glimpse-cmp-off { min-width: 2.2em; color: #f0d39a; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.glimpse-cmp .glimpse-cmp-head .glimpse-cmp-nudge { min-height: 26px; min-width: 32px; padding: 0 8px; font-size: 17px; line-height: 1; }
+.glimpse-cmp-view { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; cursor: zoom-in; touch-action: none; user-select: none;
+  -webkit-user-select: none; }
+.glimpse-cmp[data-zoomed="true"] .glimpse-cmp-view { cursor: grab; }
+.glimpse-cmp .glimpse-cmp-view.dragging { cursor: grabbing; }
+.glimpse-cmp-img { position: absolute; left: 0; top: 0; max-width: none; max-height: none; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; }
+/* No image at this step in this panel (before its first, past its last), a missing file, or one that failed to load. */
+.glimpse-cmp-gone { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; padding: 16px; text-align: center; color: #a9b2c1; }
+.glimpse-cmp-gone-what { font-size: 18px; color: #dbe1ea; }
+.glimpse-cmp-gone code { color: #ffd0c8; font-size: 12.5px; overflow-wrap: anywhere; }
+.glimpse-cmp-foot { flex: 0 0 auto; display: grid; gap: 1px; min-height: 3.1em; padding: 4px 8px 6px; background: rgba(255,255,255,0.04); }
+.glimpse-cmp-caption { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glimpse-cmp-titleline { font-size: 13px; color: #dbe1ea; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glimpse-cmp-file { font-size: 12px; color: #a9b2c1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Space: the images alone (the bar, heads and feet hidden), the panels' frames still apart. */
+.glimpse-cmp--bare :is(.glimpse-cmp-bar, .glimpse-cmp-head, .glimpse-cmp-foot) { display: none; }

@@ -1,0 +1,215 @@
+"""S06 Gate C — post-cleanup S03-B cache-consumer inventory (§10).
+
+Recomputes the machine-generated consumer inventory from current production
+source and proves: (a) it matches the checked-in artifact (currency), (b)
+deleted WEAVE/JEWEL/salvage consumers are absent, (c) every surviving cache
+consumer is present, and (d) no S03 permanent-fence allowlist contains a
+deleted symbol or a broad file-level exemption for the three S06 files.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+SRC = REPO / "src" / "workflowy_mcp"
+ROOT_MODULES = [
+    REPO / "nexus_map_codebase.py",
+    REPO / "beacon_obtain_code_snippet.py",
+    REPO / "markdown_roundtrip.py",
+    REPO / "glimpse_deploy_trampoline.py",
+    REPO / "beacon_mutation_contract.py",
+]
+ARTIFACT = REPO / "tests" / "s06_s03b_consumer_inventory.json"
+
+CONSUMER_IDIOMS = [
+    "_get_nodes_export_cache_nodes(",
+    "load_nodes_by_id_from_cache(",
+    "export_nodes_impl(",
+    "._nodes_export_cache",
+    "publish_local_cache_view(",
+    "_publish_lineage_view(",
+]
+
+DELETED_CONSUMERS = [
+    "_collect_notes_salvage_context_for_file",
+    "_restore_notes_for_file",
+    "_stash_notes_node",
+    "_is_notes_name",
+    "NotesSalvageContext",
+    "nexus_weave_enchanted",
+    "bulk_import_from_file",
+    "update_jewel_with_uuid",
+    "_is_salvageable_notes_delete_guard",
+]
+
+SURVIVING_CONSUMERS = [
+    "refresh_file_node_beacons",
+    "refresh_folder_cartographer_sync",
+    "export_nodes_impl",
+    "resolve_cartographer_path_from_node",
+    "update_beacon_from_node",
+    "preflight_beacon_write_from_node",
+    "plan_beacon_write_from_node",
+    "commit_beacon_write_plan",
+    "reconcile_tree",
+    "run_markdown_generate_pipeline",
+    "_get_nodes_export_cache_nodes",
+    "load_nodes_by_id_from_cache",
+]
+
+
+def _build_inventory() -> dict:
+    files = [p for p in SRC.rglob("*.py") if p.is_file()]
+    files.extend(p for p in ROOT_MODULES if p.is_file())
+    # Deterministic order: rglob yields filesystem directory order, which
+    # differs between NTFS and ext4, so sort by the normalised repo-relative
+    # path. The inventory's question is the consumer POPULATION, not filesystem
+    # traversal order, so this makes the artifact reproducible on any platform.
+    files.sort(key=lambda p: str(p.relative_to(REPO)).replace("\\", "/"))
+    idiom_hits: dict[str, dict[str, int]] = {}
+    symbol_presence: dict[str, list[str]] = {}
+    for path in files:
+        rel = str(path.relative_to(REPO)).replace("\\", "/")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        for idiom in CONSUMER_IDIOMS:
+            # COUNT per file, NOT line positions (was {idiom: {rel: [lineno, ...]}}).
+            # Same reasoning as the S03-B machine inventory: this artifact is a
+            # currency lock whose question is "did the consumer population change?",
+            # and a line-number list answers "where", so it churned on every
+            # unrelated edit that shifted a file. A per-file count still detects an
+            # added or removed idiom occurrence in that file -- the real signal --
+            # while ignoring pure repositioning.
+            for line in lines:
+                if idiom in line:
+                    counts = idiom_hits.setdefault(idiom, {})
+                    counts[rel] = counts.get(rel, 0) + 1
+        for sym in DELETED_CONSUMERS + SURVIVING_CONSUMERS:
+            if sym in text:
+                symbol_presence.setdefault(sym, []).append(rel)
+    return {
+        "manifest": "S06 post-cleanup S03-B cache-consumer inventory (generated post-S06)",
+        "baseline_commit": "06cd024",
+        "consumer_idiom_sites": idiom_hits,
+        "deleted_consumers_absent": {
+            sym: symbol_presence.get(sym, []) for sym in DELETED_CONSUMERS
+        },
+        "surviving_consumers_present": {
+            sym: symbol_presence.get(sym, []) for sym in SURVIVING_CONSUMERS
+        },
+    }
+
+
+def test_checked_in_inventory_is_current() -> None:
+    assert ARTIFACT.is_file(), "S03-B inventory artifact missing — regenerate it"
+    checked_in = json.loads(ARTIFACT.read_text(encoding="utf-8"))
+    assert checked_in == _build_inventory(), (
+        "S03-B consumer inventory artifact is stale — regenerate "
+        "tests/s06_s03b_consumer_inventory.json"
+    )
+
+
+def test_inventory_excludes_deleted_consumers() -> None:
+    inv = _build_inventory()
+    for sym, files in inv["deleted_consumers_absent"].items():
+        assert files == [], f"deleted consumer {sym} still present in {files}"
+
+
+def test_inventory_includes_all_surviving_consumers() -> None:
+    inv = _build_inventory()
+    for sym in SURVIVING_CONSUMERS:
+        files = inv["surviving_consumers_present"].get(sym) or []
+        assert files, f"surviving cache consumer {sym} missing from inventory (accidental deletion?)"
+
+
+def _scan_allowlist_source(path: Path) -> list[str]:
+    """AST-based allowlist audit (A4): detects (a) any deleted S06 symbol and
+    (b) broad FILE-LEVEL exemptions for the three primary S06 files inside any
+    allow/exempt-named assignment — regardless of quoting or multiline layout.
+    A function-scoped entry (contains ':') is legitimate; a bare filename is not.
+    """
+    violations: list[str] = []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for sym in DELETED_CONSUMERS:
+        if sym in text:
+            violations.append(f"{path.name}: deleted symbol {sym}")
+    banned_files = {"api_client_nexus.py", "workflowy_move_reconcile.py", "weave_worker.py"}
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        value = node.value
+        for target in targets:
+            name = target.id if isinstance(target, ast.Name) else ""
+            if "allow" not in name.lower() and "exempt" not in name.lower():
+                continue
+            for sub in ast.walk(value):
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    raw = sub.value
+                    base = raw.replace("\\", "/").rsplit("/", 1)[-1]
+                    if base in banned_files and ":" not in raw:
+                        violations.append(
+                            f"{path.name}: broad file-level exemption {raw!r} in {name}"
+                        )
+    return violations
+
+
+def test_s03_fence_allowlists_have_no_deleted_symbols_or_broad_exemptions() -> None:
+    """S03 permanent fence allowlists (S03-A shipped; S03-B extends) must
+    never grandfather deleted symbols, and may not hide the three primary S06
+    files behind broad file-level exemptions (§10/§15.6)."""
+    s03_fence_sources = [
+        REPO / "tests" / "test_coherence_s03_transition_cow.py",
+        REPO / "tests" / "test_coherence_s03_adoption.py",
+        REPO / "tests" / "test_coherence_s03_operation_boundary.py",
+        REPO / "tests" / "test_coherence_s03_epoch_reload.py",
+        REPO / "tests" / "test_coherence_s03_multiprocess.py",
+    ]
+    for path in s03_fence_sources:
+        if not path.is_file():
+            continue
+        assert _scan_allowlist_source(path) == []
+
+
+def test_allowlist_scanner_rejects_injected_broad_exemptions(tmp_path: Path) -> None:
+    """The A4 scanner must catch quoting and multiline variants of a broad
+    file-level exemption — and stay silent on function-scoped entries."""
+    bad_variants = {
+        "single_line": 'ALLOWLIST = {"api_client_nexus.py"}\n',
+        "multi_line": 'ALLOWLIST = {\n    "api_client_nexus.py",\n    "other.py",\n}\n',
+        "dict_key": 'ALLOWLIST = {\n    "weave_worker.py": "reason",\n}\n',
+        "single_quotes": "EXEMPTIONS = ['workflowy_move_reconcile.py']\n",
+        "nested_path": 'ALLOWLIST = {"src/workflowy_mcp/client/api_client_nexus.py"}\n',
+    }
+    for label, body in bad_variants.items():
+        fixture = tmp_path / f"bad_{label}.py"
+        fixture.write_text(body, encoding="utf-8")
+        found = _scan_allowlist_source(fixture)
+        assert found, f"scanner missed injected broad exemption ({label})"
+
+    legit = tmp_path / "legit_function_scoped.py"
+    legit.write_text(
+        'ALLOWLIST = {\n'
+        '    "src/workflowy_mcp/client/api_client_nexus.py:WorkFlowyClientNexus.refresh_file_node_beacons",\n'
+        '    "workflowy_mcp.weave_worker:main",\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    assert _scan_allowlist_source(legit) == []
+
+
+def test_allowlist_scanner_rejects_injected_deleted_symbols(tmp_path: Path) -> None:
+    fixture = tmp_path / "deleted_symbol.py"
+    fixture.write_text(
+        'ALLOWLIST = {"src/workflowy_mcp/client/api_client_nexus.py:WorkFlowyClientNexus._collect_notes_salvage_context_for_file"}\n',
+        encoding="utf-8",
+    )
+    assert _scan_allowlist_source(fixture) != []

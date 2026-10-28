@@ -1,0 +1,46 @@
+# Normalize line endings across the repo.
+#
+# `* text=auto` lets Git decide which files are text and normalizes them to LF
+# in the repository. `eol=lf` forces LF on checkout as well, so working-tree
+# files stay LF on every platform (Windows included). Together these stop the
+# recurring "whole file shows as changed" CRLF<->LF churn that happens when a
+# text file is hand-edited on disk with a CRLF-writing editor.
+* text=auto eol=lf
+
+# Explicit text types (belt-and-suspenders; covered by `* text=auto` too).
+*.py    text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.vue   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.markdown text eol=lf
+*.sql   text eol=lf
+*.sh    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.txt   text eol=lf
+
+# Windows-native script types: keep CRLF so they run correctly on Windows.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary types: never touch line endings, never diff as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.pt    binary
+*.pyc   binary

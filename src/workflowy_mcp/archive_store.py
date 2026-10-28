@@ -1,0 +1,1452 @@
+"""The archive store (Archive Reads U1, §4.1–§4.2).
+
+ONE in-process ``ArchiveStore`` lists the archive folder, parses every file
+through the ONE format authority (:mod:`workflowy_mcp.node_archive` — no
+other module reads archive bytes), classifies each file against one live
+cache view, builds the overlay of visible records, and answers the two
+lookup questions the rest of the feature asks: *would an archive answer
+this handle?* (the fallback gate) and *which AP-IDs do the archives carry?*
+(AP-ID allocation).
+
+Loading is lazy and change-driven (Axiom 17): ``ensure_loaded`` lists the
+folder and stats each entry on every call, parses a file only when its
+ ``(mtime_ns, size)`` changed or it is new, and drops vanished files.  No
+TTL, no background thread, no on-disk index.  The store holds everything in
+memory; it writes ONLY the daemon's ``archive_folder.json`` memory and —
+through the mount verb — the one sanctioned ``mount_parent_id`` edit, both
+never touching archive ``nodes``.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Mapping
+
+from .carto_job_governance import atomic_write_text
+from .node_archive import (
+    ArchiveError,
+    archive_mount_parent,
+    archive_scope,
+    parse_archive,
+    serialize_archive,
+    with_mount_parent,
+)
+
+# The store holds only these states, exactly one per file (§1.4 / §4.1.3).
+FILE_STATE_UNREADABLE = "unreadable"
+FILE_STATE_SKIPPED = "skipped"
+FILE_STATE_DORMANT = "dormant"
+FILE_STATE_SUPERSEDED = "superseded"
+FILE_STATE_ORPHANED = "orphaned"
+FILE_STATE_ACTIVE = "active"
+
+
+@dataclass(frozen=True)
+class ArchiveFileEntry:
+    """One inventory row: one file in the folder with exactly one state.
+
+    ``root_ap_id`` is the AP core carried by the root record's ORIGINAL
+    name ("" when the records are unavailable — a vault export dropped
+    them, or the file is unreadable); ``planted_under_name`` is the planted
+    parent's display name (a live node's, or an archived record's original
+    name) or None when the archive plants at the top level / is not
+    planted.
+    """
+
+    name: str
+    path: str
+    state: str
+    reason: str
+    archive_name: str = ""
+    exported_at: str = ""
+    scope: str = ""
+    root_ids: "tuple[str, ...]" = ()
+    node_count: int = 0
+    visible_count: int = 0
+    planted_parent_id: "str | None" = None
+    source_parent_id: "str | None" = None
+    mount_parent_id: "str | None" = None
+    root_ap_id: str = ""
+    planted_under_name: "str | None" = None
+
+
+class ArchiveOverlay:
+    """The overlay for one live generation (§4.2.3) — frozen; lazily built view.
+
+    ``records`` are the 📦-marked overlay records (one per visible archived
+    record, never the parsed originals); ``augmented_view`` is constructed
+    DIRECTLY — never through the deep-copying ``build`` classmethod — the
+    first time it is asked for, and cached once per overlay.
+    """
+
+    __slots__ = (
+        "live_view",
+        "records",
+        "by_id",
+        "visible_ids",
+        "ap_index",
+        "provenance",
+        "files",
+        "store_generation",
+        "planted_chains",
+        "_augmented_holder",
+    )
+
+    def __init__(
+        self,
+        *,
+        live_view: Any,
+        records: "tuple[dict[str, Any], ...]",
+        by_id: Mapping[str, dict[str, Any]],
+        visible_ids: frozenset,
+        ap_index: Mapping[str, "list[str]"],
+        provenance: Mapping[str, dict[str, Any]],
+        files: "tuple[ArchiveFileEntry, ...]",
+        store_generation: int,
+        planted_chains: "Mapping[str, frozenset] | None" = None,
+    ) -> None:
+        object.__setattr__(self, "live_view", live_view)
+        object.__setattr__(self, "records", records)
+        object.__setattr__(self, "by_id", by_id)
+        object.__setattr__(self, "visible_ids", visible_ids)
+        object.__setattr__(self, "ap_index", ap_index)
+        object.__setattr__(self, "provenance", provenance)
+        object.__setattr__(self, "files", files)
+        object.__setattr__(self, "store_generation", store_generation)
+        object.__setattr__(
+            self, "planted_chains", dict(planted_chains or {})
+        )
+        object.__setattr__(self, "_augmented_holder", [])
+
+    @property
+    def augmented_view(self) -> Any:
+        """The augmented CacheView: live records plus the overlay records."""
+        holder = self._augmented_holder
+        if holder:
+            return holder[0]
+        from .coherence.cache_view import CacheView
+
+        live = self.live_view
+        view = CacheView(
+            epoch_number=live.epoch_number,
+            epoch_id=live.epoch_id,
+            adopted_sequence=live.adopted_sequence,
+            nodes_export={
+                **live.nodes_export,
+                "nodes": [*live.nodes_export["nodes"], *self.records],
+            },
+            nodes_by_id={**live.nodes_by_id, **dict(self.by_id)},
+            account_scope_id=live.account_scope_id,
+        )
+        holder.append(view)
+        return view
+
+
+# ---------------------------------------------------------------------------
+# The remembered archive folder (§4.10 — the daemon's memory; Axiom 15)
+# ---------------------------------------------------------------------------
+
+# Reentrant: remember_archive_folder_from_reply holds it while calling
+# read_remembered_archive_folder() for the once-per-process cold load.
+_REMEMBERED_FOLDER_LOCK = threading.RLock()
+_REMEMBERED_FOLDER_LOADED = False
+_REMEMBERED_FOLDER_VALUE = ""
+_REMEMBERED_FOLDER_LEARNED_AT: "str | None" = None
+_REMEMBERED_FOLDER_DIRTY = False
+
+
+def _archive_folder_memory_path():
+    from .config import get_runtime_base_dir
+
+    return get_runtime_base_dir() / "archive_folder.json"
+
+
+def read_remembered_archive_folder() -> str:
+    """The remembered archive folder: the daemon's memory of the last value
+    the extension reported (Axiom 15).
+
+    Read from ``archive_folder.json`` in the runtime base dir ONCE per
+    process; afterwards the in-memory value is returned without re-reading.
+    A missing, malformed or unreadable file yields "" (no folder configured:
+    the store performs no file I/O and every lookup misses).  Never raises.
+
+    (The daemon's own memory file is parsed with the JSONDecoder API rather
+    than the loads helper: §U1.3's negative postcondition keeps this module
+    free of any direct JSON decoding call, so no archive byte is ever read
+    outside the format authority.  This file is daemon config, not an
+    archive — the different spelling is transparency, not a second reader.)
+    """
+    global _REMEMBERED_FOLDER_LOADED, _REMEMBERED_FOLDER_VALUE
+    global _REMEMBERED_FOLDER_LEARNED_AT
+    with _REMEMBERED_FOLDER_LOCK:
+        if not _REMEMBERED_FOLDER_LOADED:
+            value = ""
+            learned_at: "str | None" = None
+            try:
+                text = _archive_folder_memory_path().read_text(encoding="utf-8")
+                data = json.JSONDecoder().decode(text)
+                if isinstance(data, dict):
+                    raw = data.get("archive_folder")
+                    if isinstance(raw, str):
+                        value = raw.strip()
+                    raw_learned = data.get("learned_at")
+                    if isinstance(raw_learned, str) and raw_learned:
+                        learned_at = raw_learned
+            except Exception:  # noqa: BLE001 - a missing/unreadable memory is "" (state A)
+                value = ""
+                learned_at = None
+            _REMEMBERED_FOLDER_VALUE = value
+            _REMEMBERED_FOLDER_LEARNED_AT = learned_at
+            _REMEMBERED_FOLDER_LOADED = True
+        return _REMEMBERED_FOLDER_VALUE
+
+
+def remembered_archive_folder_learned_at() -> "str | None":
+    """When the remembered folder value was learned (the memory file's
+    ``learned_at``), or None when never learned.  Never raises."""
+
+    read_remembered_archive_folder()
+    with _REMEMBERED_FOLDER_LOCK:
+        return _REMEMBERED_FOLDER_LEARNED_AT
+
+
+# @beacon[
+#   id=nexus-archives@remember-archive-folder,
+#   role=remember_archive_folder_from_reply(reply),
+#   slice_labels=nexus--archives,nexus--config,
+#   kind=ast,
+#   comment=§4.10 (Axiom 15): the daemon's memory of the extension's archive_folder option, called from _resolve_note_session_config right after every settings reply. A reply without the key (an older extension) changes nothing; a changed trimmed value updates the in-memory value AT ONCE and rewrites archive_folder.json in the runtime dir atomically ({"archive_folder", "learned_at"}) — UNLESS the current operation is augmented, in which case the file write DEFERS to the next non-augmented settings read (the dirty flag flushes even on an unchanged value; Axiom 5, E36). Every archive read uses the remembered value; no archive read ever performs a settings round trip.,
+# ]
+def remember_archive_folder_from_reply(reply: Any) -> None:
+    """Learn the extension's ``archive_folder`` from one settings reply (§4.10).
+
+    Called from ``_resolve_note_session_config`` right after the reply
+    arrives.  A reply WITHOUT the key (an older extension) changes nothing.
+    Otherwise the in-memory value updates AT ONCE when it differs, and the
+    memory file is rewritten atomically with a fresh ``learned_at`` —
+    UNLESS the current operation is augmented (an overlay is installed):
+    then the FILE WRITE waits for the next settings read outside an
+    augmented operation (Axiom 5; E36) — the in-memory value is already the
+    truth for this process, and the deferred write flushes at the next
+    non-augmented call even when the reported value is unchanged.  Never
+    raises.
+    """
+    global _REMEMBERED_FOLDER_LOADED, _REMEMBERED_FOLDER_VALUE
+    global _REMEMBERED_FOLDER_LEARNED_AT, _REMEMBERED_FOLDER_DIRTY
+
+    if not isinstance(reply, dict) or "archive_folder" not in reply:
+        return
+    raw = reply.get("archive_folder")
+    value = raw.strip() if isinstance(raw, str) else ""
+    from .archive_context import current_archive_context
+
+    context = current_archive_context()
+    augmented = context is not None and context.overlay is not None
+    learned_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with _REMEMBERED_FOLDER_LOCK:
+        if not _REMEMBERED_FOLDER_LOADED:
+            read_remembered_archive_folder()
+        if value == _REMEMBERED_FOLDER_VALUE:
+            # A deferred write still flushes here: the reported value being
+            # unchanged does not mean the FILE has it yet (E36).
+            if _REMEMBERED_FOLDER_DIRTY and not augmented:
+                _write_archive_folder_memory(value, _REMEMBERED_FOLDER_LEARNED_AT)
+                _REMEMBERED_FOLDER_DIRTY = False
+            return
+        _REMEMBERED_FOLDER_VALUE = value
+        _REMEMBERED_FOLDER_LEARNED_AT = learned_at
+        _REMEMBERED_FOLDER_LOADED = True
+        if augmented:
+            _REMEMBERED_FOLDER_DIRTY = True
+            return
+    _write_archive_folder_memory(value, learned_at)
+
+
+def _write_archive_folder_memory(value: str, learned_at: "str | None") -> None:
+    """Atomically write ``archive_folder.json`` (§4.10).  Never raises."""
+
+    try:
+        payload = {"archive_folder": value, "learned_at": learned_at}
+        atomic_write_text(
+            _archive_folder_memory_path(),
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        )
+    except Exception:  # noqa: BLE001 - a failed memory write is never loud
+        return
+
+
+def _reset_archive_folder_memory_for_tests() -> None:
+    """Test seam: clear the process memory so the next read re-loads the
+    file (the memory is once-per-process in production)."""
+
+    global _REMEMBERED_FOLDER_LOADED, _REMEMBERED_FOLDER_VALUE
+    global _REMEMBERED_FOLDER_LEARNED_AT, _REMEMBERED_FOLDER_DIRTY
+    with _REMEMBERED_FOLDER_LOCK:
+        _REMEMBERED_FOLDER_VALUE = ""
+        _REMEMBERED_FOLDER_LEARNED_AT = None
+        _REMEMBERED_FOLDER_LOADED = False
+        _REMEMBERED_FOLDER_DIRTY = False
+
+
+def _record_ap_core(name: Any) -> "str | None":
+    """The uppercase AP core at a record name's leading edge, or None.
+
+    The ONE AP grammar: ``_AP_ID_LEADING_RE`` after
+    ``_lstrip_leading_ws_and_emoji``, exactly as
+    ``resolve_uuid_from_anchor_point`` scans (§4.1.4).
+    """
+    if not isinstance(name, str) or not name:
+        return None
+    from .client.api_client_nexus import _AP_ID_LEADING_RE, _lstrip_leading_ws_and_emoji
+
+    match = _AP_ID_LEADING_RE.match(_lstrip_leading_ws_and_emoji(name))
+    if not match:
+        return None
+    return match.group(1).upper()
+
+
+def _archive_nest(flat_nodes: "list[dict[str, Any]]") -> "list[dict[str, Any]]":
+    """The exporter's own nest callable (§4.1.1, premise P14).
+
+    ``_write_node_export_archive`` passes ``client._build_hierarchy``; the
+    builder never touches ``self``, so ONE bare-instance binding is
+    byte-equivalent for the store's parses.
+    """
+    from .client.api_client_etch import WorkFlowyClientEtch
+
+    global _ARCHIVE_NEST_ETCH
+    if _ARCHIVE_NEST_ETCH is None:
+        _ARCHIVE_NEST_ETCH = object.__new__(WorkFlowyClientEtch)
+    return _ARCHIVE_NEST_ETCH._build_hierarchy(list(flat_nodes))
+
+
+_ARCHIVE_NEST_ETCH: Any = None
+
+
+def _unreadable_parsed(path: str, name: str, mtime_ns: int, size: int, reason: str) -> dict:
+    return {
+        "path": path,
+        "name": name,
+        "mtime_ns": mtime_ns,
+        "size": size,
+        "state": FILE_STATE_UNREADABLE,
+        "reason": reason,
+        "document": None,
+        "scope": "",
+        "mount_parent_id": None,
+        "source_parent_id": None,
+        "root_ids": (),
+        "archive_name": "",
+        "exported_at": "",
+        "node_count": 0,
+        "cores": {},
+        "visible_ids": (),
+        "visible_records": (),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The store
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=nexus-archives@archive-store,
+#   role=📦 ArchiveStore,
+#   slice_labels=nexus--archives,ra-workflowy-cache,
+#   kind=ast,
+#   comment=THE one archive store (Archive Reads U1, §4.1-§4.2; U3 adds the inventory, the mount write and the folder memory): lists the archive folder through the injected folder provider (production: read_remembered_archive_folder), lazily and change-driven (list + stat on every ensure_loaded; reparse only on (mtime_ns, size) change; drop vanished; one store_generation counter), parses every file ONLY through node_archive.parse_archive (no second reader), classifies each file per live generation (unreadable / skipped vault / dormant root-still-live / candidate, then shadowing: live wins per subtree, newest exported_at wins per subtree, ties by file name; planting under mount_parent_id else source_parent_id else top, orphans and mount cycles at the top; sibling priority M+1+k after the live children), and builds the one overlay of 📦-marked records carrying the _nexus_archive provenance marker. Looks up: all_ap_cores (Axiom 11, every readable state), lookup(supplied, kind) for the fallback gate, and inventory(live_view) — EVERY file as one row, whatever its state, also when no overlay exists. Writes ONLY the daemon's archive_folder.json memory (remember_archive_folder_from_reply, deferred inside augmented operations) and, for the mount verb, the ONE sanctioned mount_parent_id edit through with_mount_parent + serialize_archive + a parse-back/byte-identity verification (nodes untouched). No TTL, no background reload, no on-disk index (Axiom 17).,
+# ]
+class ArchiveStore:
+    """The one archive store: folder provider, lazy loading, classification,
+    the overlay, the all-cores index and the two lookups."""
+
+    def __init__(
+        self,
+        *,
+        folder_provider: "Callable[[], str] | None" = None,
+    ) -> None:
+        self._folder_provider = folder_provider or read_remembered_archive_folder
+        self._mutex = threading.Lock()
+        # Parsed documents keyed by absolute path as listed.
+        self._parsed: "dict[str, dict[str, Any]]" = {}
+        self._store_generation = 0
+        self._last_listing_signature: "tuple | None" = None
+        self._folder_reason: "str | None" = None  # unreadable-folder reason
+        self._folder_value: str = ""  # the last configured folder value (§5.4 texts)
+        self._all_cores: "dict[str, str]" = {}
+        # The ONE overlay slot: (live_view, store_generation, overlay|None).
+        self._overlay_slot: "tuple[Any, int, ArchiveOverlay | None] | None" = None
+
+    # -- loading -----------------------------------------------------------
+
+    @property
+    def folder_unreadable_reason(self) -> "str | None":
+        """Why the folder itself could not be read, when it could not (§5.4
+        state C); None when the folder is usable or absent."""
+        return self._folder_reason
+
+    def ensure_loaded(self) -> None:
+        """List the folder, parse what changed, drop what vanished (§4.1.1).
+
+        With no folder configured: no file I/O at all, no files, every
+        lookup misses (state A).  A folder that cannot be resolved, listed
+        or read makes the folder ``unreadable`` with the reason.
+        """
+        with self._mutex:
+            try:
+                folder_value = str(self._folder_provider() or "").strip()
+            except Exception:  # noqa: BLE001 - a failing provider is "no folder"
+                folder_value = ""
+            if not folder_value:
+                self._folder_reason = None
+                self._folder_value = ""
+                if self._parsed:
+                    self._parsed = {}
+                    self._rebuild_all_cores()
+                    self._store_generation += 1
+                self._last_listing_signature = None
+                return
+
+            listed = self._list_folder(folder_value)
+            self._folder_value = folder_value
+            if isinstance(listed, str):  # an unreadable-folder reason
+                self._folder_reason = listed
+                if self._parsed:
+                    self._parsed = {}
+                    self._rebuild_all_cores()
+                    self._store_generation += 1
+                self._last_listing_signature = None
+                return
+            self._folder_reason = None
+
+            signature = tuple(sorted(listed.keys()))
+            parsed: "dict[str, dict[str, Any]]" = {}
+            changed = signature != self._last_listing_signature
+            for path, (name, mtime_ns, size) in listed.items():
+                cached = self._parsed.get(path)
+                if (
+                    cached is not None
+                    and cached["mtime_ns"] == mtime_ns
+                    and cached["size"] == size
+                ):
+                    parsed[path] = cached
+                    continue
+                changed = True
+                parsed[path] = self._parse_file(path, name, mtime_ns, size)
+            if changed:
+                self._parsed = parsed
+                self._last_listing_signature = signature
+                self._rebuild_all_cores()
+                self._store_generation += 1
+            else:
+                self._parsed = parsed
+
+    def _list_folder(
+        self, folder_value: str
+    ) -> "dict[str, tuple[str, int, int]] | str":
+        """List the folder; return {absolute path: (name, mtime_ns, size)} or
+        an unreadable-folder reason string."""
+        from .tool_path_resolution import ToolPathError, resolve_tool_path
+
+        try:
+            resolution = resolve_tool_path(
+                folder_value,
+                param="archive_folder",
+                context="archive folder",
+                direction="read",
+            )
+            folder = resolution.resolved
+        except ToolPathError as exc:
+            return f"archive folder could not be resolved: {exc}"
+        if not os.path.exists(folder):
+            return f"archive folder does not exist: {folder}"
+        if not os.path.isdir(folder):
+            return f"archive folder is not a directory: {folder}"
+        try:
+            found: "dict[str, tuple[str, int, int]]" = {}
+            with os.scandir(folder) as scan:
+                for entry in scan:
+                    name = entry.name
+                    # Non-recursive; non-hidden ``*.json`` only (case-
+                    # insensitive), so the atomic writer's ``.‹name›.‹pid›.
+                    # ‹hex›.tmp`` temporaries and dotfiles are never read
+                    # and never make an archive ambiguous (E12).
+                    if name.startswith("."):
+                        continue
+                    if not name.lower().endswith(".json"):
+                        continue
+                    if not entry.is_file():
+                        continue
+                    stat = entry.stat()
+                    found[entry.path] = (name, stat.st_mtime_ns, stat.st_size)
+            return found
+        except OSError as exc:
+            return f"archive folder could not be listed: {exc}"
+
+    def _parse_file(
+        self, path: str, name: str, mtime_ns: int, size: int
+    ) -> "dict[str, Any]":
+        """Read one file's bytes at once and parse it through the ONE format
+        authority.  Any refusal makes the file ``unreadable`` (§4.1.1)."""
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except OSError as exc:
+            return _unreadable_parsed(
+                path, name, mtime_ns, size, f"could not be read: {exc}"
+            )
+        try:
+            document = parse_archive(data, nest=_archive_nest)
+            block = document["archive"]
+            scope = archive_scope(block)
+            mount_parent_id = archive_mount_parent(block)
+        except Exception as exc:  # noqa: BLE001 - any refusal is the unreadable state
+            reason = str(exc) if isinstance(exc, ArchiveError) else f"{type(exc).__name__}: {exc}"
+            return _unreadable_parsed(path, name, mtime_ns, size, reason)
+        nodes = document["nodes"]
+        source_parent_id = block.get("source_parent_id")
+        if not isinstance(source_parent_id, str):
+            source_parent_id = None
+        cores: "dict[str, str]" = {}
+        for record in nodes:
+            core = _record_ap_core(record.get("name"))
+            if core is not None and core not in cores:
+                cores[core] = path
+        parsed = {
+            "path": path,
+            "name": name,
+            "mtime_ns": mtime_ns,
+            "size": size,
+            "state": None,  # classified per live generation
+            "reason": "",
+            "document": document,
+            "scope": scope,
+            "mount_parent_id": mount_parent_id,
+            "source_parent_id": source_parent_id,
+            "root_ids": tuple(str(r) for r in block.get("root_ids") or ()),
+            "archive_name": str(block.get("name") or ""),
+            "exported_at": str(block.get("exported_at") or ""),
+            "node_count": len(nodes),
+            "cores": cores,
+            "visible_ids": (),
+            "visible_records": (),
+        }
+        if scope == "vault":
+            # Skipped files keep only their block and their cores; their
+            # records are dropped from memory after classification (E23).
+            parsed["document"] = {"archive": document["archive"], "nodes": []}
+        return parsed
+
+    def _rebuild_all_cores(self) -> None:
+        """The all-cores index (Axiom 11): every readable file's cores,
+        whatever its state; ``unreadable`` contributes nothing."""
+        cores: "dict[str, str]" = {}
+        for parsed in self._parsed.values():
+            if parsed["state"] == FILE_STATE_UNREADABLE:
+                continue
+            for core, path in parsed["cores"].items():
+                cores.setdefault(core, path)
+        self._all_cores = cores
+
+    # -- classification, shadowing, planting (§4.1.3–§4.2.2) ----------------
+
+    def _classify(self, live_view: Any) -> "list[dict[str, Any]]":
+        """One state per parsed file for THIS live view, then the overlay
+        inputs: visible records, planted parents, priorities.  Deterministic
+        for the same inputs (G9): everything iterates in sorted-path order."""
+        live_ids = set(live_view.nodes_by_id.keys())
+
+        parsed = [dict(item) for _, item in sorted(self._parsed.items())]
+        for item in parsed:
+            if item["state"] == FILE_STATE_UNREADABLE:
+                continue
+            if item["scope"] == "vault":
+                item["state"] = FILE_STATE_SKIPPED
+                item["reason"] = "whole-vault export; vault exports are never read"
+                continue
+            root_ids = item["root_ids"]
+            if root_ids and root_ids[0] in live_ids:
+                item["state"] = FILE_STATE_DORMANT
+                item["reason"] = (
+                    f"root {root_ids[0]} still lives in Workflowy (the cache "
+                    "has not seen a deletion)"
+                )
+                continue
+            item["state"] = None  # candidate; decided after shadowing
+
+        candidates = [item for item in parsed if item["state"] is None]
+        # Newest first by exported_at (the string sorts chronologically),
+        # ties by file name ascending (§4.2.1): the stable two-pass sort
+        # orders by name first, then re-orders by date descending.
+        candidates.sort(key=lambda item: item["name"])
+        candidates.sort(key=lambda item: item["exported_at"], reverse=True)
+
+        claimed = set(live_ids)
+        claimed_by: "dict[str, str]" = {}
+        for item in candidates:
+            visible_ids, visible_records = _visible_records_of(item, claimed)
+            item["visible_ids"] = visible_ids
+            item["visible_records"] = visible_records
+            if not visible_ids:
+                item["state"] = FILE_STATE_SUPERSEDED
+                shadow = claimed_by.get(item["root_ids"][0]) if item["root_ids"] else None
+                item["reason"] = (
+                    f"shadowed by newer archive {os.path.basename(shadow)}"
+                    if shadow
+                    else "no visible record (shadowed by a newer archive)"
+                )
+                continue
+            for record_id in visible_ids:
+                claimed.add(record_id)
+                claimed_by.setdefault(record_id, item["path"])
+
+        # Planting (§4.2.2): effective parent → live id / visible record of
+        # another file / top level / orphan.
+        by_path = {
+            item["path"]: item for item in candidates if item.get("visible_ids")
+        }
+        edges: "dict[str, str]" = {}  # file path → the file holding its parent
+        for item in by_path.values():
+            target = self._resolve_parent_target(item, by_path, live_ids)
+            item["planted_parent"] = target
+            item["planted_parent_id"] = None
+            if isinstance(target, tuple):
+                edges[item["path"]] = target[0]
+
+        # Cycles (E5): every file on a planted-parent cycle is orphaned at
+        # the top level.
+        for path in _find_cycle_files(edges):
+            item = by_path[path]
+            item["state"] = FILE_STATE_ORPHANED
+            item["planted_parent"] = None
+            members = [p for p in _cycle_members(edges, path) if p != path]
+            names = sorted(os.path.basename(by_path[p]["path"]) for p in members)
+            item["reason"] = (
+                "mount cycle with " + ", ".join(names) if names else "mount cycle"
+            )
+
+        for item in by_path.values():
+            if item["state"] == FILE_STATE_ORPHANED:
+                continue
+            target = item["planted_parent"]
+            if target is None:
+                # A top-level export is NOT an orphan (E25).
+                item["state"] = FILE_STATE_ACTIVE
+                item["reason"] = "active"
+            elif isinstance(target, tuple):
+                item["planted_parent_id"] = target[1]
+                item["state"] = FILE_STATE_ACTIVE
+                item["reason"] = "active"
+            elif isinstance(target, str) and target in live_ids:
+                item["planted_parent_id"] = target
+                item["state"] = FILE_STATE_ACTIVE
+                item["reason"] = "active"
+            else:
+                item["planted_parent_id"] = None
+                item["planted_parent"] = None
+                item["state"] = FILE_STATE_ORPHANED
+                item["reason"] = (
+                    f"parent {target} is in neither Workflowy nor an active archive"
+                )
+        return parsed
+
+    def _resolve_parent_target(
+        self,
+        item: "dict[str, Any]",
+        by_path: "dict[str, dict[str, Any]]",
+        live_ids: set,
+    ) -> "str | tuple[str, str] | None":
+        """The effective parent (§4.2.2): mount_parent_id, else
+        source_parent_id, else None (a top-level export — not an orphan)."""
+        parent = item["mount_parent_id"] or item["source_parent_id"]
+        if not parent:
+            return None
+        if parent in live_ids:
+            return parent
+        for other_path in sorted(by_path):
+            other = by_path[other_path]
+            if other is item:
+                continue
+            if parent in other["visible_ids"]:
+                return (other_path, parent)
+        return parent  # exists nowhere — the caller marks the orphan
+
+    # -- the overlay (§4.2.3) -----------------------------------------------
+
+    # @beacon[
+    #   id=nexus-archives@archive-store-overlay-for,
+    #   role=ArchiveStore.overlay_for,
+    #   slice_labels=nexus--archives,ra-workflowy-cache,
+    #   kind=ast,
+    #   comment=THE one overlay accessor (§4.2.3): overlay_for(live_view) returns None when no archive record is visible (callers stay on the live view, Axiom 14 — byte-identical behaviour), else the ArchiveOverlay cached in ONE slot keyed on (live view identity, store generation), holding a strong reference to live_view; a new live generation or a store change rebuilds, nothing else is cached. overlay.augmented_view is constructed DIRECTLY (two container copies, live node dicts shared by identity, no deep copy) and lazily cached on the overlay.,
+    # ]
+    def overlay_for(self, live_view: Any) -> "ArchiveOverlay | None":
+        """The overlay for one live view, or None when nothing is visible.
+
+        One slot keyed on ``(live view identity, store generation)``,
+        holding a strong reference to ``live_view``; a new live generation
+        or a store change rebuilds; nothing else is cached.  Callers stay
+        on the live view when None is returned (Axiom 14).
+        """
+        self.ensure_loaded()
+        with self._mutex:
+            slot = self._overlay_slot
+            if (
+                slot is not None
+                and slot[0] is live_view
+                and slot[1] == self._store_generation
+            ):
+                return slot[2]
+            overlay = self._build_overlay(live_view)
+            self._overlay_slot = (live_view, self._store_generation, overlay)
+            return overlay
+
+    def _build_overlay(self, live_view: Any) -> "ArchiveOverlay | None":
+        parsed = self._classify(live_view)
+        visible_items = [
+            item
+            for item in parsed
+            if item.get("visible_ids")
+            and item["state"] in (FILE_STATE_ACTIVE, FILE_STATE_ORPHANED)
+        ]
+        if not visible_items:
+            return None
+
+        from .archive_context import ARCHIVE_RECORD_KEY
+        from .client.api_client_nexus import (
+            _insert_leading_name_emojis,
+            _split_leading_ap_handle,
+        )
+
+        live_nodes_by_id = live_view.nodes_by_id
+
+        def _live_sibling_max(parent_id: "str | None") -> int:
+            best = -1
+            for node in live_nodes_by_id.values():
+                node_parent = node.get("parent_id") or node.get("parentId")
+                if parent_id is None:
+                    if node_parent:
+                        continue
+                elif node_parent != parent_id:
+                    continue
+                priority = node.get("priority")
+                if isinstance(priority, bool) or not isinstance(priority, (int, float)):
+                    continue
+                best = max(best, int(priority))
+            return best
+
+        # Group planted roots by planted-parent key for the k ordering:
+        # ordered by their own in-file priority, then exported_at, then file
+        # name; k is the rank; priority = M + 1 + k (§4.2.2).
+        root_groups: "dict[Any, list[tuple[dict[str, Any], dict[str, Any]]]]" = {}
+        for item in visible_items:
+            for record in item["visible_records"]:
+                if str(record.get("id")) in item["root_ids"]:
+                    root_groups.setdefault(item["planted_parent_id"], []).append(
+                        (item, record)
+                    )
+
+        priorities: "dict[str, int]" = {}
+        for members in root_groups.values():
+            parent_key = members[0][0]["planted_parent_id"]
+            m = _live_sibling_max(parent_key)
+            ordered = sorted(
+                members,
+                key=lambda pair: (
+                    _numeric_priority(pair[1].get("priority")),
+                    pair[0]["exported_at"],
+                    pair[0]["name"],
+                ),
+            )
+            for k, (item, record) in enumerate(ordered):
+                priorities[str(record.get("id"))] = m + 1 + k
+
+        records: "list[dict[str, Any]]" = []
+        by_id: "dict[str, dict[str, Any]]" = {}
+        visible_ids: "set[str]" = set()
+        ap_index: "dict[str, list[str]]" = {}
+        provenance: "dict[str, dict[str, Any]]" = {}
+
+        for item in visible_items:
+            state = (
+                FILE_STATE_ACTIVE
+                if item["state"] == FILE_STATE_ACTIVE
+                else FILE_STATE_ORPHANED
+            )
+            prov_common = {
+                "archive_file": item["path"],
+                "archive_name": item["archive_name"],
+                "exported_at": item["exported_at"],
+                "archive_root": item["root_ids"][0] if item["root_ids"] else "",
+                "state": state,
+            }
+            for record in item["visible_records"]:
+                record_id = str(record.get("id"))
+                overlay_record = dict(record)
+                overlay_record["name"] = _archive_marked_name(
+                    record.get("name"),
+                    _split_leading_ap_handle,
+                    _insert_leading_name_emojis,
+                )
+                if record_id in item["root_ids"]:
+                    overlay_record["parent_id"] = item["planted_parent_id"]
+                    if "parentId" in overlay_record:
+                        overlay_record["parentId"] = item["planted_parent_id"]
+                    overlay_record["priority"] = priorities.get(record_id, 0)
+                overlay_record[ARCHIVE_RECORD_KEY] = dict(prov_common)
+                records.append(overlay_record)
+                by_id[record_id] = overlay_record
+                visible_ids.add(record_id)
+                provenance[record_id] = dict(prov_common)
+                core = _record_ap_core(record.get("name"))
+                if core is not None:
+                    ap_index.setdefault(core, []).append(record_id)
+
+        entries = self._entries_for(live_view, parsed)
+        return ArchiveOverlay(
+            live_view=live_view,
+            records=tuple(records),
+            by_id=by_id,
+            visible_ids=frozenset(visible_ids),
+            ap_index=ap_index,
+            provenance=provenance,
+            files=entries,
+            store_generation=self._store_generation,
+            planted_chains=_planted_chains(parsed, live_view),
+        )
+
+    def _entries_for(
+        self, live_view: Any, parsed: "list[dict[str, Any]]"
+    ) -> "tuple[ArchiveFileEntry, ...]":
+        """One inventory row per parsed file — active, orphaned, dormant,
+        superseded, skipped and unreadable alike (the §5.12 inventory lists
+        EVERY file, also when no archive is visible and the overlay itself
+        is ``None``).  Deterministic (sorted-path order, G9)."""
+
+        live_nodes = (
+            live_view.nodes_by_id if live_view is not None else {}
+        )
+        entries: "list[ArchiveFileEntry]" = []
+        for item in parsed:
+            state = item["state"] or FILE_STATE_SUPERSEDED
+            root_ap_id = ""
+            root_id = item["root_ids"][0] if item["root_ids"] else None
+            if root_id:
+                document = item.get("document") or {}
+                for record in document.get("nodes") or ():
+                    if str(record.get("id")) == root_id:
+                        core = _record_ap_core(record.get("name"))
+                        root_ap_id = core or ""
+                        break
+            planted_under_name: "str | None" = None
+            planted_parent_id = item.get("planted_parent_id")
+            if planted_parent_id:
+                live_parent = live_nodes.get(planted_parent_id)
+                if isinstance(live_parent, Mapping):
+                    planted_under_name = str(
+                        live_parent.get("name") or live_parent.get("nm") or ""
+                    )
+                else:
+                    # An archived parent: the ORIGINAL record name from the
+                    # file that holds it (the inventory names the record as
+                    # stored — the 📦 mark is a render-side behaviour).
+                    for other in parsed:
+                        for record in other.get("visible_records") or ():
+                            if str(record.get("id")) == planted_parent_id:
+                                planted_under_name = str(
+                                    record.get("name") or record.get("nm") or ""
+                                )
+                                break
+                        if planted_under_name is not None:
+                            break
+            entries.append(
+                ArchiveFileEntry(
+                    name=item["name"],
+                    path=item["path"],
+                    state=state,
+                    reason=item["reason"] or "",
+                    archive_name=item["archive_name"],
+                    exported_at=item["exported_at"],
+                    scope=item["scope"],
+                    root_ids=tuple(item["root_ids"]),
+                    node_count=item["node_count"],
+                    visible_count=len(item.get("visible_ids") or ()),
+                    planted_parent_id=planted_parent_id,
+                    source_parent_id=item["source_parent_id"],
+                    mount_parent_id=item["mount_parent_id"],
+                    root_ap_id=root_ap_id,
+                    planted_under_name=planted_under_name,
+                )
+            )
+        return tuple(entries)
+
+    def inventory(self, live_view: Any = None) -> "list[ArchiveFileEntry]":
+        """Every parsed file as one inventory row, whatever its state (§5.12).
+
+        Unlike :meth:`overlay_for` (which returns ``None`` when nothing is
+        visible, Axiom 14), the inventory always lists the whole folder —
+        dormant, superseded, skipped and unreadable rows included.  With no
+        ``live_view`` the current operation's pinned view is used; without
+        any populated cache this raises (the verb is cache-backed; E13).
+        Never writes.
+        """
+        self.ensure_loaded()
+        if live_view is None:
+            from .coherence.operation_cache import current_operation_cache
+
+            snapshot = current_operation_cache(required=False)
+            live_view = snapshot.view if snapshot is not None else None
+        if live_view is None:
+            raise RuntimeError(
+                "archive inventory: no populated /nodes-export cache is "
+                "available (call system.cache.refresh and retry)."
+            )
+        with self._mutex:
+            parsed = self._classify(live_view)
+            return list(self._entries_for(live_view, parsed))
+
+    def mount_target(self, archive: str) -> "dict[str, Any] | None":
+        """The named file's mount facts (§U3 D5): ``{"name", "path",
+        "document", "scope", "mount_parent_id", "reason"}`` or ``None``
+        when no file of that name is listed.  The document is the store's
+        parsed document — :func:`with_mount_parent` never mutates it."""
+
+        self.ensure_loaded()
+        with self._mutex:
+            for path, parsed in sorted(self._parsed.items()):
+                if parsed["name"] == archive:
+                    return {
+                        "name": parsed["name"],
+                        "path": path,
+                        "document": parsed["document"],
+                        "scope": parsed["scope"],
+                        "mount_parent_id": parsed["mount_parent_id"],
+                        "reason": parsed.get("reason") or "",
+                    }
+            return None
+
+    def holding_archive_of(self, record_id: str) -> "tuple[str, str] | None":
+        """``(path, name)`` of the archive whose VISIBLE record is
+        ``record_id`` (for the current live generation), or None — the
+        mount verb's inside-self and cycle checks' first question."""
+
+        try:
+            self.ensure_loaded()
+            from .coherence.operation_cache import current_operation_cache
+
+            snapshot = current_operation_cache(required=False)
+            live_view = snapshot.view if snapshot is not None else None
+            if live_view is None:
+                return None
+            with self._mutex:
+                for item in self._classify(live_view):
+                    if item["state"] not in (FILE_STATE_ACTIVE, FILE_STATE_ORPHANED):
+                        continue
+                    for record in item.get("visible_records") or ():
+                        if str(record.get("id")) == str(record_id):
+                            return (item["path"], item["name"])
+            return None
+        except Exception:  # noqa: BLE001 - the check never raises
+            return None
+
+    def mount_cycle_check(
+        self, archive_path: str, parent_id: str
+    ) -> "str | None":
+        """The §5.11 cycle check: would planting ``archive_path``'s root
+        under ``parent_id`` close a cycle?
+
+        Walks the merged live+archived ancestor chain OF ``parent_id``
+        (the same edges :func:`_planted_chains` walks); when the chain
+        reaches a visible record of ``archive_path`` itself, the mount
+        would make the archive an ancestor of its own root.  Returns the
+        NAME of the first other archive on that chain (the §5.11
+        ``{other}``), or ``None``.  Never raises; never writes.
+        """
+
+        try:
+            self.ensure_loaded()
+            from .coherence.operation_cache import current_operation_cache
+
+            snapshot = current_operation_cache(required=False)
+            live_view = snapshot.view if snapshot is not None else None
+            if live_view is None:
+                return None
+            with self._mutex:
+                parsed = self._classify(live_view)
+            live_nodes = live_view.nodes_by_id
+            archived_by_id: "dict[str, dict[str, Any]]" = {}
+            root_planting: "dict[str, str | None]" = {}
+            holder_of: "dict[str, tuple[str, str]]" = {}  # id -> (path, name)
+            for item in parsed:
+                if item["state"] in (FILE_STATE_ACTIVE, FILE_STATE_ORPHANED):
+                    for record in item.get("visible_records") or ():
+                        rid = str(record.get("id"))
+                        archived_by_id[rid] = record
+                        holder_of[rid] = (item["path"], item["name"])
+                    for rid in item["root_ids"]:
+                        root_planting[str(rid)] = item.get("planted_parent_id")
+            node: "str | None" = str(parent_id)
+            visited: "set[str]" = set()
+            first_other: "str | None" = None
+            hops = 0
+            while node and node not in visited and hops < 100000:
+                visited.add(node)
+                holder = holder_of.get(node)
+                if holder is not None:
+                    if holder[0] == archive_path:
+                        return first_other or holder[1]
+                    if first_other is None:
+                        first_other = holder[1]
+                live = live_nodes.get(node)
+                if isinstance(live, Mapping):
+                    parent = live.get("parent_id") or live.get("parentId")
+                elif node in root_planting:
+                    parent = root_planting[node]
+                else:
+                    record = archived_by_id.get(node)
+                    if record is None:
+                        break
+                    parent = record.get("parent_id") or record.get("parentId")
+                node = str(parent) if parent else None
+                hops += 1
+            return None
+        except Exception:  # noqa: BLE001 - the check never raises
+            return None
+
+    def write_mount_parent(self, archive: str, parent_id: "str | None") -> dict:
+        """The ONE sanctioned archive-file edit (§5.11, §U3 D5).
+
+        ``with_mount_parent`` composes the new document (``nodes`` untouched,
+        so ``nodes_sha256`` stays valid) → ``serialize_archive`` → the new
+        bytes must re-parse to the new document → ``atomic_write_text`` →
+        read back and demand byte identity.  Returns ``{"path",
+        "mount_parent_id", "previous_mount_parent_id", "verified"}``;
+        ``verified`` is False when the read-back differed (the file is left
+        in place, UNVERIFIED — §5.11).  Raises ``FileNotFoundError`` /
+        ``OSError`` from the store's own parsed state when the file is gone
+        or unwritable; refuses nothing else (the caller owns the §5.11
+        refusal checks).  The next ``ensure_loaded`` sees the changed
+        ``(mtime_ns, size)`` and re-parses.
+        """
+        self.ensure_loaded()
+        with self._mutex:
+            target = None
+            for path, parsed in sorted(self._parsed.items()):
+                if parsed["name"] == archive:
+                    target = parsed
+                    break
+            if target is None:
+                raise FileNotFoundError(f"no archive file named {archive!r}")
+            document = target["document"]
+            if document is None:
+                raise ValueError(f"archive file {archive!r} is unreadable")
+            path = target["path"]
+            previous = target["mount_parent_id"]
+        new_document = with_mount_parent(document, parent_id)
+        serialized = serialize_archive(new_document)
+        reparsed = parse_archive(serialized.encode("utf-8"), nest=_archive_nest)
+        if reparsed != new_document:
+            return {
+                "path": path,
+                "mount_parent_id": parent_id,
+                "previous_mount_parent_id": previous,
+                "verified": False,
+            }
+        atomic_write_text(path, serialized)
+        with open(path, "rb") as handle:
+            read_back = handle.read()
+        return {
+            "path": path,
+            "mount_parent_id": parent_id,
+            "previous_mount_parent_id": previous,
+            "verified": read_back == serialized.encode("utf-8"),
+        }
+
+    # -- lookups -------------------------------------------------------------
+
+    def all_ap_cores(self) -> "dict[str, str]":
+        """Every AP core any readable archive file carries → its file path.
+
+        Read once per allocation, before the lock (§4.9); whatever the
+        files' states (dormant, skipped, superseded included); an
+        ``unreadable`` file contributes nothing (E42).
+        """
+        self.ensure_loaded()
+        with self._mutex:
+            return dict(self._all_cores)
+
+    def lookup(
+        self,
+        supplied: str,
+        kind: str,
+        *,
+        live_view: Any = None,
+        exact_only: bool = False,
+    ) -> Any:
+        """Would an active (or orphaned) archive answer this handle?
+
+        ``kind="uuid"``: an exact visible id, or — unless ``exact_only`` —
+        a UNIQUE visible id with the supplied (hyphen-normalized, ≥ 8 hex)
+        prefix.  ``kind="ap"``: the core in the visible ``ap_index``.
+        Returns the matched uuid (or uuid list for ``ap``), else None.
+        Never raises.
+        """
+        try:
+            overlay = self.overlay_for(live_view) if live_view is not None else None
+            if overlay is None:
+                return None
+            if kind == "uuid":
+                return _lookup_uuid(overlay, supplied, exact_only=exact_only)
+            if kind == "ap":
+                return _lookup_ap(overlay, supplied)
+            return None
+        except Exception:  # noqa: BLE001 - the gate's lookup never raises
+            return None
+
+    def miss_lookup(
+        self,
+        supplied: str,
+        kind: str,
+        *,
+        live_view: Any = None,
+        exact_only: bool = False,
+    ) -> "tuple[str | None, dict[str, Any] | None]":
+        """``(uuid, provenance)`` for the archive-aware miss texts (§4.7.2).
+
+        The same match the gate's :meth:`lookup` makes, plus the matched
+        record's provenance (which file, which export date) so the §5.2–§5.3
+        texts can name them.  ``(None, None)`` on any miss.  Never raises.
+        """
+        try:
+            overlay = self.overlay_for(live_view) if live_view is not None else None
+            if overlay is None:
+                return None, None
+            if kind == "uuid":
+                uuid_hit = _lookup_uuid(overlay, supplied, exact_only=exact_only)
+            elif kind == "ap":
+                uuids = _lookup_ap(overlay, supplied) or []
+                uuid_hit = uuids[0] if uuids else None
+            else:
+                return None, None
+            if not uuid_hit:
+                return None, None
+            provenance = overlay.provenance.get(uuid_hit)
+            return uuid_hit, dict(provenance) if isinstance(provenance, dict) else None
+        except Exception:  # noqa: BLE001 - the miss text never raises
+            return None, None
+
+    def ap_hint_facts(self, live_view: Any = None) -> "dict[str, Any]":
+        """The §5.4 hint facts for one live view: ``{"state", "folder", "n"}``.
+
+        ``state="A"`` when no folder is configured; ``"C"`` when the folder
+        could not be resolved/listed or at least one file is ``unreadable``;
+        else ``"B"`` with ``n`` = the number of files in state ``active`` or
+        ``orphaned`` for this live generation, reusing the one overlay accessor.
+        Never raises.
+        """
+        try:
+            self.ensure_loaded()
+            with self._mutex:
+                folder = self._folder_value
+                if not folder:
+                    return {"state": "A", "folder": "", "n": 0}
+                if self._folder_reason is not None or any(
+                    parsed.get("state") == FILE_STATE_UNREADABLE
+                    for parsed in self._parsed.values()
+                ):
+                    return {"state": "C", "folder": folder, "n": 0}
+            # The accessor owns the same non-reentrant mutex. Keep A/C's
+            # early returns above; ask it outside the folder-state lock.
+            overlay = self.overlay_for(live_view) if live_view is not None else None
+            n = sum(
+                1
+                for entry in (overlay.files if overlay is not None else ())
+                if entry.state in (FILE_STATE_ACTIVE, FILE_STATE_ORPHANED)
+            )
+            return {"state": "B", "folder": folder, "n": n}
+        except Exception:  # noqa: BLE001 - the hint never raises
+            return {"state": "A", "folder": "", "n": 0}
+
+    def verbatim_subtree_records(
+        self,
+        archive_file: str,
+        uuid: str,
+        *,
+        live_view: Any = None,
+    ) -> "list[dict[str, Any]] | None":
+        """The visible records of ONE archive file under ``uuid``, verbatim.
+
+        The derivative copy's source (Axiom 6, §U2): the parsed ORIGINAL
+        records (original names, parents and priorities — no 📦 mark, no
+        ``_nexus_archive`` marker) for the subtree rooted at ``uuid``,
+        restricted to the records VISIBLE for the current live generation
+        (live wins per subtree, shadowing included), in the file's own
+        preorder emission order.  Returns owned shallow copies — the store's
+        parsed records are never handed out.  ``None`` when the file is
+        unknown, not visible for this generation, or ``uuid`` is not one of
+        its visible records.  Never raises.  (The one sanctioned copy that
+        READS archived content; it writes nothing.)
+        """
+        try:
+            self.ensure_loaded()
+            if live_view is None:
+                from .coherence.operation_cache import current_operation_cache
+
+                snapshot = current_operation_cache(required=False)
+                live_view = snapshot.view if snapshot is not None else None
+            if live_view is None:
+                return None
+            classified = {item["path"]: item for item in self._classify(live_view)}
+            item = classified.get(archive_file)
+            if item is None or not item.get("visible_records"):
+                return None
+            records = list(item["visible_records"])
+            by_id = {str(record.get("id")): record for record in records}
+            root = by_id.get(str(uuid))
+            if root is None:
+                return None
+            children: "dict[str, list[dict[str, Any]]]" = {}
+            for record in records:
+                parent = record.get("parent_id") or record.get("parentId")
+                children.setdefault(str(parent) if parent else "", []).append(record)
+            # Preorder DFS from the root; children in the file's own order —
+            # the file's emission IS preorder, so this reproduces it exactly.
+            subtree: "list[dict[str, Any]]" = []
+            stack = [root]
+            while stack:
+                record = stack.pop()
+                subtree.append(dict(record))
+                kids = children.get(str(record.get("id")), [])
+                for kid in reversed(kids):
+                    stack.append(kid)
+            return subtree
+        except Exception:  # noqa: BLE001 - the copy source never raises
+            return None
+
+
+def _numeric_priority(value: Any) -> "int | float":
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return value
+
+
+def _visible_records_of(
+    item: "dict[str, Any]", claimed: "set[str]"
+) -> "tuple[list[str], list[dict[str, Any]]]":
+    """The records of one candidate file visible under ``claimed`` (§4.2.1).
+
+    A record is visible iff its own id and the id of every in-file ancestor
+    (walking ``parent_id``/``parentId`` within the file up to its root) are
+    not in ``claimed``.  A record whose in-file parent is invisible is
+    invisible.
+    """
+    document = item["document"]
+    nodes = document["nodes"]
+    in_file_ids = {str(record.get("id")) for record in nodes}
+    in_file_parent = {
+        str(record.get("id")): (record.get("parent_id") or record.get("parentId"))
+        for record in nodes
+    }
+    verdicts: "dict[str, bool]" = {}
+
+    def _visible(record_id: str) -> bool:
+        cached = verdicts.get(record_id)
+        if cached is not None:
+            return cached
+        verdicts[record_id] = False  # cycle guard
+        parent = in_file_parent.get(record_id)
+        chain_visible = True
+        if parent and str(parent) in in_file_ids:
+            chain_visible = _visible(str(parent))
+        result = bool(chain_visible) and record_id not in claimed
+        verdicts[record_id] = result
+        return result
+
+    visible_records = [record for record in nodes if _visible(str(record.get("id")))]
+    return [str(record.get("id")) for record in visible_records], visible_records
+
+
+def _planted_chains(
+    parsed: "list[dict[str, Any]]", live_view: Any
+) -> "dict[str, frozenset]":
+    """Per visible archive: its planted-parent chain (§5.5, E16).
+
+    The chain of one archive is the set containing its planted parent and
+    EVERY ancestor of that parent in the merged live+archived universe: a
+    live node's parent is its live parent; an archived record's parent is
+    its in-file parent, except a file's root, whose parent in the merged
+    universe is that file's own planted parent (the overlay re-parents
+    roots).  The §5.5 footer counts an archive when one of the operation's
+    recorded scope roots is in this chain.  Precomputed once per overlay.
+    """
+
+    live_nodes = live_view.nodes_by_id if live_view is not None else {}
+    archived_by_id: "dict[str, dict[str, Any]]" = {}
+    root_planting: "dict[str, str | None]" = {}
+    for item in parsed:
+        if item["state"] in (FILE_STATE_ACTIVE, FILE_STATE_ORPHANED):
+            for record in item.get("visible_records") or ():
+                archived_by_id[str(record.get("id"))] = record
+            for rid in item["root_ids"]:
+                root_planting[str(rid)] = item.get("planted_parent_id")
+    chains: "dict[str, frozenset]" = {}
+    for item in parsed:
+        if item["state"] not in (FILE_STATE_ACTIVE, FILE_STATE_ORPHANED):
+            continue
+        chain: "set[str]" = set()
+        node: "str | None" = item.get("planted_parent_id")
+        hops = 0
+        while node and hops < 100000:
+            if node in chain:
+                break  # a planting cycle is broken at planting; belt only
+            chain.add(node)
+            live = live_nodes.get(node)
+            if isinstance(live, Mapping):
+                parent = live.get("parent_id") or live.get("parentId")
+            elif node in root_planting:
+                parent = root_planting[node]
+            else:
+                record = archived_by_id.get(node)
+                if record is None:
+                    break
+                parent = record.get("parent_id") or record.get("parentId")
+            node = str(parent) if parent else None
+            hops += 1
+        if chain:
+            chains[item["path"]] = frozenset(chain)
+    return chains
+
+
+def _find_cycle_files(edges: "dict[str, str]") -> "list[str]":
+    """Every file on any planted-parent cycle (E5), deterministically."""
+    cyclic: "set[str]" = set()
+    for start in sorted(edges):
+        path: "list[str]" = []
+        seen: "set[str]" = set()
+        node: "str | None" = start
+        while node is not None and node in edges:
+            if node in seen:
+                cycle_start = path.index(node)
+                cyclic.update(path[cycle_start:])
+                break
+            seen.add(node)
+            path.append(node)
+            node = edges[node]
+    return sorted(cyclic)
+
+
+def _cycle_members(edges: "dict[str, str]", member: str) -> "list[str]":
+    """The files sharing a cycle with ``member`` (for the reason string)."""
+    cyclic: "set[str]" = set()
+    for start in sorted(edges):
+        path: "list[str]" = []
+        seen: "set[str]" = set()
+        node: "str | None" = start
+        while node is not None and node in edges:
+            if node in seen:
+                cycle_start = path.index(node)
+                cycle = path[cycle_start:]
+                if member in cycle:
+                    cyclic.update(cycle)
+                break
+            seen.add(node)
+            path.append(node)
+            node = edges[node]
+    return sorted(cyclic)
+
+
+def _archive_marked_name(
+    raw_name: Any,
+    split_leading_ap_handle: Callable[[str], "dict[str, Any]"],
+    insert_leading_name_emojis: Callable[..., "tuple[str, str, str]"],
+) -> str:
+    """The 📦-marked overlay name (§4.2.2): 📦 inserted into the ordinary
+    title through the ONE existing emoji policy, after any AP handle."""
+
+    name = (
+        raw_name
+        if isinstance(raw_name, str)
+        else ("" if raw_name is None else str(raw_name))
+    )
+    parts = split_leading_ap_handle(name)
+    token = parts.get("token") or ""
+    decoration = parts.get("decoration") or ""
+    title = parts.get("title") or ""
+    new_title, _run, _added = insert_leading_name_emojis(
+        title, "📦", position="prepend"
+    )
+    if token:
+        return f"{decoration}{token} {new_title}"
+    return new_title
+
+
+def _lookup_uuid(
+    overlay: ArchiveOverlay, supplied: str, *, exact_only: bool
+) -> "str | None":
+    """An exact visible id, or a unique visible id with the supplied prefix."""
+    if not isinstance(supplied, str) or not supplied:
+        return None
+    needle = supplied.replace("-", "").lower()
+    if len(needle) < 8:
+        return None
+    exact: "str | None" = None
+    prefix_matches: "list[str]" = []
+    for visible_id in sorted(overlay.visible_ids):
+        candidate = visible_id.replace("-", "").lower()
+        if candidate == needle:
+            exact = visible_id
+            break
+        if not exact_only and candidate.startswith(needle):
+            prefix_matches.append(visible_id)
+    if exact is not None:
+        return exact
+    if exact_only:
+        return None
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
+    return None
+
+
+def _lookup_ap(overlay: ArchiveOverlay, supplied: str) -> "list[str] | None":
+    """The visible AP core, or None."""
+    if not isinstance(supplied, str) or not supplied:
+        return None
+    from .client.api_client_nexus import _normalize_ap_id_input
+
+    core = _normalize_ap_id_input(supplied)
+    if core is None:
+        return None
+    uuids = overlay.ap_index.get(core)
+    if uuids:
+        return sorted(uuids)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# The one production accessor + the test seam (§4.1.1)
+# ---------------------------------------------------------------------------
+
+_ARCHIVE_STORE: "ArchiveStore | None" = None
+_ARCHIVE_STORE_LOCK = threading.Lock()
+
+
+def get_archive_store() -> ArchiveStore:
+    """The ONE production ArchiveStore (created on first use)."""
+    global _ARCHIVE_STORE
+    with _ARCHIVE_STORE_LOCK:
+        if _ARCHIVE_STORE is None:
+            _ARCHIVE_STORE = ArchiveStore()
+        return _ARCHIVE_STORE
+
+
+def set_archive_store_for_tests(store: "ArchiveStore | None") -> None:
+    """Install (or clear) a test store; restore with ``None`` (the fixture)."""
+
+    global _ARCHIVE_STORE
+    with _ARCHIVE_STORE_LOCK:
+        _ARCHIVE_STORE = store

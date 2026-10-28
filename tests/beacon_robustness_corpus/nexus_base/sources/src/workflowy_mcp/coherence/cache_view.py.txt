@@ -1,0 +1,453 @@
+"""CacheView and copy-on-write publication scaffold (S01 §10, Axiom 5).
+
+A process's adopted cache is published as an IMMUTABLE view: base adoption
+and journal replay build a NEW view privately and atomically swap the
+published reference under the process-local publisher mutex.  Node dicts
+belonging to a published view are never mutated in place, so a long-running
+read captures one view reference and sees exactly one generation end-to-end.
+
+The cache stays plain dicts/JSON — only this small published-view container
+is new.  There is deliberately no pervasive runtime node wrapper: ownership
+discipline plus later permanent static fences enforce immutability.
+
+Lock doctrine (fixed order, §5.2)::
+
+    cross-process coherence mutex
+        → process-local CacheView publisher mutex
+
+The reverse order is forbidden.  The publisher mutex is a short
+process-local lock covering only reference swaps and view construction —
+never network I/O.
+"""
+
+from __future__ import annotations
+
+import copy
+import os
+import threading
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from .errors import CacheViewError
+
+
+# @beacon[
+#   id=coherence@cache-view,
+#   slice_labels=ra-workflowy-cache,mci-cache-codec,
+#   kind=ast,
+#   comment=Immutable CacheView: explicit borrowed deep-ownership or transferred zero-copy construction with one validated ID index; unchanged predecessor nodes are shared read-only. CF-A01 freezes new descendants and preserves already-frozen shared nodes and index/list identity; copy hooks yield private plain containers. Publication remains identity-CAS under the existing publisher mutex.,
+# ]
+@dataclass(frozen=True)
+class CacheView:
+    """One immutable published cache generation.
+
+    ``nodes_export`` and ``nodes_by_id`` reference the SAME owned node
+    objects within one view; unchanged predecessor nodes may be shared
+    read-only. Borrowed caller input is detached; transferred input surrenders
+    mutation authority. ``account_scope_id`` is optional in S01 scaffold
+    use; replay/adoption (S03) binds it so journal application can reject
+    cross-account records (audit amendment A6).
+    """
+
+    epoch_number: int
+    epoch_id: str
+    adopted_sequence: int
+    nodes_export: dict[str, Any]
+    nodes_by_id: dict[str, dict[str, Any]]
+    account_scope_id: str | None = None
+
+    def __post_init__(self) -> None:
+        # CF-A01 test-mode deep-freeze (Waypoint A Stage2-15): when enabled
+        # (env var or set_test_deep_freeze — test sessions only, NEVER
+        # production), recursively wrap the payload in read-only proxies so
+        # an alias mutation fails loudly at the mutation site.  A single
+        # memo preserves node identity across nodes_export/nodes_by_id.
+        if not _TEST_DEEP_FREEZE:
+            return
+        memo: dict[int, Any] = {}
+        object.__setattr__(
+            self, "nodes_export", _deep_freeze(self.nodes_export, memo)
+        )
+        object.__setattr__(
+            self, "nodes_by_id", _deep_freeze(self.nodes_by_id, memo)
+        )
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        epoch_number: int,
+        epoch_id: str,
+        adopted_sequence: int,
+        nodes_export: Mapping[str, Any],
+        account_scope_id: str | None = None,
+        ownership: Literal["borrowed", "transferred"] = "borrowed",
+    ) -> CacheView:
+        """Validate explicit ownership and build exactly one ID index.
+
+        Borrowed input is deeply detached, including nested metadata.
+        Transferred ordinary outer dict/list containers are consumed without
+        copying; unchanged immutable predecessor nodes are never written.
+        Invalid transfers raise, never fall back to a defensive copy.
+        """
+
+        if isinstance(epoch_number, bool) or not isinstance(epoch_number, int) or epoch_number < 0:
+            raise CacheViewError("CacheView: epoch_number must be a non-negative integer")
+        if not isinstance(epoch_id, str) or not epoch_id:
+            raise CacheViewError("CacheView: epoch_id must be a nonempty string")
+        if (
+            isinstance(adopted_sequence, bool)
+            or not isinstance(adopted_sequence, int)
+            or adopted_sequence < 0
+        ):
+            raise CacheViewError("CacheView: adopted_sequence must be a non-negative integer")
+        if account_scope_id is not None:
+            from .paths import validate_account_scope_id
+
+            validate_account_scope_id(account_scope_id)
+        if not isinstance(nodes_export, Mapping):
+            raise CacheViewError("CacheView: nodes_export must be a mapping")
+        nodes = nodes_export.get("nodes")
+        if not isinstance(nodes, list):
+            raise CacheViewError("CacheView: nodes_export is missing its 'nodes' list")
+
+        if ownership not in ("borrowed", "transferred"):
+            raise CacheViewError("CacheView: ownership must be borrowed or transferred")
+        if ownership == "transferred":
+            if type(nodes_export) is not dict or type(nodes) is not list:
+                raise CacheViewError("CacheView: transferred payload requires ordinary dict/list containers")
+            owned_export = nodes_export
+        else:
+            owned_export = copy.deepcopy(dict(nodes_export))
+        owned_nodes = owned_export["nodes"]
+        index: dict[str, dict[str, Any]] = {}
+        for node in owned_nodes:
+            if not isinstance(node, dict):
+                raise CacheViewError("CacheView: node entries must be objects")
+            node_id = node.get("id")
+            if node_id is None or not str(node_id).strip():
+                raise CacheViewError("CacheView: node with missing/blank id")
+            normalized_id = str(node_id)
+            if not isinstance(node_id, str):
+                node["id"] = normalized_id
+            node_id = normalized_id
+            if node_id in index:
+                raise CacheViewError(f"CacheView: duplicate node id {node_id!r}")
+            index[node_id] = node
+
+        return cls(
+            epoch_number=epoch_number,
+            epoch_id=epoch_id,
+            adopted_sequence=adopted_sequence,
+            nodes_export=owned_export,
+            nodes_by_id=index,
+            account_scope_id=account_scope_id,
+        )
+
+
+# @beacon[
+#   id=coherence@prepare-cow-payload,
+#   slice_labels=mci-cache-codec,
+#   kind=ast,
+#   comment=Detach only added/replaced nodes and metadata from a transform; retain exact immutable predecessor fragments and hand private outer containers to transferred construction.,
+# ]
+def prepare_cow_payload(previous: CacheView, candidate: Mapping[str, Any]) -> dict[str, Any]:
+    """Prepare a transferred candidate without traversing unchanged nodes.
+
+    Identity against the explicitly supplied immutable predecessor selects
+    unchanged structure, never guesses ownership of other borrowed objects.
+    Invalid shapes are left for CacheView.build's existing validation.
+    """
+    result = {}
+    for key, value in candidate.items():
+        if key == "nodes" and isinstance(value, list):
+            prepared = []
+            for node in value:
+                node_id = node.get("id") if isinstance(node, Mapping) else None
+                old = previous.nodes_by_id.get(str(node_id)) if node_id is not None else None
+                prepared.append(node if old is node else copy.deepcopy(node))
+            result[key] = prepared
+        else:
+            result[key] = (value if key in previous.nodes_export and
+                           value is previous.nodes_export[key] else copy.deepcopy(value))
+    return result
+
+
+# @beacon[
+#   id=auto-beacon@CacheViewPublisher-xesb,
+#   role=CacheViewPublisher,
+#   slice_labels=mci-cache-codec,
+#   kind=ast,
+# ]
+class CacheViewPublisher:
+    """Process-local atomic publication holder for the adopted CacheView.
+
+    The swap occurs under ONE short process-local mutex.  There is no
+    in-place mutator: transformations clone only the changed structure
+    privately and publish a new view.
+    """
+
+    def __init__(self, initial: CacheView, *, transition_policy: Any = None) -> None:
+        if not isinstance(initial, CacheView):
+            raise CacheViewError("CacheViewPublisher requires an initial CacheView")
+        self._mutex = threading.Lock()
+        self._view = initial
+        # S03-CR-02: optional sparse transition-effect policy (a
+        # TransitionEffectPolicy from coherence.transition_effects, or None).
+        # When present, epoch-reload/recovery publication rebases the offer
+        # through the ONE sparse merge authority and commits the surviving
+        # effects atomically with the swap (coherence.adoption._publish_epoch_view).
+        # Plain attribute (never forbidden); coherence-internal/test publishers
+        # leave it None and keep the sealed no-overlay behavior.
+        self.transition_policy = transition_policy
+
+    def capture(self) -> CacheView:
+        """Return one stable view reference (safe to retain across swaps)."""
+
+        with self._mutex:
+            return self._view
+
+    def publish(
+        self, new_view: CacheView, *, expected_current: CacheView | None = None
+    ) -> CacheView:
+        """Atomically swap the published view.
+
+        Stale compare-and-swap publication (``expected_current`` supplied
+        but no longer current) is rejected.
+        """
+
+        if not isinstance(new_view, CacheView):
+            raise CacheViewError("publish requires a CacheView")
+        with self._mutex:
+            if expected_current is not None and self._view is not expected_current:
+                raise CacheViewError(
+                    "stale publication: expected current view no longer current"
+                )
+            self._view = new_view
+            return new_view
+
+    def build_and_publish(
+        self,
+        transform: Callable[[CacheView], CacheView],
+        *,
+        expected_current: CacheView | None = None,
+    ) -> CacheView:
+        """Capture, transform privately, and atomically publish the result.
+
+        The transform runs OUTSIDE the publisher mutex (audit amendment
+        A5.2): the mutex only ever covers reference reads and the final
+        identity compare-and-swap, so a slow transform never blocks
+        concurrent captures.  The transform receives the captured immutable
+        view and MUST return a NEW CacheView (never a mutated alias).
+        """
+
+        with self._mutex:
+            current = self._view
+            if expected_current is not None and current is not expected_current:
+                raise CacheViewError(
+                    "stale publication: expected current view no longer current"
+                )
+        new_view = transform(current)
+        if not isinstance(new_view, CacheView):
+            raise CacheViewError("transform must return a CacheView")
+        if new_view is current:
+            raise CacheViewError("transform must not return its input view")
+        with self._mutex:
+            if self._view is not current:
+                raise CacheViewError(
+                    "stale publication: view changed while the new view was building"
+                )
+            self._view = new_view
+            return new_view
+
+    def publish_with_commit(
+        self,
+        new_view: CacheView,
+        *,
+        expected_current: CacheView,
+        commit: Callable[[], None] | None = None,
+    ) -> CacheView:
+        """Atomically swap AND run one commit callback under the same mutex (S03).
+
+        The S03 transition COW bridge couples each view publication to legacy
+        dirty-ID bookkeeping: a reader must never observe the new view with
+        half-applied bookkeeping (or vice versa), so the swap and the commit
+        are one critical section.  ``commit`` must be short, local, and free
+        of I/O — it runs while the publisher mutex is held.
+        """
+
+        if not isinstance(new_view, CacheView):
+            raise CacheViewError("publish requires a CacheView")
+        with self._mutex:
+            if self._view is not expected_current:
+                raise CacheViewError(
+                    "stale publication: expected current view no longer current"
+                )
+            self._view = new_view
+            if commit is not None:
+                commit()
+            return new_view
+
+    def synchronized(self, fn: Callable[[CacheView], Any]) -> Any:
+        """Run one short process-local critical section under the publisher mutex.
+
+        ``fn`` receives the CURRENT view (already under the mutex — never
+        call ``capture()`` from inside ``fn``; the mutex is not
+        re-entrant).  Exists for bookkeeping that must stay atomic with
+        view publication (e.g. the legacy dirty-ID set, S03 §6.2).  Never
+        perform I/O or long-running work inside ``fn``; the fixed lock
+        order (coherence mutex → publisher mutex) still applies, so a
+        coherence-mutex holder may call this, never the reverse.
+        """
+
+        with self._mutex:
+            return fn(self._view)
+
+
+# ---------------------------------------------------------------------------
+# CF-A01 test-mode deep freeze (Waypoint A Stage2-15)
+# ---------------------------------------------------------------------------
+#
+# Opt-in recursive read-only proxies for published CacheView payloads during
+# test runs.  The permanent AST alias scanner covers STATIC alias shapes;
+# cross-function aliasing (an alias passed across a call boundary and mutated
+# there) is structurally beyond sound static analysis in Python — this
+# runtime detector closes that residual by making the mutation itself raise
+# at the exact mutation site under the full suite.  PRODUCTION SHAPE IS
+# UNCHANGED: the flag is off unless WORKFLOWY_MCP_TEST_DEEP_FREEZE=1 (or an
+# explicit set_test_deep_freeze(True) call), and payloads stay plain
+# JSON-shaped dicts/lists.
+
+_DEEP_FREEZE_ENV_VAR = "WORKFLOWY_MCP_TEST_DEEP_FREEZE"
+_DEEP_FREEZE_MESSAGE = (
+    "CF-A01 test deep-freeze: a published CacheView payload is immutable — "
+    "alias mutation detected (clone privately and publish a NEW CacheView "
+    "through the COW authority instead)"
+)
+
+_TEST_DEEP_FREEZE = os.environ.get(_DEEP_FREEZE_ENV_VAR) == "1"
+
+
+# @beacon[
+#   id=auto-beacon@set_test_deep_freeze-s9c4,
+#   role=set_test_deep_freeze,
+#   slice_labels=mci-harness-freeze,
+#   kind=ast,
+# ]
+def set_test_deep_freeze(enabled: bool) -> None:
+    """Explicit runtime toggle for the test session (conftest/autouse).
+
+    The environment variable sets the import-time default AND propagates to
+    subprocess actors (harness launchers merge os.environ); this setter is
+    authoritative for the current process thereafter.
+    """
+
+    global _TEST_DEEP_FREEZE
+    _TEST_DEEP_FREEZE = bool(enabled)
+
+
+def is_test_deep_freeze_active() -> bool:
+    """Whether the CF-A01 deep-freeze is currently active in this process."""
+
+    return _TEST_DEEP_FREEZE
+
+
+class _FrozenDict(dict):
+    """A dict that reads exactly like a dict but refuses every mutation.
+
+    A SUBCLASS (never a Mapping wrapper): isinstance(x, dict) stays True,
+    JSON serialization, equality, iteration, and repr are unchanged, and
+    production shape is therefore untouched when the flag is off.
+    ``copy()``/``copy.copy``/``copy.deepcopy`` deliberately yield PLAIN
+    MUTABLE containers so the COW transform/private-clone flows are
+    unaffected by the freeze.
+    """
+
+    __slots__ = ()
+
+    def _immutable(self, *args: Any, **kwargs: Any) -> Any:
+        raise TypeError(_DEEP_FREEZE_MESSAGE)
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+    def copy(self) -> dict:
+        return dict(self)
+
+    def __copy__(self) -> dict:
+        return dict(self)
+
+    def __deepcopy__(self, memo: dict) -> dict:
+        return copy.deepcopy(dict(self), memo)
+
+
+class _FrozenList(list):
+    """The list twin of _FrozenDict (same contract)."""
+
+    __slots__ = ()
+
+    def _immutable(self, *args: Any, **kwargs: Any) -> Any:
+        raise TypeError(_DEEP_FREEZE_MESSAGE)
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    append = _immutable
+    extend = _immutable
+    insert = _immutable
+    remove = _immutable
+    pop = _immutable
+    clear = _immutable
+    sort = _immutable
+    reverse = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+
+    def copy(self) -> list:
+        return list(self)
+
+    def __copy__(self) -> list:
+        return list(self)
+
+    def __deepcopy__(self, memo: dict) -> list:
+        return copy.deepcopy(list(self), memo)
+
+
+def _deep_freeze(value: Any, memo: dict[int, Any]) -> Any:
+    """Recursively wrap every dict/list in read-only proxies (memo-shared).
+
+    The memo maps id(source container) → its proxy, so aliasing in the
+    source (nodes_export['nodes'][i] IS nodes_by_id[id]) is preserved as
+    aliasing in the frozen output.  Already-frozen values pass through
+    unchanged (idempotent re-freeze, e.g. dataclasses.replace).
+    """
+
+    if isinstance(value, (_FrozenDict, _FrozenList)):
+        return value
+    if isinstance(value, dict):
+        obj_id = id(value)
+        cached = memo.get(obj_id)
+        if cached is not None:
+            return cached
+        frozen = _FrozenDict()
+        memo[obj_id] = frozen
+        for key, item in value.items():
+            dict.__setitem__(frozen, key, _deep_freeze(item, memo))
+        return frozen
+    if isinstance(value, list):
+        obj_id = id(value)
+        cached = memo.get(obj_id)
+        if cached is not None:
+            return cached
+        frozen_list = _FrozenList()
+        memo[obj_id] = frozen_list
+        for item in value:
+            list.append(frozen_list, _deep_freeze(item, memo))
+        return frozen_list
+    return value

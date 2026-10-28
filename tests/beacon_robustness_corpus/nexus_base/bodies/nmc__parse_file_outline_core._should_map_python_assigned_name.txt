@@ -1,0 +1,11 @@
+    def _should_map_python_assigned_name(name: str, *, qual_prefix: Optional[str]) -> bool:
+        """Return True when an assigned Name should appear in the Python outline."""
+        if not isinstance(name, str) or not name:
+            return False
+        if name.isupper():
+            return True
+        # Map module-level dunder globals like __version__ / __all__ so
+        # package __init__.py and similar files remain structurally visible.
+        if qual_prefix is None and len(name) > 4 and name.startswith("__") and name.endswith("__"):
+            return True
+        return False

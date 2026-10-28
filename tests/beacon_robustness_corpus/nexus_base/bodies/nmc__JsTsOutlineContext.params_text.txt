@@ -1,0 +1,6 @@
+    def params_text(self, fn_node: Any) -> str:
+        """Return a function-like node's parameter list as ``(a, b, ...)``.
+
+        Wrapper around the Phase B.1 module-level ``_js_params_text``.
+        """
+        return _js_params_text(fn_node, self.source_bytes)

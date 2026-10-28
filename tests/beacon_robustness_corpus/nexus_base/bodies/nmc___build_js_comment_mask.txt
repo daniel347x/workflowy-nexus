@@ -1,0 +1,69 @@
+def _build_js_comment_mask(src_lines: list[str]) -> tuple[list[bool], list[str]]:
+    """Build a per-line comment mask + cleaned-text array for JS/TS source.
+
+    Returns ``(comment_mask, cleaned)`` where ``comment_mask[i]`` is True iff
+    line ``i+1`` is part of a JS/TS comment region (either ``//`` line
+    comments or interior lines of a ``/* ... */`` block), and ``cleaned[i]``
+    is the comment body with the language sugar stripped (for ``//`` lines:
+    everything after ``//`` left-stripped; for block-comment interiors: the
+    line content with any leading ``*`` removed and the closing ``*/``
+    trimmed when present on the same line).
+
+    Module-level shared helper. Used by:
+      - parse_js_ts_outline (Workflowy CONTEXT COMMENTS slurp)
+      - _parse_js_ts_outline_from_source (Vue script-block outline)
+      - beacon_obtain_code_snippet._comment_block_span_js (snippet core span)
+
+    Lifted to module level in May 2026 so that the snippet engine in
+    ``beacon_obtain_code_snippet.py`` can share the same comment-detection
+    logic as the Cartographer outline builders. Prior to that lift, each
+    consumer had its own near-identical copy, which is exactly the class of
+    duplication that caused the duplicate CONTEXT COMMENTS / beacon-block
+    leakage bugs fixed earlier in this same session.
+
+    NOTE: we intentionally do NOT pre-filter ``@beacon[`` / ``@beacon-close[``
+    opener lines here. They are flagged as ordinary comments and the
+    delimiter block is stripped as a whole unit downstream by
+    ``_strip_beacon_meta_blocks_from_context(...)``. See the inline comment
+    history at the call sites for the rationale.
+    """
+    comment_mask: list[bool] = [False] * len(src_lines)
+    cleaned: list[str] = ["" for _ in range(len(src_lines))]
+    in_block = False
+
+    for idx, raw in enumerate(src_lines, start=1):
+        stripped = raw.lstrip()
+        if not stripped:
+            continue
+
+        is_comment = False
+        text = ""
+
+        if not in_block:
+            if stripped.startswith("//"):
+                is_comment = True
+                text = stripped[2:].lstrip()
+            elif "/*" in stripped:
+                is_comment = True
+                in_block = True
+                after = stripped.split("/*", 1)[1]
+                if "*/" in after:
+                    before_close, _ = after.split("*/", 1)
+                    text = before_close.strip()
+                    in_block = False
+                else:
+                    text = after.strip()
+        else:
+            is_comment = True
+            if "*/" in stripped:
+                before_close, _ = stripped.split("*/", 1)
+                text = before_close.strip()
+                in_block = False
+            else:
+                text = stripped
+
+        if is_comment:
+            comment_mask[idx - 1] = True
+            cleaned[idx - 1] = text
+
+    return comment_mask, cleaned

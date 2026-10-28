@@ -1,0 +1,230 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import os
+from pathlib import Path
+
+import psutil
+import pytest
+
+from workflowy_mcp import carto_job_governance as gov
+
+ACCOUNT = "a" * 32
+
+
+@pytest.fixture(autouse=True)
+def _clear_cleanup_obligations():
+    gov._CLEANUP_OBLIGATIONS.clear()
+    yield
+    gov._CLEANUP_OBLIGATIONS.clear()
+
+
+def _cache() -> dict[str, dict]:
+    return {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "file": {"id": "file", "parent_id": "repo"},
+    }
+
+
+def _footprint(tmp_path: Path) -> dict:
+    target = tmp_path / "repo" / "a.py"
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("x = 1\n", encoding="utf-8")
+    return gov.compute_footprint(target, "file", _cache(), kind="file")
+
+
+def _lease(tmp_path: Path, jobs: Path) -> dict:
+    leases = gov.acquire_q3_leases(
+        [_footprint(tmp_path)],
+        account_scope_id=ACCOUNT,
+        jobs_root=jobs,
+    )
+    assert len(leases) == 1
+    return leases[0]
+
+
+def _claim(tmp_path: Path, jobs: Path, *, job_id: str = "cleanup-claim") -> dict:
+    process = psutil.Process(os.getpid())
+    claim = gov.build_claim(
+        job_id=job_id,
+        job_type="CARTO_BULK_APPLY",
+        dedupe_key=hashlib.sha256(job_id.encode()).hexdigest(),
+        account_scope_id=ACCOUNT,
+        footprint=_footprint(tmp_path),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=os.getpid(),
+        pid_create_time=process.create_time(),
+        handoff_state="running",
+        spawn_started_at=None,
+        execution_owner="launcher",
+    )
+    gov.write_claim(claim, jobs)
+    return claim
+
+
+async def _no_sleep(_seconds: float) -> None:
+    await asyncio.sleep(0)
+
+
+def test_transient_q3_unlink_failure_retries_to_success_without_tombstone(tmp_path):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    calls = 0
+
+    def transient_unlink(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("transient lease lock")
+        path.unlink()
+
+    assert (
+        asyncio.run(
+            gov.release_q3_leases_async(
+                [lease],
+                jobs_root=jobs,
+                unlink_fn=transient_unlink,
+                sleep_fn=_no_sleep,
+            )
+        )
+        == []
+    )
+    assert calls == 2
+    assert not list(gov.governance_paths(jobs).leases_dir.glob("*.json"))
+    assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_persistent_q3_release_failure_is_actionable_and_not_clean_success(tmp_path):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+
+    with pytest.raises(gov.GovernanceCleanupError) as caught:
+        asyncio.run(
+            gov.release_q3_leases_async(
+                [lease],
+                jobs_root=jobs,
+                unlink_fn=lambda _path: (_ for _ in ()).throw(PermissionError("still locked")),
+                immediate_attempts=2,
+                sleep_fn=_no_sleep,
+            )
+        )
+
+    lease_path = gov.q3_lease_path_for(lease, jobs)
+    assert lease_path.name in str(caught.value)
+    assert lease_path.exists()
+    assert gov.pending_cleanup_obligations()[0]["kind"] == "q3_release"
+
+
+def test_transient_claim_unlink_failure_retries_after_tombstone(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, jobs)
+    calls = 0
+
+    def transient_unlink(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("transient claim lock")
+        path.unlink()
+
+    assert asyncio.run(
+        gov.finalize_claim_async(
+            claim["claim_id"],
+            jobs,
+            unlink_fn=transient_unlink,
+            sleep_fn=_no_sleep,
+        )
+    )
+    assert calls == 2
+    assert not list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+    assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_persistent_live_owner_finalize_failure_remains_blocking_and_actionable(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, jobs)
+
+    def fail_tombstone(_path, _payload):
+        raise OSError("tombstone volume unavailable")
+
+    with pytest.raises(gov.GovernanceCleanupError) as caught:
+        asyncio.run(
+            gov.finalize_claim_async(
+                claim["claim_id"],
+                jobs,
+                atomic_writer=fail_tombstone,
+                immediate_attempts=2,
+                sleep_fn=_no_sleep,
+            )
+        )
+
+    assert "blocking artifacts" in str(caught.value)
+    assert list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+    assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+    with pytest.raises(gov.GovernanceConflictError):
+        gov.acquire_q3_leases(
+            [_footprint(tmp_path)],
+            account_scope_id=ACCOUNT,
+            jobs_root=jobs,
+        )
+    assert gov.pending_cleanup_obligations()[0]["kind"] == "claim_finalize"
+
+
+def test_manual_cleanup_retry_api_releases_q3_lease(tmp_path):
+    jobs = tmp_path / "jobs"
+    lease = _lease(tmp_path, jobs)
+    blocked = True
+
+    def controlled_unlink(path: Path) -> None:
+        if blocked:
+            raise PermissionError("held by scanner")
+        path.unlink()
+
+    with pytest.raises(gov.GovernanceCleanupError):
+        asyncio.run(
+            gov.release_q3_leases_async(
+                [lease],
+                jobs_root=jobs,
+                unlink_fn=controlled_unlink,
+                immediate_attempts=1,
+            )
+        )
+    assert gov.pending_cleanup_obligations()
+
+    blocked = False
+    result = asyncio.run(gov.retry_cleanup_obligations_async())
+    assert result["released"]
+    assert result["remaining"] == []
+    assert not gov.pending_cleanup_obligations()
+    assert not gov.q3_lease_path_for(lease, jobs).exists()
+
+
+def test_claim_never_deletes_when_tombstone_write_fails(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, jobs)
+    unlink_calls = 0
+
+    def fail_tombstone(_path, _payload):
+        raise OSError("cannot publish tombstone")
+
+    def forbidden_unlink(_path: Path) -> None:
+        nonlocal unlink_calls
+        unlink_calls += 1
+
+    with pytest.raises(gov.GovernanceCleanupError):
+        asyncio.run(
+            gov.finalize_claim_async(
+                claim["claim_id"],
+                jobs,
+                atomic_writer=fail_tombstone,
+                unlink_fn=forbidden_unlink,
+                immediate_attempts=1,
+            )
+        )
+    assert unlink_calls == 0
+    assert list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+    assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))

@@ -1,0 +1,99 @@
+# `workflowy_nexus.config` Reference
+
+The NEXUS Core v1 MCP server reads its runtime configuration from a JSON file. The schema is validated by pydantic with **`extra: forbid`** — any unknown top-level keys or unknown keys inside `paths`, `websocket`, `timing`, or `retention` will cause the server to fail to load. Stick to the documented field names below.
+
+## How the config file is discovered
+
+Resolution order (first match wins):
+
+1. The path in the `WORKFLOWY_NEXUS_CONFIG` environment variable (typically set in your MCP host's JSON config — see the `env` block in your TypingMind / Claude Code / etc. MCP server entry).
+2. `workflowy_nexus.config.local.json` adjacent to the script that's running (e.g., next to `glimpse_deploy_trampoline.py`).
+3. `MCP_Servers/workflowy_nexus.config.local.json` walking up from the script.
+4. Smart per-OS defaults if no config file is found.
+
+## Getting started
+
+1. Copy `workflowy_nexus.config.example.json` (in this repo's root) to `workflowy_nexus.config.local.json` somewhere convenient.
+2. Replace every `/absolute/path/to/...` placeholder with a real path on your machine.
+3. Either set `WORKFLOWY_NEXUS_CONFIG` to that file's path, or place it where the resolver expects it (see above).
+
+## Field reference
+
+### Top level
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `schemaVersion` | int | yes | Always `1` for this release. Reserved for future schema migrations. |
+| `paths` | object | no | Runtime filesystem paths. All sub-fields optional; sensible per-OS defaults if omitted. |
+| `websocket` | object | no | GLIMPSE WebSocket server settings (currently hardcoded to localhost:8765 on the server side; this section is reserved for future configurability). |
+| `timing` | object | no | Polling/reconnect intervals for the Chrome extension client. |
+| `retention` | object | no | How long completed CARTO job artifacts are kept on disk. |
+
+### `paths`
+
+All optional. If a field is omitted, the server falls back to portable per-user defaults under your OS's standard runtime directories.
+
+| Field | Type | Notes |
+|---|---|---|
+| `nexusRunsBase` | string | Base directory for NEXUS run artifacts (terrain JSON, gem JSON, journals). |
+| `cartographerJobsDir` | string | Directory for detached CARTO_REFRESH job JSON files (status, progress, cancellation flags). |
+| `cartographerFileRefreshDir` | string | Directory for per-file Cartographer F12 refresh artifacts. |
+| `windsurfExeCandidates` | list of strings | Ordered list of candidate paths to `Windsurf.exe` for F9 "open node in editor". The server tries each in order, then falls back to standard install locations. Omit if you don't use F9. |
+
+#### Trampoline-only fields (Workflowy Desktop ASAR patching)
+
+These fields are only consumed by `glimpse_deploy_trampoline.py`. **Most users should use the unpacked Chrome extension** in `workflowy-glimpse-cache/` against `workflowy.com` in Chrome, and can ignore these fields. The trampoline is the advanced path for installing GLIMPSE into the Workflowy Desktop Electron app — invasive, breaks on every Workflowy update, and high-friction.
+
+| Field | Type | Notes |
+|---|---|---|
+| `glimpseAgentWorkspace` | string | Working directory where the trampoline stages files. Defaults to `%LOCALAPPDATA%/glimpse_deploy_workspace` on Windows. |
+| `glimpseCacheSource` | string | **Required for trampoline use.** Absolute path to your local checkout of `workflowy-glimpse-cache/glimpse-cache-client.js` (this is the file the trampoline patches into Workflowy Desktop's ASAR). |
+| `workflowyAppAsar` | string | Path to Workflowy Desktop's `app.asar`. Defaults to `%LOCALAPPDATA%/Programs/WorkFlowy/resources/app.asar` on Windows. |
+| `workflowyElectronCacheDirs` | list of strings | Workflowy Desktop's Electron cache directories. The trampoline clears these after deploying to ensure the new ASAR is picked up. Defaults to `%APPDATA%/WorkFlowy/{Cache,Code Cache,GPUCache}` on Windows. |
+| `glimpseWslRepoDir` | string | Optional WSL-side checkout of `workflowy-glimpse-cache`. When set, the trampoline runs a `git pull` here before packing the ASAR (handy if you develop the extension on the WSL side). Set to empty string `""` to disable. |
+| `glimpseStagingSubdir` | string | Subdirectory name under `glimpseAgentWorkspace` where the trampoline stages files for ASAR packing. Defaults to `staging`. |
+
+### `websocket`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `host` | string | `localhost` | Currently hardcoded on the server side; this field is reserved for future configurability. |
+| `port` | int | `8765` | Currently hardcoded on the server side. |
+
+### `timing`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `websocketReconnectDelayMs` | int | `3000` | How long the Chrome extension waits before reconnecting after a dropped WebSocket connection. |
+| `cartoJobsPollIntervalMs` | int | `1000` | How often the Chrome extension polls the MCP server for CARTO job status updates. |
+| `refreshSettleSeconds` | float | `2.0` | Mutation-coherence (S02): the best-effort settle delay between a refresh's lineage-cut capture and its `/nodes-export` request, giving Workflowy's server a moment to persist just-committed GUI edits so the export actually contains the edits the refresh will clear. The cut is captured FIRST, so anything arriving during the delay is never lost — it simply survives to the next refresh. When manually clicking Refresh right after making GUI edits, wait a few seconds for the edits to reach Workflowy's servers first; this built-in delay is belt-and-suspenders, not a proof. |
+
+### `retention`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `cartoJobMaxAgeSeconds` | int | `3600` | How long completed CARTO_REFRESH job artifacts are kept on disk before the server's GC pass removes them. Default 1 hour. |
+
+## Environment variable overrides
+
+A handful of fields can be overridden via environment variables at server startup (useful for one-off testing without editing the JSON):
+
+| Env var | Overrides |
+|---|---|
+| `WORKFLOWY_API_KEY` | `apiKey` (required for any Workflowy API access) |
+| `WORKFLOWY_API_URL` | API base URL |
+| `WORKFLOWY_TIMEOUT` | Request timeout in seconds |
+| `WORKFLOWY_MAX_RETRIES` | Max retry attempts |
+| `DEBUG` | Debug mode (truthy: `1`, `true`, `yes`, `on`) |
+| `LOG_LEVEL` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
+| `NEXUS_RUNS_BASE` | `paths.nexusRunsBase` |
+| `CARTOGRAPHER_JOBS_DIR` | `paths.cartographerJobsDir` |
+| `CARTOGRAPHER_FILE_REFRESH_DIR` | `paths.cartographerFileRefreshDir` |
+| `WORKFLOWY_WS_HOST` | `websocket.host` |
+| `WORKFLOWY_WS_PORT` | `websocket.port` |
+| `WORKFLOWY_WS_RECONNECT_DELAY_MS` | `timing.websocketReconnectDelayMs` |
+| `WORKFLOWY_CARTO_JOBS_POLL_INTERVAL_MS` | `timing.cartoJobsPollIntervalMs` |
+
+## Validation
+
+Validation happens at server startup. If your config has any unknown keys, type errors, or fails a field validator (e.g., `port` outside 1–65535), the server will refuse to start with a pydantic error message identifying the offending field. Use this as fast feedback to fix your config.

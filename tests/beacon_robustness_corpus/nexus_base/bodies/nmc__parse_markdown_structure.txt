@@ -1,0 +1,140 @@
+def parse_markdown_structure(file_path: str) -> List[Dict[str, Any]]:
+    """Parse Markdown into a NEXUS node tree using markdown-it-py.
+
+    Parsing is a pure read: illegal C0 controls are sanitized only in the
+    in-memory parse buffer, and mdformat is globally disabled. The preserved
+    ``IGNORE_MDFORMAT`` frontmatter flag is currently a compatibility no-op.
+    Document order supplies priorities and the markdown-it token stream is
+    converted into the hierarchical NEXUS tree.
+    """
+    try:
+        # STEP 1: Load the Markdown source.
+        with open(file_path, 'r', encoding='utf-8') as f:
+            original_content_raw = f.read()
+        original_content = _strip_disallowed_markdown_control_chars(original_content_raw)
+        # Parsing is a pure read. Illegal C0 controls are repaired only in the
+        # in-memory parse buffer; a claimed CARTO owner will gain an explicit
+        # atomic repair primitive in Phase C.
+
+        # STEP 1.1: Detect YAML frontmatter and per-file IGNORE_MDFORMAT flag.
+        # NOTE: this detection is preserved as suspenders, but mdformat is now
+        # globally disabled below regardless of the flag value.
+        frontmatter, _body = _split_frontmatter_if_any(original_content)
+        ignore_mdformat = _frontmatter_has_ignore_mdformat(frontmatter)
+
+        # MDFORMAT GLOBALLY DISABLED (Dan, 2026-04-30):
+        # mdformat doesn't work well with agents. Agents reflexively add YAML
+        # frontmatter to files that don't need it (e.g. 99 files), and mdformat
+        # mangles YAML frontmatter and rewrites the source file unconditionally
+        # on every F12 refresh, locking in any corruption. The IGNORE_MDFORMAT
+        # flag is preserved above for backward compatibility but is now a noop:
+        # the skip-mdformat branch is taken unconditionally.
+        #
+        # Original gated behavior is preserved below in commented form for
+        # reference. To re-enable mdformat on a per-file basis in the future,
+        # restore the if/else and ensure agents respect the IGNORE_MDFORMAT
+        # opt-out invariant.
+        #
+        # if ignore_mdformat:
+        #     body_for_parse = _body
+        #     full_content_for_parse = original_content
+        # else:
+        #     body_for_parse = mdformat.text(_body)
+        #     full_content_for_parse = (f"---\n{frontmatter}\n---\n" if frontmatter else "") + body_for_parse
+        #     with open(file_path, 'w', encoding='utf-8') as f:
+        #         f.write(full_content_for_parse)
+
+        body_for_parse = _body
+        full_content_for_parse = original_content
+        if DEBUG_MD_BEACONS:
+            print(
+                f"[MD-FILE] path={file_path!r} (mdformat globally disabled; "
+                f"IGNORE_MDFORMAT={ignore_mdformat} preserved as no-op)",
+            )
+
+        lines = _markdown_source_lines(full_content_for_parse)
+        md_beacons = parse_markdown_beacon_blocks(lines)
+
+        # STEP 2: Parse ONLY the body with markdown-it-py to avoid misinterpreting frontmatter.
+        #
+        # We keep markdown-it-py's block parser because it already knows the
+        # hard cases (fenced code, indented code, HTML blocks, blockquotes,
+        # source maps). The only thing we override is the ATX heading rule's
+        # CommonMark 6-hash cap. Dan's Workflowy-first 99-file methodology
+        # explicitly supports 7, 8, 9+ hash headings as real child nodes.
+        md = MarkdownIt("commonmark")
+        try:
+            md.block.ruler.at("heading", markdown_it_heading_arbitrary_depth)
+        except Exception:
+            # Fail loudly enough to be visible in the parse-error node rather
+            # than silently falling back to the 6-hash CommonMark rule.
+            raise
+        tokens = md.parse(body_for_parse)
+
+        if DEBUG_MD_BEACONS:
+            print("[MD-TOKENS-BEGIN]")
+            for t in tokens:
+                # t.map is (start_line, end_line) 0-based; add 1 for human-readable
+                line_span = t.map if hasattr(t, 'map') and t.map is not None else None
+                if line_span:
+                    span_str = f"[{line_span[0]+1},{line_span[1]+1}]"
+                else:
+                    span_str = "[]"
+                print(f"  type={t.type!r} tag={t.tag!r} map={span_str} content={t.content!r}")
+            print("[MD-TOKENS-END]")
+
+        # STEP 3: Convert token stream to NEXUS hierarchical tree with priorities.
+        # Use the exact body lines from the parsed Markdown so list/code-block
+        # structure is preserved verbatim inside heading notes.
+        # When YAML frontmatter exists, markdown-it token line maps are relative
+        # to body_for_parse, while apply_markdown_beacons receives full-file
+        # line numbers. Carry the body offset into each heading node's internal
+        # _md_heading_line coordinate so beacon attachment is line-accurate.
+        body_line_offset = 0
+        if frontmatter is not None:
+            # Opening '---' + frontmatter lines + closing '---'.
+            body_line_offset = len(frontmatter.splitlines()) + 2
+        root_children = tokens_to_nexus_tree(
+            tokens,
+            source_lines=_markdown_source_lines(body_for_parse),
+            source_line_offset=body_line_offset,
+        )
+        
+        if frontmatter is not None:
+            # Preserve frontmatter at the top of the tree so it survives round-trips
+            root_children.insert(0, {
+                "name": "⚙️ YAML Frontmatter",
+                "priority": 0,
+                "note": frontmatter,
+                "children": []
+            })
+
+        # Preserve any "leading text" — prose that appears in the body BEFORE the
+        # first heading. The heading-only tree builder (tokens_to_nexus_tree)
+        # has no heading to anchor such content to, so without this it would be
+        # silently dropped from the Workflowy view (the F12+1 leading-text bug).
+        # We represent it exactly like frontmatter: a dedicated, recognizable
+        # top-of-tree node (NOT a synthetic heading), so markdown_roundtrip
+        # emits it verbatim above the first heading on F12+3 and the round-trip
+        # F12+1 -> F12+3 -> F12+1 is idempotent (it never becomes a heading, so
+        # nothing accumulates). priority=1 places it after frontmatter
+        # (priority 0) and before the first real heading (priority 100+).
+        leading_text = _extract_markdown_leading_text(
+            tokens,
+            body_source_lines=_markdown_source_lines(body_for_parse),
+        )
+        if leading_text:
+            insert_idx = 1 if frontmatter is not None else 0
+            root_children.insert(insert_idx, {
+                "name": MD_LEADING_TEXT_NODE_NAME,
+                "priority": 1,
+                "note": leading_text,
+                "children": []
+            })
+
+        if md_beacons:
+            apply_markdown_beacons(lines, root_children, md_beacons)
+        return root_children
+        
+    except Exception as e:
+        return [{"name": _warn_name("⚠️ MD Parse Error"), "note": str(e), "children": []}]

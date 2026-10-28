@@ -1,0 +1,7286 @@
+{
+ "schema": "beacon_robustness/u01/area1_q1_freeze@1",
+ "generated_at": "2026-10-19T04:28:50.207532+00:00",
+ "base_rev": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+ "measurement": "area-1/q1_matrix.py at a345dc7: for each of the six parser languages a clean base file with good blocks B1/B2/S1(span)/B3/B4, then one corruption per case; records what happens to the good blocks under the real parser (good_now) and the patched non-swallowing parser (good_nonswallowing; C1+C2 for line-comment languages, MD_C1+dashdash_gt for Markdown)",
+ "origin": {
+  "q1_matrix.py": {
+   "path": "/mnt/c/tmp/beacon_robustness/area-1/q1_matrix.py",
+   "sha256": "a2bbf20de46210880987c4021490f65d72d56361537341150e51134b78491326"
+  },
+  "results.json": {
+   "path": "/mnt/c/tmp/beacon_robustness/area-1/q1/results.json",
+   "sha256": "8f1369fdffb6b06145ce2efcd3914c43258df42c2547a365f2d28e6c8cfa78ab"
+  },
+  "fixtures_dir": {
+   "path": "/mnt/c/tmp/beacon_robustness/area-1/q1",
+   "note": "92 fixture files: 6 bases + 85 cases + results.json"
+  },
+  "parser_module": "/mnt/c/tmp/beacon_robustness/u01/freezes/work/base_a345dc7/nexus_map_codebase.py",
+  "parser_module_sha256": "883e0f026a61f399a5b2f098077777b38a2a7541525ca044a6d2afae7ab23c00"
+ },
+ "verification": {
+  "cases_recorded": 85,
+  "cases_frozen": 85,
+  "reproduced_from_bytes": 85,
+  "mismatches": [],
+  "bases": {
+   "python": "5f80e888329bdb0f3a03999dcb5238f3d6c8398b8f93d994821e73411f9b43f0",
+   "shell": "b2344dab5d098dae0739e7d9c4dc2e524fc898a28a4c67f70082a42fa8eb87af",
+   "yaml": "a25c8b9d7d95a6ddd5ecc9df785137b34f1349e8b40305a09a3cdcf534a07d45",
+   "sql": "76e09ee8ff7d41ac62a56af66b64d51392ff05799880dbd9f9eb5c9fa863065e",
+   "js_ts": "776d18d2473beba7a883d3e6f48cf8e2bb1180b27ea3b6d482ec7951679a1dc0",
+   "markdown": "3e7cd20016afa09b0a7f115be1bd35934119e963fdc1e207de69e3c2cb1dcd1f"
+  }
+ },
+ "note": "results.json keys are 'lang|case'; fixture file name is 'lang_case.ext'; the corrupted slot in each case follows q1_matrix.py corruptions() — SLOT/B2/S1c/EOF replacement inside the base layout B1/SLOT/B2/S1o/B3/S1c/B4/EOF.  Markdown k1 has two variants (k1b keeps the '-->', k1c loses it).",
+ "bases": {
+  "python": {
+   "file": "python_base.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "5f80e888329bdb0f3a03999dcb5238f3d6c8398b8f93d994821e73411f9b43f0"
+  },
+  "shell": {
+   "file": "shell_base.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "b2344dab5d098dae0739e7d9c4dc2e524fc898a28a4c67f70082a42fa8eb87af"
+  },
+  "yaml": {
+   "file": "yaml_base.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "a25c8b9d7d95a6ddd5ecc9df785137b34f1349e8b40305a09a3cdcf534a07d45"
+  },
+  "sql": {
+   "file": "sql_base.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "76e09ee8ff7d41ac62a56af66b64d51392ff05799880dbd9f9eb5c9fa863065e"
+  },
+  "js_ts": {
+   "file": "js_ts_base.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "776d18d2473beba7a883d3e6f48cf8e2bb1180b27ea3b6d482ec7951679a1dc0"
+  },
+  "markdown": {
+   "file": "markdown_base.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "3e7cd20016afa09b0a7f115be1bd35934119e963fdc1e207de69e3c2cb1dcd1f"
+  }
+ },
+ "cases": [
+  {
+   "key": "js_ts|k10_lost_bracket_inside_string",
+   "lang": "js_ts",
+   "case": "k10_lost_bracket_inside_string",
+   "ext": ".js",
+   "file": "js_ts_k10_lost_bracket_inside_string.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\nconst sample = `\n// @beacon[\n//   id=x10@0,\n//   slice_labels=lab-x10,\n`;\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "87e1ccfe5a1cebf17137b563a08ccf35f3b0aaba5409563a40bc1267c7cf01f8",
+   "bytes": 752,
+   "lines": 55,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 12, own opener at 17)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x10@0": {
+      "line": 12,
+      "kind": "span",
+      "labels": "lab-x10",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      12,
+      22,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      46,
+      51,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k10_lost_bracket_inside_string.js.txt"
+  },
+  {
+   "key": "js_ts|k11_complete_block_inside_string",
+   "lang": "js_ts",
+   "case": "k11_complete_block_inside_string",
+   "ext": ".js",
+   "file": "js_ts_k11_complete_block_inside_string.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\nconst sample = `\n// @beacon[\n//   id=x11@0,\n//   slice_labels=lab-x11,\n//   kind=ast,\n//   comment=Comment of x11@0.,\n// ]\n`;\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "f58721bbacac8913b490eefc0c89830cd73985f8d699a316227359b41e6fd35e",
+   "bytes": 804,
+   "lines": 58,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x11@0": {
+      "line": 12,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x11@0": {
+      "line": 12,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      12,
+      17,
+      "kept",
+      "x11@0",
+      []
+     ],
+     [
+      20,
+      25,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      30,
+      35,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      49,
+      54,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k11_complete_block_inside_string.js.txt"
+  },
+  {
+   "key": "js_ts|k12_lost_bracket_then_bracket_led_code",
+   "lang": "js_ts",
+   "case": "k12_lost_bracket_then_bracket_led_code",
+   "ext": ".js",
+   "file": "js_ts_k12_lost_bracket_then_bracket_led_code.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=x12@0,\n//   slice_labels=lab-x12,\n//   kind=ast,\n//   comment=Comment of x12@0.,\n\nconst arr = [\n  1,\n];\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "ea0abb571424de767aabb2977edfa422afc3ddf74f0f9b3326336c0fe6ef3490",
+   "bytes": 802,
+   "lines": 59,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x12@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0., const arr = [ 1",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x12@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      19,
+      "kept",
+      "x12@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k12_lost_bracket_then_bracket_led_code.js.txt"
+  },
+  {
+   "key": "js_ts|k13_lost_bracket_then_fieldlike_code",
+   "lang": "js_ts",
+   "case": "k13_lost_bracket_then_fieldlike_code",
+   "ext": ".js",
+   "file": "js_ts_k13_lost_bracket_then_fieldlike_code.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=x13@0,\n//   slice_labels=lab-x13,\n//   kind=ast,\n//   comment=Comment of x13@0.,\n\nid = compute();\nkind = mode;\nslice_labels = [a, b];\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "b43df9dda9c5dc139ddf000e54d8d0e890b5bed181273d77f41d86d8964f769b",
+   "bytes": 832,
+   "lines": 59,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 21)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x13@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x13",
+      "comment": "Comment of x13@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k13_lost_bracket_then_fieldlike_code.js.txt"
+  },
+  {
+   "key": "js_ts|k14_duplicate_keys",
+   "lang": "js_ts",
+   "case": "k14_duplicate_keys",
+   "ext": ".js",
+   "file": "js_ts_k14_duplicate_keys.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   slice_labels=second-labels,\n//   id=b2dup@0,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "20ed44c4060bcd38bdc808a986db3d0c469f62a97a2f96f06f4c733d878f3113",
+   "bytes": 727,
+   "lines": 51,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "b2dup@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "b2dup@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      18,
+      "kept",
+      "b2dup@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k14_duplicate_keys.js.txt"
+  },
+  {
+   "key": "js_ts|k1_opener_lost_bracket",
+   "lang": "js_ts",
+   "case": "k1_opener_lost_bracket",
+   "ext": ".js",
+   "file": "js_ts_k1_opener_lost_bracket.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=x1@0,\n//   slice_labels=lab-x1,\n//   kind=ast,\n//   comment=Comment of x1@0.,\n\nfunction x1() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "7fd9ee41dd737f4533706cf2ad0229d2e2e0b5f6b3238673fd307bd0524a7592",
+   "bytes": 807,
+   "lines": 59,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 21)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x1@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x1",
+      "comment": "Comment of x1@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k1_opener_lost_bracket.js.txt"
+  },
+  {
+   "key": "js_ts|k2_bracket_trailing_comma",
+   "lang": "js_ts",
+   "case": "k2_bracket_trailing_comma",
+   "ext": ".js",
+   "file": "js_ts_k2_bracket_trailing_comma.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ],\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "c3e663bc08ec7bb8475d2161f7bc078258c9382ff9571391fce9605b9d7eb0a4",
+   "bytes": 678,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k2_bracket_trailing_comma.js.txt"
+  },
+  {
+   "key": "js_ts|k3_bracket_trailing_space",
+   "lang": "js_ts",
+   "case": "k3_bracket_trailing_space",
+   "ext": ".js",
+   "file": "js_ts_k3_bracket_trailing_space.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ] \nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "ee62b2a23c3fb754cf3735c60039a1f845ed01bb1faf31423e52272afb3bca5c",
+   "bytes": 678,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k3_bracket_trailing_space.js.txt"
+  },
+  {
+   "key": "js_ts|k4_stray_bracket",
+   "lang": "js_ts",
+   "case": "k4_stray_bracket",
+   "ext": ".js",
+   "file": "js_ts_k4_stray_bracket.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// ]\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "9295d68a65755bba5b3b26e9667925d5c1c5abacd086019e40465659f0ccf636",
+   "bytes": 683,
+   "lines": 51,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      13,
+      18,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k4_stray_bracket.js.txt"
+  },
+  {
+   "key": "js_ts|k5_opener_inside_opener",
+   "lang": "js_ts",
+   "case": "k5_opener_inside_opener",
+   "ext": ".js",
+   "file": "js_ts_k5_opener_inside_opener.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=x5@0,\n// @beacon[\n//   id=y5@0,\n//   slice_labels=lab-x5,\n//   kind=ast,\n//   comment=Comment of x5@0.,\n// ]\nfunction x5() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "5eb5d30e65551ebafe8fe4984b08beb5ce15f8feabfa5085bdaf5433b3b1d9fc",
+   "bytes": 837,
+   "lines": 61,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "y5@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x5@0": {
+      "line": 11,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     },
+     "y5@0": {
+      "line": 13,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      18,
+      "kept",
+      "y5@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      52,
+      57,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k5_opener_inside_opener.js.txt"
+  },
+  {
+   "key": "js_ts|k6_one_line_block",
+   "lang": "js_ts",
+   "case": "k6_one_line_block",
+   "ext": ".js",
+   "file": "js_ts_k6_one_line_block.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[ id=x6@0, slice_labels=one, kind=ast, ]\nfunction x6() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "14fd286ac529156a1333aa3735cf5d81ef9a3234edfe4b15c3f3d4b011a03a9c",
+   "bytes": 759,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 16)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "<no-id@11>": {
+      "line": 11,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      21,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k6_one_line_block.js.txt"
+  },
+  {
+   "key": "js_ts|k7_close_lost_bracket",
+   "lang": "js_ts",
+   "case": "k7_close_lost_bracket",
+   "ext": ".js",
+   "file": "js_ts_k7_close_lost_bracket.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "8f03fbcf5f023f63fdd320e58e3891073d30a6921b469453fb871928f9131221",
+   "bytes": 672,
+   "lines": 48,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k7_close_lost_bracket.js.txt"
+  },
+  {
+   "key": "js_ts|k8_bare_field_no_opener",
+   "lang": "js_ts",
+   "case": "k8_bare_field_no_opener",
+   "ext": ".js",
+   "file": "js_ts_k8_bare_field_no_opener.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n//   id=bare@0,\nfunction x8() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n",
+   "sha256": "0a44ba6b7b5ee3576ceda94aadb28a49a3c3c4e62dea97ec141c8fded570ed1b",
+   "bytes": 724,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      16,
+      21,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k8_bare_field_no_opener.js.txt"
+  },
+  {
+   "key": "js_ts|k9_unterminated_at_eof",
+   "lang": "js_ts",
+   "case": "k9_unterminated_at_eof",
+   "ext": ".js",
+   "file": "js_ts_k9_unterminated_at_eof.js",
+   "text": "// @beacon[\n//   id=b1@0,\n//   slice_labels=lab-b1,\n//   kind=ast,\n//   comment=Comment of b1@0.,\n// ]\nfunction f1() {\n  return 1;\n}\n\n// @beacon[\n//   id=b2@0,\n//   slice_labels=lab-b2,\n//   kind=ast,\n//   comment=Comment of b2@0.,\n// ]\nfunction f2() {\n  return 1;\n}\n\n// @beacon[\n//   id=s1@0,\n//   slice_labels=lab-s1,\n//   kind=span,\n//   comment=Comment of s1@0.,\n// ]\n// @beacon[\n//   id=b3@0,\n//   slice_labels=lab-b3,\n//   kind=ast,\n//   comment=Comment of b3@0.,\n// ]\nfunction f3() {\n  return 1;\n}\n\n// @beacon-close[\n//   id=s1@0,\n// ]\n// @beacon[\n//   id=b4@0,\n//   slice_labels=lab-b4,\n//   kind=ast,\n//   comment=Comment of b4@0.,\n// ]\nfunction f4() {\n  return 1;\n}\n\n// @beacon[\n//   id=x9@0,\n//   slice_labels=lab-x9,\n//   kind=ast,\n//   comment=Comment of x9@0.,\n",
+   "sha256": "f13c7dc38ed8b9e3735498a025321bd4a8096c411c3071eb2a97d5e413d41b5f",
+   "bytes": 775,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x9@0": {
+      "line": 50,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x9@0": {
+      "line": 50,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ],
+     [
+      50,
+      null,
+      "kept",
+      "x9@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/js_ts_k9_unterminated_at_eof.js.txt"
+  },
+  {
+   "key": "markdown|k10_lost_bracket_inside_string",
+   "lang": "markdown",
+   "case": "k10_lost_bracket_inside_string",
+   "ext": ".md",
+   "file": "markdown_k10_lost_bracket_inside_string.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n```text\n<!--\n@beacon[\n  id=x10@0,\n```\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "ea86a2b6c4983b2cad6c8f0f3dd3a751d9ba8812d1a1600a604c69c4ebfdb313",
+   "bytes": 635,
+   "lines": 67,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      20,
+      25,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      57,
+      62,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k10_lost_bracket_inside_string.md.txt"
+  },
+  {
+   "key": "markdown|k11_complete_block_inside_string",
+   "lang": "markdown",
+   "case": "k11_complete_block_inside_string",
+   "ext": ".md",
+   "file": "markdown_k11_complete_block_inside_string.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n```text\n<!--\n@beacon[\n  id=x11@0,\n  slice_labels=lab-x11,\n  kind=ast,\n  comment=Comment of x11@0.,\n]\n-->\n```\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "c9db3a53b17dc7e63c6bda1714dc7034c0f41cb0159fbbac49639d381d2f3894",
+   "bytes": 706,
+   "lines": 72,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      62,
+      67,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k11_complete_block_inside_string.md.txt"
+  },
+  {
+   "key": "markdown|k12_lost_bracket_then_bracket_led_code",
+   "lang": "markdown",
+   "case": "k12_lost_bracket_then_bracket_led_code",
+   "ext": ".md",
+   "file": "markdown_k12_lost_bracket_then_bracket_led_code.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=x12@0,\n  slice_labels=lab-x12,\n  kind=ast,\n  comment=Comment of x12@0.,\n-->\n\nSome prose\n] closing bracket prose\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "e1b2a635924603feb530acf7c0d938cb40793baf1d7850d1b8ca53b3207fd74e",
+   "bytes": 728,
+   "lines": 72,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x12@0": {
+      "line": 14,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0., Some prose",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x12@0": {
+      "line": 14,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      22,
+      "kept",
+      "x12@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      62,
+      67,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k12_lost_bracket_then_bracket_led_code.md.txt"
+  },
+  {
+   "key": "markdown|k13_lost_bracket_then_fieldlike_code",
+   "lang": "markdown",
+   "case": "k13_lost_bracket_then_fieldlike_code",
+   "ext": ".md",
+   "file": "markdown_k13_lost_bracket_then_fieldlike_code.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=x13@0,\n  slice_labels=lab-x13,\n  kind=ast,\n  comment=Comment of x13@0.,\n-->\n\nid=compute in prose\nkind=mode in prose\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "6dfa8d9f062903b1b64856096038ad1bcf52bf09ea2e8b1a135c36d60622efa8",
+   "bytes": 732,
+   "lines": 72,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 14, own opener at 25)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x13@0": {
+      "line": 14,
+      "kind": "ast",
+      "labels": "lab-x13",
+      "comment": "Comment of x13@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      30,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      62,
+      67,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k13_lost_bracket_then_fieldlike_code.md.txt"
+  },
+  {
+   "key": "markdown|k14_duplicate_keys",
+   "lang": "markdown",
+   "case": "k14_duplicate_keys",
+   "ext": ".md",
+   "file": "markdown_k14_duplicate_keys.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=second-labels,\n  id=b2dup@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "06dc170f917c13f3053e53c05d72dd47ac9f255ca68648f776468fe33d475f78",
+   "bytes": 640,
+   "lines": 63,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "b2dup@0": {
+      "line": 14,
+      "kind": "ast",
+      "labels": "lab-b2",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "b2dup@0": {
+      "line": 14,
+      "kind": "ast",
+      "labels": "lab-b2",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      21,
+      "kept",
+      "b2dup@0",
+      []
+     ],
+     [
+      28,
+      33,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      53,
+      58,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k14_duplicate_keys.md.txt"
+  },
+  {
+   "key": "markdown|k1b_md_lost_bracket_keeps_dashdash",
+   "lang": "markdown",
+   "case": "k1b_md_lost_bracket_keeps_dashdash",
+   "ext": ".md",
+   "file": "markdown_k1b_md_lost_bracket_keeps_dashdash.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=x1@0,\n  slice_labels=lab-x1,\n  kind=ast,\n  comment=Comment of x1@0.,\n-->\n\n## x1\n\nParagraph x1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "4d72ee5f2c1a27a9ec3e5e7a2640c7b4c944de6e0ba52feadd858a6d7bf5379f",
+   "bytes": 711,
+   "lines": 73,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 14, own opener at 26)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x1@0": {
+      "line": 14,
+      "kind": "ast",
+      "labels": "lab-x1",
+      "comment": "Comment of x1@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      31,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      38,
+      43,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      46,
+      51,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      63,
+      68,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k1b_md_lost_bracket_keeps_dashdash.md.txt"
+  },
+  {
+   "key": "markdown|k1c_md_lost_dashdash",
+   "lang": "markdown",
+   "case": "k1c_md_lost_dashdash",
+   "ext": ".md",
+   "file": "markdown_k1c_md_lost_dashdash.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "aed20c4cded06013d7f0a5a73ecb277e9813ae311a2e0809d62e969ba2b1983a",
+   "bytes": 592,
+   "lines": 60,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      19,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k1c_md_lost_dashdash.md.txt"
+  },
+  {
+   "key": "markdown|k2_bracket_trailing_comma",
+   "lang": "markdown",
+   "case": "k2_bracket_trailing_comma",
+   "ext": ".md",
+   "file": "markdown_k2_bracket_trailing_comma.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n],\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "e8cb9e4ce15e0caa1ce1ab95348face62e615f188699490c2f6671ef20511c97",
+   "bytes": 597,
+   "lines": 61,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      19,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      51,
+      56,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k2_bracket_trailing_comma.md.txt"
+  },
+  {
+   "key": "markdown|k3_bracket_trailing_space",
+   "lang": "markdown",
+   "case": "k3_bracket_trailing_space",
+   "ext": ".md",
+   "file": "markdown_k3_bracket_trailing_space.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n] \n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "e72ee3b983fbe54e104bb641a037c72ac9ff345c16d55609e6f0ef5d51faab45",
+   "bytes": 597,
+   "lines": 61,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      19,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      51,
+      56,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k3_bracket_trailing_space.md.txt"
+  },
+  {
+   "key": "markdown|k4_stray_bracket",
+   "lang": "markdown",
+   "case": "k4_stray_bracket",
+   "ext": ".md",
+   "file": "markdown_k4_stray_bracket.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n]\n-->\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "3c9aca666d2427ab82b4bc9a103cdc8e80cd26022044eb79c77d5e11b67d9dd1",
+   "bytes": 608,
+   "lines": 65,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      18,
+      23,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      30,
+      35,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      38,
+      43,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      55,
+      60,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k4_stray_bracket.md.txt"
+  },
+  {
+   "key": "markdown|k5_opener_inside_opener",
+   "lang": "markdown",
+   "case": "k5_opener_inside_opener",
+   "ext": ".md",
+   "file": "markdown_k5_opener_inside_opener.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n@beacon[\n  id=y5@0,\n  id=x5@0,\n  slice_labels=lab-x5,\n  kind=ast,\n  comment=Comment of x5@0.,\n]\n-->\n## x5\n\nParagraph x5.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "456fba5e6639ba0c9e4f5e87ecae0f8abe25597e6b50a5738a3459540c57aa84",
+   "bytes": 732,
+   "lines": 75,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x5@0": {
+      "line": 14,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x5@0": {
+      "line": 15,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      21,
+      "kept",
+      "x5@0",
+      []
+     ],
+     [
+      28,
+      33,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      48,
+      53,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      65,
+      70,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k5_opener_inside_opener.md.txt"
+  },
+  {
+   "key": "markdown|k6_one_line_block",
+   "lang": "markdown",
+   "case": "k6_one_line_block",
+   "ext": ".md",
+   "file": "markdown_k6_one_line_block.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!-- @beacon[ id=x6@0, slice_labels=one, kind=ast, ] -->\n## x6\n\nParagraph x6.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "d6a4f3c7cd46a56ceb0c4c2c3e615266737502ce494c56082735ad1d484e7179",
+   "bytes": 675,
+   "lines": 66,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 13, own opener at 19)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      13,
+      24,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      56,
+      61,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k6_one_line_block.md.txt"
+  },
+  {
+   "key": "markdown|k7_close_lost_bracket",
+   "lang": "markdown",
+   "case": "k7_close_lost_bracket",
+   "ext": ".md",
+   "file": "markdown_k7_close_lost_bracket.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "eaacd4049b56b336ee597bcbb818196feb1c8af925cc33a00a090c04a89abdbf",
+   "bytes": 594,
+   "lines": 60,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      19,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k7_close_lost_bracket.md.txt"
+  },
+  {
+   "key": "markdown|k8_bare_field_no_opener",
+   "lang": "markdown",
+   "case": "k8_bare_field_no_opener",
+   "ext": ".md",
+   "file": "markdown_k8_bare_field_no_opener.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n  id=bare@0,\n-->\n## x8\n\nParagraph x8.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n",
+   "sha256": "a4b3a701501c59dfb77fd3beab5764143893209a025902e03c11eadbf068e2f9",
+   "bytes": 640,
+   "lines": 68,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      41,
+      46,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      58,
+      63,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k8_bare_field_no_opener.md.txt"
+  },
+  {
+   "key": "markdown|k9_unterminated_at_eof",
+   "lang": "markdown",
+   "case": "k9_unterminated_at_eof",
+   "ext": ".md",
+   "file": "markdown_k9_unterminated_at_eof.md",
+   "text": "<!--\n@beacon[\n  id=b1@0,\n  slice_labels=lab-b1,\n  kind=ast,\n  comment=Comment of b1@0.,\n]\n-->\n## f1\n\nParagraph f1.\n\n<!--\n@beacon[\n  id=b2@0,\n  slice_labels=lab-b2,\n  kind=ast,\n  comment=Comment of b2@0.,\n]\n-->\n## f2\n\nParagraph f2.\n\n<!--\n@beacon[\n  id=s1@0,\n  slice_labels=lab-s1,\n  kind=span,\n  comment=Comment of s1@0.,\n]\n-->\n<!--\n@beacon[\n  id=b3@0,\n  slice_labels=lab-b3,\n  kind=ast,\n  comment=Comment of b3@0.,\n]\n-->\n## f3\n\nParagraph f3.\n\n<!--\n@beacon-close[\n  id=s1@0,\n]\n-->\n<!--\n@beacon[\n  id=b4@0,\n  slice_labels=lab-b4,\n  kind=ast,\n  comment=Comment of b4@0.,\n]\n-->\n## f4\n\nParagraph f4.\n\n<!--\n@beacon[\n  id=x9@0,\n  slice_labels=lab-x9,\n  kind=ast,\n  comment=Comment of x9@0.,\n-->\n",
+   "sha256": "6aa759d73539a5a614a3079544dba03308d8549b8c590a96fc63f8c9187f4626",
+   "bytes": 688,
+   "lines": 68,
+   "fixed_candidate": "MD_C1+dashdash_gt",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x9@0": {
+      "line": 63,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": "Comment of x9@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x9@0": {
+      "line": 63,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": "Comment of x9@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      2,
+      7,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      19,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      51,
+      56,
+      "kept",
+      "b4@0",
+      []
+     ],
+     [
+      63,
+      null,
+      "kept",
+      "x9@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/markdown_k9_unterminated_at_eof.md.txt"
+  },
+  {
+   "key": "python|k10_lost_bracket_inside_string",
+   "lang": "python",
+   "case": "k10_lost_bracket_inside_string",
+   "ext": ".py",
+   "file": "python_k10_lost_bracket_inside_string.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\ndef doc_holder():\n    \"\"\"Example:\n    # @beacon[\n    #   id=x10@0,\n    #   slice_labels=lab-x10,\n    \"\"\"\n    return 0\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "8c2ed1b4306f1552bdfa039269138f786a6b27c98af8e443fbdc148570bc1b64",
+   "bytes": 740,
+   "lines": 58,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 13, own opener at 20)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x10@0": {
+      "line": 13,
+      "kind": "span",
+      "labels": "lab-x10",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      13,
+      25,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      30,
+      35,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      49,
+      54,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k10_lost_bracket_inside_string.py.txt"
+  },
+  {
+   "key": "python|k11_complete_block_inside_string",
+   "lang": "python",
+   "case": "k11_complete_block_inside_string",
+   "ext": ".py",
+   "file": "python_k11_complete_block_inside_string.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\ndef doc_holder():\n    \"\"\"Example:\n    # @beacon[\n    #   id=x11@0,\n    #   slice_labels=lab-x11,\n    #   kind=ast,\n    #   comment=Comment of x11@0.,\n    # ]\n    \"\"\"\n    return 0\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "c07d1dfe608c0299adaae67072fa36860e59ef14026cdd465ef7b9889daa8cff",
+   "bytes": 801,
+   "lines": 61,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x11@0": {
+      "line": 13,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x11@0": {
+      "line": 13,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      13,
+      18,
+      "kept",
+      "x11@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      52,
+      57,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k11_complete_block_inside_string.py.txt"
+  },
+  {
+   "key": "python|k12_lost_bracket_then_bracket_led_code",
+   "lang": "python",
+   "case": "k12_lost_bracket_then_bracket_led_code",
+   "ext": ".py",
+   "file": "python_k12_lost_bracket_then_bracket_led_code.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=x12@0,\n#   slice_labels=lab-x12,\n#   kind=ast,\n#   comment=Comment of x12@0.,\n\nvalues = [\n    \"one\",\n]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "7efb107fa1fcce3feffa581e0c4d1900d0b5dfdd1a7cd5a75a0061bdd076deea",
+   "bytes": 742,
+   "lines": 59,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x12@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0., values = [ \"one\"",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x12@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      19,
+      "kept",
+      "x12@0",
+      [
+       "values"
+      ]
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k12_lost_bracket_then_bracket_led_code.py.txt"
+  },
+  {
+   "key": "python|k13_lost_bracket_then_fieldlike_code",
+   "lang": "python",
+   "case": "k13_lost_bracket_then_fieldlike_code",
+   "ext": ".py",
+   "file": "python_k13_lost_bracket_then_fieldlike_code.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=x13@0,\n#   slice_labels=lab-x13,\n#   kind=ast,\n#   comment=Comment of x13@0.,\n\nid = compute()\nkind = mode\nslice_labels = [a, b]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "ad90c73d308ae6f14c323d31e2c257a85e255f40eb0b5b47aec46a74776db1a2",
+   "bytes": 767,
+   "lines": 59,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 21)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x13@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x13",
+      "comment": "Comment of x13@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k13_lost_bracket_then_fieldlike_code.py.txt"
+  },
+  {
+   "key": "python|k14_duplicate_keys",
+   "lang": "python",
+   "case": "k14_duplicate_keys",
+   "ext": ".py",
+   "file": "python_k14_duplicate_keys.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   slice_labels=second-labels,\n#   id=b2dup@0,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "9f65d3d4795f0bafe41f14615422936b8698e9a2791abb2a22902b26e8e706fb",
+   "bytes": 668,
+   "lines": 51,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "b2dup@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "b2dup@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      18,
+      "kept",
+      "b2dup@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k14_duplicate_keys.py.txt"
+  },
+  {
+   "key": "python|k1_opener_lost_bracket",
+   "lang": "python",
+   "case": "k1_opener_lost_bracket",
+   "ext": ".py",
+   "file": "python_k1_opener_lost_bracket.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=x1@0,\n#   slice_labels=lab-x1,\n#   kind=ast,\n#   comment=Comment of x1@0.,\n\ndef x1():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "2a150d8c2c9a16d59c9117f16855424938aa654bbdb2c6dcb7a34d6c54823141",
+   "bytes": 739,
+   "lines": 59,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 21)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x1@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x1",
+      "comment": "Comment of x1@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k1_opener_lost_bracket.py.txt"
+  },
+  {
+   "key": "python|k2_bracket_trailing_comma",
+   "lang": "python",
+   "case": "k2_bracket_trailing_comma",
+   "ext": ".py",
+   "file": "python_k2_bracket_trailing_comma.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ],\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "1f41ef0571555d14b0c5b2fbb91b437f8dce86b20a0068635c8f37fe52ac8fc8",
+   "bytes": 621,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k2_bracket_trailing_comma.py.txt"
+  },
+  {
+   "key": "python|k3_bracket_trailing_space",
+   "lang": "python",
+   "case": "k3_bracket_trailing_space",
+   "ext": ".py",
+   "file": "python_k3_bracket_trailing_space.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ] \ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "8a0b383ef48ef3983b1d98c6cd1e118e771165564c54c2b7fd26fab3e5c803e4",
+   "bytes": 621,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k3_bracket_trailing_space.py.txt"
+  },
+  {
+   "key": "python|k4_stray_bracket",
+   "lang": "python",
+   "case": "k4_stray_bracket",
+   "ext": ".py",
+   "file": "python_k4_stray_bracket.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# ]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "86d5d0e4137460f28941f8ca036a1f9503349383d98e1679483360ea6186e113",
+   "bytes": 625,
+   "lines": 51,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      13,
+      18,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k4_stray_bracket.py.txt"
+  },
+  {
+   "key": "python|k5_opener_inside_opener",
+   "lang": "python",
+   "case": "k5_opener_inside_opener",
+   "ext": ".py",
+   "file": "python_k5_opener_inside_opener.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=x5@0,\n# @beacon[\n#   id=y5@0,\n#   slice_labels=lab-x5,\n#   kind=ast,\n#   comment=Comment of x5@0.,\n# ]\ndef x5():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "b9fc8835c569858f7d5b72a11ab58d85bc84490ba353bc9a8feaf8e02ce32faa",
+   "bytes": 766,
+   "lines": 61,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "y5@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x5@0": {
+      "line": 11,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     },
+     "y5@0": {
+      "line": 13,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      18,
+      "kept",
+      "y5@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      52,
+      57,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k5_opener_inside_opener.py.txt"
+  },
+  {
+   "key": "python|k6_one_line_block",
+   "lang": "python",
+   "case": "k6_one_line_block",
+   "ext": ".py",
+   "file": "python_k6_one_line_block.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[ id=x6@0, slice_labels=one, kind=ast, ]\ndef x6():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "a5f722552b1c161f7a7c326347af16883f1c74a578a9cb24b26e2a6886b4fc15",
+   "bytes": 695,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 16)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "<no-id@11>": {
+      "line": 11,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      21,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k6_one_line_block.py.txt"
+  },
+  {
+   "key": "python|k7_close_lost_bracket",
+   "lang": "python",
+   "case": "k7_close_lost_bracket",
+   "ext": ".py",
+   "file": "python_k7_close_lost_bracket.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "72016f6f64636094892e88b4da3ad9759a5a3b4b2ce0784727c8c1ce0e983b4e",
+   "bytes": 616,
+   "lines": 48,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k7_close_lost_bracket.py.txt"
+  },
+  {
+   "key": "python|k8_bare_field_no_opener",
+   "lang": "python",
+   "case": "k8_bare_field_no_opener",
+   "ext": ".py",
+   "file": "python_k8_bare_field_no_opener.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n#   id=bare@0,\ndef x8():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n",
+   "sha256": "4c50f6d0a85c0ce9d5e1365bcad9a9d4214d8d94f9a3ffc4df6f7ca56f8a84f7",
+   "bytes": 660,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      16,
+      21,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k8_bare_field_no_opener.py.txt"
+  },
+  {
+   "key": "python|k9_unterminated_at_eof",
+   "lang": "python",
+   "case": "k9_unterminated_at_eof",
+   "ext": ".py",
+   "file": "python_k9_unterminated_at_eof.py",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\ndef f1():\n    return 1\n\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\ndef f2():\n    return 1\n\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\ndef f3():\n    return 1\n\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\ndef f4():\n    return 1\n\n\n# @beacon[\n#   id=x9@0,\n#   slice_labels=lab-x9,\n#   kind=ast,\n#   comment=Comment of x9@0.,\n",
+   "sha256": "d5c1d32f0e84e17f552d61a60447f5e01f3da710ae4d2a7e9b8b926e601de0ba",
+   "bytes": 713,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x9@0": {
+      "line": 50,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x9@0": {
+      "line": 50,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ],
+     [
+      50,
+      null,
+      "kept",
+      "x9@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/python_k9_unterminated_at_eof.py.txt"
+  },
+  {
+   "key": "shell|k10_lost_bracket_inside_string",
+   "lang": "shell",
+   "case": "k10_lost_bracket_inside_string",
+   "ext": ".sh",
+   "file": "shell_k10_lost_bracket_inside_string.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\ncat <<'EOF'\n# @beacon[\n#   id=x10@0,\n#   slice_labels=lab-x10,\nEOF\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "551e5eb41a2dd9514bcf0dddf1ec0303f7949ca6171a26216874d34d4bfefc31",
+   "bytes": 668,
+   "lines": 55,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 12, own opener at 17)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x10@0": {
+      "line": 12,
+      "kind": "span",
+      "labels": "lab-x10",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      12,
+      22,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      46,
+      51,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k10_lost_bracket_inside_string.sh.txt"
+  },
+  {
+   "key": "shell|k11_complete_block_inside_string",
+   "lang": "shell",
+   "case": "k11_complete_block_inside_string",
+   "ext": ".sh",
+   "file": "shell_k11_complete_block_inside_string.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\ncat <<'EOF'\n# @beacon[\n#   id=x11@0,\n#   slice_labels=lab-x11,\n#   kind=ast,\n#   comment=Comment of x11@0.,\n# ]\nEOF\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "c591ba5d54c020af765b2d413da2197e8fbeb88db2e756917cc901f1327e8bd1",
+   "bytes": 717,
+   "lines": 58,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x11@0": {
+      "line": 12,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x11@0": {
+      "line": 12,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      12,
+      17,
+      "kept",
+      "x11@0",
+      []
+     ],
+     [
+      20,
+      25,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      30,
+      35,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      49,
+      54,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k11_complete_block_inside_string.sh.txt"
+  },
+  {
+   "key": "shell|k12_lost_bracket_then_bracket_led_code",
+   "lang": "shell",
+   "case": "k12_lost_bracket_then_bracket_led_code",
+   "ext": ".sh",
+   "file": "shell_k12_lost_bracket_then_bracket_led_code.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=x12@0,\n#   slice_labels=lab-x12,\n#   kind=ast,\n#   comment=Comment of x12@0.,\n\narr=(\n  one\n)\n]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "c70dc41e55651e8191db92b308d93000a9ba5241dbc1bc7cb7ef301e90c3bbcc",
+   "bytes": 714,
+   "lines": 60,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x12@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0., arr=( one )",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x12@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      20,
+      "kept",
+      "x12@0",
+      [
+       "arr"
+      ]
+     ],
+     [
+      22,
+      27,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      38,
+      43,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      51,
+      56,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k12_lost_bracket_then_bracket_led_code.sh.txt"
+  },
+  {
+   "key": "shell|k13_lost_bracket_then_fieldlike_code",
+   "lang": "shell",
+   "case": "k13_lost_bracket_then_fieldlike_code",
+   "ext": ".sh",
+   "file": "shell_k13_lost_bracket_then_fieldlike_code.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=x13@0,\n#   slice_labels=lab-x13,\n#   kind=ast,\n#   comment=Comment of x13@0.,\n\nid=compute\nkind=mode\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "a599df63bfd54749b6866645c49a802a16d7e65834081e7cc3c4f456a67045e1",
+   "bytes": 719,
+   "lines": 58,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 20)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x13@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x13",
+      "comment": "Comment of x13@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      25,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      30,
+      35,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      49,
+      54,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k13_lost_bracket_then_fieldlike_code.sh.txt"
+  },
+  {
+   "key": "shell|k14_duplicate_keys",
+   "lang": "shell",
+   "case": "k14_duplicate_keys",
+   "ext": ".sh",
+   "file": "shell_k14_duplicate_keys.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   slice_labels=second-labels,\n#   id=b2dup@0,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "ec1b13776abd8acfe95f997dc915255070c9ea3b17c349086348bb19868c0ce4",
+   "bytes": 648,
+   "lines": 51,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "b2dup@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "b2dup@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      18,
+      "kept",
+      "b2dup@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k14_duplicate_keys.sh.txt"
+  },
+  {
+   "key": "shell|k1_opener_lost_bracket",
+   "lang": "shell",
+   "case": "k1_opener_lost_bracket",
+   "ext": ".sh",
+   "file": "shell_k1_opener_lost_bracket.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=x1@0,\n#   slice_labels=lab-x1,\n#   kind=ast,\n#   comment=Comment of x1@0.,\n\nx1() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "fc25f8444da31a2ab881b6d32c57d789562f38a794fe2fa8b252ed3257ca4b7c",
+   "bytes": 714,
+   "lines": 59,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 21)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x1@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x1",
+      "comment": "Comment of x1@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      50,
+      55,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k1_opener_lost_bracket.sh.txt"
+  },
+  {
+   "key": "shell|k2_bracket_trailing_comma",
+   "lang": "shell",
+   "case": "k2_bracket_trailing_comma",
+   "ext": ".sh",
+   "file": "shell_k2_bracket_trailing_comma.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ],\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "2f0cac447512bb6dc7d4cc7fe66e7171c9655a56cfbc486a82fb11b1991e82d4",
+   "bytes": 601,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k2_bracket_trailing_comma.sh.txt"
+  },
+  {
+   "key": "shell|k3_bracket_trailing_space",
+   "lang": "shell",
+   "case": "k3_bracket_trailing_space",
+   "ext": ".sh",
+   "file": "shell_k3_bracket_trailing_space.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ] \nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "cfde9a36ef03cf36be5962dc24c959cac15c9143a7e26a61ccb3ab69cc86abc4",
+   "bytes": 601,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k3_bracket_trailing_space.sh.txt"
+  },
+  {
+   "key": "shell|k4_stray_bracket",
+   "lang": "shell",
+   "case": "k4_stray_bracket",
+   "ext": ".sh",
+   "file": "shell_k4_stray_bracket.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# ]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "fd2269c613a77dda79dd1b9ca8998d4c4b21a941b260a39623298fae1e684240",
+   "bytes": 605,
+   "lines": 51,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      13,
+      18,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k4_stray_bracket.sh.txt"
+  },
+  {
+   "key": "shell|k5_opener_inside_opener",
+   "lang": "shell",
+   "case": "k5_opener_inside_opener",
+   "ext": ".sh",
+   "file": "shell_k5_opener_inside_opener.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=x5@0,\n# @beacon[\n#   id=y5@0,\n#   slice_labels=lab-x5,\n#   kind=ast,\n#   comment=Comment of x5@0.,\n# ]\nx5() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "46aaa2ed512b5b819a2d6afcf4b6bbb5fef38acf0c5a28e274b255487694ab9f",
+   "bytes": 741,
+   "lines": 61,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "y5@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x5@0": {
+      "line": 11,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     },
+     "y5@0": {
+      "line": 13,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      18,
+      "kept",
+      "y5@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      52,
+      57,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k5_opener_inside_opener.sh.txt"
+  },
+  {
+   "key": "shell|k6_one_line_block",
+   "lang": "shell",
+   "case": "k6_one_line_block",
+   "ext": ".sh",
+   "file": "shell_k6_one_line_block.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[ id=x6@0, slice_labels=one, kind=ast, ]\nx6() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "3644c6f0e71c0a3fe89da9a016b6ffbbc715ffadf9a3c7ead842813f1efd9557",
+   "bytes": 670,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 16)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "<no-id@11>": {
+      "line": 11,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      21,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k6_one_line_block.sh.txt"
+  },
+  {
+   "key": "shell|k7_close_lost_bracket",
+   "lang": "shell",
+   "case": "k7_close_lost_bracket",
+   "ext": ".sh",
+   "file": "shell_k7_close_lost_bracket.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "d90fe59430074da4e8ff44c0b946489a3a35d5a6db2ce916485b9689bad3ddd2",
+   "bytes": 596,
+   "lines": 48,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k7_close_lost_bracket.sh.txt"
+  },
+  {
+   "key": "shell|k8_bare_field_no_opener",
+   "lang": "shell",
+   "case": "k8_bare_field_no_opener",
+   "ext": ".sh",
+   "file": "shell_k8_bare_field_no_opener.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n#   id=bare@0,\nx8() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n",
+   "sha256": "fe5e3bd8b7991ba9967e3d03ec386db95baa1351ed374158ba8878bcc452b861",
+   "bytes": 635,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      16,
+      21,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k8_bare_field_no_opener.sh.txt"
+  },
+  {
+   "key": "shell|k9_unterminated_at_eof",
+   "lang": "shell",
+   "case": "k9_unterminated_at_eof",
+   "ext": ".sh",
+   "file": "shell_k9_unterminated_at_eof.sh",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1() {\n  echo hi\n}\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2() {\n  echo hi\n}\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3() {\n  echo hi\n}\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4() {\n  echo hi\n}\n\n# @beacon[\n#   id=x9@0,\n#   slice_labels=lab-x9,\n#   kind=ast,\n#   comment=Comment of x9@0.,\n",
+   "sha256": "4de1d76f66ff60ca9643aa1febcb8addcef3db79508936d2680ca4296fcc6bab",
+   "bytes": 693,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x9@0": {
+      "line": 50,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x9@0": {
+      "line": 50,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ],
+     [
+      50,
+      null,
+      "kept",
+      "x9@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/shell_k9_unterminated_at_eof.sh.txt"
+  },
+  {
+   "key": "sql|k10_lost_bracket_inside_string",
+   "lang": "sql",
+   "case": "k10_lost_bracket_inside_string",
+   "ext": ".sql",
+   "file": "sql_k10_lost_bracket_inside_string.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\nSELECT '\n-- @beacon[\n--   id=x10@0,\n--   slice_labels=lab-x10,\n' AS doc;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "91487953de67d3961a570056db7c086486702892deb9d53ab5d5f5c0b9035efc",
+   "bytes": 695,
+   "lines": 47,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 10, own opener at 15)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x10@0": {
+      "line": 10,
+      "kind": "span",
+      "labels": "lab-x10",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      20,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      40,
+      45,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k10_lost_bracket_inside_string.sql.txt"
+  },
+  {
+   "key": "sql|k11_complete_block_inside_string",
+   "lang": "sql",
+   "case": "k11_complete_block_inside_string",
+   "ext": ".sql",
+   "file": "sql_k11_complete_block_inside_string.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\nSELECT '\n-- @beacon[\n--   id=x11@0,\n--   slice_labels=lab-x11,\n--   kind=ast,\n--   comment=Comment of x11@0.,\n-- ]\n' AS doc;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "861482a1444f803664d31c2ba346e8c231d16f289a6f09fcdc9ddbed8c8e66f2",
+   "bytes": 747,
+   "lines": 50,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x11@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x11@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      15,
+      "kept",
+      "x11@0",
+      []
+     ],
+     [
+      18,
+      23,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      32,
+      37,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      43,
+      48,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k11_complete_block_inside_string.sql.txt"
+  },
+  {
+   "key": "sql|k12_lost_bracket_then_bracket_led_code",
+   "lang": "sql",
+   "case": "k12_lost_bracket_then_bracket_led_code",
+   "ext": ".sql",
+   "file": "sql_k12_lost_bracket_then_bracket_led_code.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=x12@0,\n--   slice_labels=lab-x12,\n--   kind=ast,\n--   comment=Comment of x12@0.,\n\nSELECT ARRAY[\n  1\n]\n;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "1feed421cdce907b7199df06084651eb01414a0331bdc0369a9d1f6a24994988",
+   "bytes": 746,
+   "lines": 52,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x12@0": {
+      "line": 9,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0., SELECT ARRAY[ 1",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x12@0": {
+      "line": 9,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      17,
+      "kept",
+      "x12@0",
+      []
+     ],
+     [
+      20,
+      25,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      28,
+      33,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k12_lost_bracket_then_bracket_led_code.sql.txt"
+  },
+  {
+   "key": "sql|k13_lost_bracket_then_fieldlike_code",
+   "lang": "sql",
+   "case": "k13_lost_bracket_then_fieldlike_code",
+   "ext": ".sql",
+   "file": "sql_k13_lost_bracket_then_fieldlike_code.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=x13@0,\n--   slice_labels=lab-x13,\n--   kind=ast,\n--   comment=Comment of x13@0.,\n\nid = 1\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "8ec15f8c8f59305023b688b63378c2fe2b72b36afb24a0bba8d2023d9927817a",
+   "bytes": 731,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 9, own opener at 17)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x13@0": {
+      "line": 9,
+      "kind": "ast",
+      "labels": "lab-x13",
+      "comment": "Comment of x13@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      22,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k13_lost_bracket_then_fieldlike_code.sql.txt"
+  },
+  {
+   "key": "sql|k14_duplicate_keys",
+   "lang": "sql",
+   "case": "k14_duplicate_keys",
+   "ext": ".sql",
+   "file": "sql_k14_duplicate_keys.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   slice_labels=second-labels,\n--   id=b2dup@0,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "fe1e364589c402bc76036bb8e5f4de753d9fe4b847e802fafac92d638a6e524a",
+   "bytes": 671,
+   "lines": 43,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "b2dup@0": {
+      "line": 9,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "b2dup@0": {
+      "line": 9,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      16,
+      "kept",
+      "b2dup@0",
+      []
+     ],
+     [
+      19,
+      24,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k14_duplicate_keys.sql.txt"
+  },
+  {
+   "key": "sql|k1_opener_lost_bracket",
+   "lang": "sql",
+   "case": "k1_opener_lost_bracket",
+   "ext": ".sql",
+   "file": "sql_k1_opener_lost_bracket.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=x1@0,\n--   slice_labels=lab-x1,\n--   kind=ast,\n--   comment=Comment of x1@0.,\n\nSELECT 1 AS x1;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "aa365b8177a7707d0fa80e8950f217be0d6b10310133c2bb7d55ff96d3e5678a",
+   "bytes": 737,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 9, own opener at 17)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x1@0": {
+      "line": 9,
+      "kind": "ast",
+      "labels": "lab-x1",
+      "comment": "Comment of x1@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      22,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      31,
+      36,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k1_opener_lost_bracket.sql.txt"
+  },
+  {
+   "key": "sql|k2_bracket_trailing_comma",
+   "lang": "sql",
+   "case": "k2_bracket_trailing_comma",
+   "ext": ".sql",
+   "file": "sql_k2_bracket_trailing_comma.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ],\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "b29e9a0f34ad4632aded21fb58d0379bdf51a4b110d2995a1c5772848c92e4a8",
+   "bytes": 622,
+   "lines": 41,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      14,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      17,
+      22,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k2_bracket_trailing_comma.sql.txt"
+  },
+  {
+   "key": "sql|k3_bracket_trailing_space",
+   "lang": "sql",
+   "case": "k3_bracket_trailing_space",
+   "ext": ".sql",
+   "file": "sql_k3_bracket_trailing_space.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ] \nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "bab3607dd24fe63425c7ff56f948ece718b52c43ebd793c79d9f0b46c5833dfd",
+   "bytes": 622,
+   "lines": 41,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      14,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      17,
+      22,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k3_bracket_trailing_space.sql.txt"
+  },
+  {
+   "key": "sql|k4_stray_bracket",
+   "lang": "sql",
+   "case": "k4_stray_bracket",
+   "ext": ".sql",
+   "file": "sql_k4_stray_bracket.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- ]\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "986361caa2b21c2d0032be5bbb34ffa88a4a818f0f656f6263e1f504f33a1e4f",
+   "bytes": 627,
+   "lines": 43,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      19,
+      24,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k4_stray_bracket.sql.txt"
+  },
+  {
+   "key": "sql|k5_opener_inside_opener",
+   "lang": "sql",
+   "case": "k5_opener_inside_opener",
+   "ext": ".sql",
+   "file": "sql_k5_opener_inside_opener.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=x5@0,\n-- @beacon[\n--   id=y5@0,\n--   slice_labels=lab-x5,\n--   kind=ast,\n--   comment=Comment of x5@0.,\n-- ]\nSELECT 1 AS x5;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "db057d9a8ced9c8bd96fc4f1b2875aa4db74b81faf1e1205b4d299f22ef10c9e",
+   "bytes": 767,
+   "lines": 51,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "y5@0": {
+      "line": 9,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x5@0": {
+      "line": 9,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     },
+     "y5@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      16,
+      "kept",
+      "y5@0",
+      []
+     ],
+     [
+      19,
+      24,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      44,
+      49,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k5_opener_inside_opener.sql.txt"
+  },
+  {
+   "key": "sql|k6_one_line_block",
+   "lang": "sql",
+   "case": "k6_one_line_block",
+   "ext": ".sql",
+   "file": "sql_k6_one_line_block.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[ id=x6@0, slice_labels=one, kind=ast, ]\nSELECT 1 AS x6;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "e736f0f03f5bca46bb3cd5c863376d713205d4f01ad5828834af752ce0c95135",
+   "bytes": 689,
+   "lines": 44,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 9, own opener at 12)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "<no-id@9>": {
+      "line": 9,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      17,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      20,
+      25,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k6_one_line_block.sql.txt"
+  },
+  {
+   "key": "sql|k7_close_lost_bracket",
+   "lang": "sql",
+   "case": "k7_close_lost_bracket",
+   "ext": ".sql",
+   "file": "sql_k7_close_lost_bracket.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "ce54ec45be1f7b2b006266fd590fe4850321cc87f7e9a7cb71f890a42166870d",
+   "bytes": 616,
+   "lines": 40,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      14,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      17,
+      22,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k7_close_lost_bracket.sql.txt"
+  },
+  {
+   "key": "sql|k8_bare_field_no_opener",
+   "lang": "sql",
+   "case": "k8_bare_field_no_opener",
+   "ext": ".sql",
+   "file": "sql_k8_bare_field_no_opener.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n--   id=bare@0,\nSELECT 1 AS x8;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n",
+   "sha256": "6777b4a4a0a25998852749df5bc6e84128bf67a193fa0d37e23f1a21e4215be0",
+   "bytes": 654,
+   "lines": 44,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      12,
+      17,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      20,
+      25,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      26,
+      31,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k8_bare_field_no_opener.sql.txt"
+  },
+  {
+   "key": "sql|k9_unterminated_at_eof",
+   "lang": "sql",
+   "case": "k9_unterminated_at_eof",
+   "ext": ".sql",
+   "file": "sql_k9_unterminated_at_eof.sql",
+   "text": "-- @beacon[\n--   id=b1@0,\n--   slice_labels=lab-b1,\n--   kind=ast,\n--   comment=Comment of b1@0.,\n-- ]\nSELECT 1 AS f1;\n\n-- @beacon[\n--   id=b2@0,\n--   slice_labels=lab-b2,\n--   kind=ast,\n--   comment=Comment of b2@0.,\n-- ]\nSELECT 1 AS f2;\n\n-- @beacon[\n--   id=s1@0,\n--   slice_labels=lab-s1,\n--   kind=span,\n--   comment=Comment of s1@0.,\n-- ]\n-- @beacon[\n--   id=b3@0,\n--   slice_labels=lab-b3,\n--   kind=ast,\n--   comment=Comment of b3@0.,\n-- ]\nSELECT 1 AS f3;\n\n-- @beacon-close[\n--   id=s1@0,\n-- ]\n-- @beacon[\n--   id=b4@0,\n--   slice_labels=lab-b4,\n--   kind=ast,\n--   comment=Comment of b4@0.,\n-- ]\nSELECT 1 AS f4;\n\n-- @beacon[\n--   id=x9@0,\n--   slice_labels=lab-x9,\n--   kind=ast,\n--   comment=Comment of x9@0.,\n",
+   "sha256": "c607e648092da839598f4da66fcab36a8f2f6c46651764b09a3998da7fdd1f1a",
+   "bytes": 719,
+   "lines": 46,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x9@0": {
+      "line": 42,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x9@0": {
+      "line": 42,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      9,
+      14,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      17,
+      22,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b4@0",
+      []
+     ],
+     [
+      42,
+      null,
+      "kept",
+      "x9@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/sql_k9_unterminated_at_eof.sql.txt"
+  },
+  {
+   "key": "yaml|k10_lost_bracket_inside_string",
+   "lang": "yaml",
+   "case": "k10_lost_bracket_inside_string",
+   "ext": ".yaml",
+   "file": "yaml_k10_lost_bracket_inside_string.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\ndoc: |\n  # @beacon[\n  #   id=x10@0,\n  #   slice_labels=lab-x10,\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "9bd567acb05c53e6ebae8dfce1b342dfe394c34c605dbfe3e079a7382b7db21c",
+   "bytes": 641,
+   "lines": 50,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 11, own opener at 15)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x10@0": {
+      "line": 11,
+      "kind": "span",
+      "labels": "lab-x10",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      20,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      24,
+      29,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      30,
+      35,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      42,
+      47,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k10_lost_bracket_inside_string.yaml.txt"
+  },
+  {
+   "key": "yaml|k11_complete_block_inside_string",
+   "lang": "yaml",
+   "case": "k11_complete_block_inside_string",
+   "ext": ".yaml",
+   "file": "yaml_k11_complete_block_inside_string.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\ndoc: |\n  # @beacon[\n  #   id=x11@0,\n  #   slice_labels=lab-x11,\n  #   kind=ast,\n  #   comment=Comment of x11@0.,\n  # ]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "d06536de6743fd3eaef503379b0c50e45415eae86fb9988f4ac0ec99a05a6231",
+   "bytes": 696,
+   "lines": 53,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x11@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x11@0": {
+      "line": 11,
+      "kind": "ast",
+      "labels": "lab-x11",
+      "comment": "Comment of x11@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      11,
+      16,
+      "kept",
+      "x11@0",
+      []
+     ],
+     [
+      18,
+      23,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      33,
+      38,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      45,
+      50,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k11_complete_block_inside_string.yaml.txt"
+  },
+  {
+   "key": "yaml|k12_lost_bracket_then_bracket_led_code",
+   "lang": "yaml",
+   "case": "k12_lost_bracket_then_bracket_led_code",
+   "ext": ".yaml",
+   "file": "yaml_k12_lost_bracket_then_bracket_led_code.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=x12@0,\n#   slice_labels=lab-x12,\n#   kind=ast,\n#   comment=Comment of x12@0.,\n\nlist:\n  - one\n]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "7aca750bf21811451c4d0bae393971c9b3b168b353ec159e56049c0944a36365",
+   "bytes": 690,
+   "lines": 55,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x12@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0., list: - one",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x12@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "lab-x12",
+      "comment": "Comment of x12@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      18,
+      "kept",
+      "x12@0",
+      []
+     ],
+     [
+      20,
+      25,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      35,
+      40,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      47,
+      52,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k12_lost_bracket_then_bracket_led_code.yaml.txt"
+  },
+  {
+   "key": "yaml|k13_lost_bracket_then_fieldlike_code",
+   "lang": "yaml",
+   "case": "k13_lost_bracket_then_fieldlike_code",
+   "ext": ".yaml",
+   "file": "yaml_k13_lost_bracket_then_fieldlike_code.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=x13@0,\n#   slice_labels=lab-x13,\n#   kind=ast,\n#   comment=Comment of x13@0.,\n\nid=compute\nkind=mode\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "6f2bebf98002b06c8f875e6412e5f8eb2b06832fed133fbf28317dc29b5b2216",
+   "bytes": 695,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 10, own opener at 19)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x13@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "lab-x13",
+      "comment": "Comment of x13@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      24,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      28,
+      33,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      46,
+      51,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k13_lost_bracket_then_fieldlike_code.yaml.txt"
+  },
+  {
+   "key": "yaml|k14_duplicate_keys",
+   "lang": "yaml",
+   "case": "k14_duplicate_keys",
+   "ext": ".yaml",
+   "file": "yaml_k14_duplicate_keys.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   slice_labels=second-labels,\n#   id=b2dup@0,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "989f1be9b3b480f118fcccd6c2f18c9060eaa1576bcfd227b4c9f30b938ae63f",
+   "bytes": 624,
+   "lines": 47,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "b2dup@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "MISSING",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "b2dup@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "second-labels",
+      "comment": "Comment of b2@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      17,
+      "kept",
+      "b2dup@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k14_duplicate_keys.yaml.txt"
+  },
+  {
+   "key": "yaml|k1_opener_lost_bracket",
+   "lang": "yaml",
+   "case": "k1_opener_lost_bracket",
+   "ext": ".yaml",
+   "file": "yaml_k1_opener_lost_bracket.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=x1@0,\n#   slice_labels=lab-x1,\n#   kind=ast,\n#   comment=Comment of x1@0.,\n\nx1:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "410c889d73081130907228782945af0918075bc357db8da7c28596c33d36ecc6",
+   "bytes": 684,
+   "lines": 54,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 10, own opener at 19)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x1@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "lab-x1",
+      "comment": "Comment of x1@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      24,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      28,
+      33,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      34,
+      39,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      46,
+      51,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k1_opener_lost_bracket.yaml.txt"
+  },
+  {
+   "key": "yaml|k2_bracket_trailing_comma",
+   "lang": "yaml",
+   "case": "k2_bracket_trailing_comma",
+   "ext": ".yaml",
+   "file": "yaml_k2_bracket_trailing_comma.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ],\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "16fe2525673cfb8bc7a4da58548cb6184ad9cc674e985dad8e75df1a7c7d770f",
+   "bytes": 577,
+   "lines": 45,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      15,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      19,
+      24,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k2_bracket_trailing_comma.yaml.txt"
+  },
+  {
+   "key": "yaml|k3_bracket_trailing_space",
+   "lang": "yaml",
+   "case": "k3_bracket_trailing_space",
+   "ext": ".yaml",
+   "file": "yaml_k3_bracket_trailing_space.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ] \nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "04e4041eb5491e267edc52e63a1d6b0bef90a298e32b709625c39e1d58f8e220",
+   "bytes": 577,
+   "lines": 45,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      15,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      19,
+      24,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k3_bracket_trailing_space.yaml.txt"
+  },
+  {
+   "key": "yaml|k4_stray_bracket",
+   "lang": "yaml",
+   "case": "k4_stray_bracket",
+   "ext": ".yaml",
+   "file": "yaml_k4_stray_bracket.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# ]\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "f1f991910b9c5b6d8b76b461745dcb892215ffe3309d8423db539817ccaa3587",
+   "bytes": 581,
+   "lines": 47,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      12,
+      17,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      27,
+      32,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      39,
+      44,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k4_stray_bracket.yaml.txt"
+  },
+  {
+   "key": "yaml|k5_opener_inside_opener",
+   "lang": "yaml",
+   "case": "k5_opener_inside_opener",
+   "ext": ".yaml",
+   "file": "yaml_k5_opener_inside_opener.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=x5@0,\n# @beacon[\n#   id=y5@0,\n#   slice_labels=lab-x5,\n#   kind=ast,\n#   comment=Comment of x5@0.,\n# ]\nx5:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "75732b5e1154c091d951845730f95429fdad4ec72f4707b4457030a79188cfd2",
+   "bytes": 711,
+   "lines": 56,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "y5@0": {
+      "line": 10,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x5@0": {
+      "line": 10,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     },
+     "y5@0": {
+      "line": 12,
+      "kind": "ast",
+      "labels": "lab-x5",
+      "comment": "Comment of x5@0.",
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      17,
+      "kept",
+      "y5@0",
+      []
+     ],
+     [
+      21,
+      26,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      30,
+      35,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      48,
+      53,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k5_opener_inside_opener.yaml.txt"
+  },
+  {
+   "key": "yaml|k6_one_line_block",
+   "lang": "yaml",
+   "case": "k6_one_line_block",
+   "ext": ".yaml",
+   "file": "yaml_k6_one_line_block.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[ id=x6@0, slice_labels=one, kind=ast, ]\nx6:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "e677c056e9b960039ce39d25b11e08bb8ad2592bba5ab0642d3a8b1ddf17958a",
+   "bytes": 640,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "STOLEN(by block at line 10, own opener at 14)",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "<no-id@10>": {
+      "line": 10,
+      "kind": "span",
+      "labels": null,
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      19,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      41,
+      46,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k6_one_line_block.yaml.txt"
+  },
+  {
+   "key": "yaml|k7_close_lost_bracket",
+   "lang": "yaml",
+   "case": "k7_close_lost_bracket",
+   "ext": ".yaml",
+   "file": "yaml_k7_close_lost_bracket.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "a679fa581b66c745f80ba0d7bc2122b1de4f0af6f0e1461fa4f0492d83d6d01a",
+   "bytes": 572,
+   "lines": 44,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      15,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      19,
+      24,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      36,
+      41,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k7_close_lost_bracket.yaml.txt"
+  },
+  {
+   "key": "yaml|k8_bare_field_no_opener",
+   "lang": "yaml",
+   "case": "k8_bare_field_no_opener",
+   "ext": ".yaml",
+   "file": "yaml_k8_bare_field_no_opener.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n#   id=bare@0,\nx8:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n",
+   "sha256": "bb8d2195138da85a1b7f307562efd0ed30f14fb9c81cc571798cb34f1be434d9",
+   "bytes": 605,
+   "lines": 49,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {},
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {},
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      14,
+      19,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      23,
+      28,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      29,
+      34,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      41,
+      46,
+      "kept",
+      "b4@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k8_bare_field_no_opener.yaml.txt"
+  },
+  {
+   "key": "yaml|k9_unterminated_at_eof",
+   "lang": "yaml",
+   "case": "k9_unterminated_at_eof",
+   "ext": ".yaml",
+   "file": "yaml_k9_unterminated_at_eof.yaml",
+   "text": "# @beacon[\n#   id=b1@0,\n#   slice_labels=lab-b1,\n#   kind=ast,\n#   comment=Comment of b1@0.,\n# ]\nf1:\n  key: 1\n\n# @beacon[\n#   id=b2@0,\n#   slice_labels=lab-b2,\n#   kind=ast,\n#   comment=Comment of b2@0.,\n# ]\nf2:\n  key: 1\n\n# @beacon[\n#   id=s1@0,\n#   slice_labels=lab-s1,\n#   kind=span,\n#   comment=Comment of s1@0.,\n# ]\n# @beacon[\n#   id=b3@0,\n#   slice_labels=lab-b3,\n#   kind=ast,\n#   comment=Comment of b3@0.,\n# ]\nf3:\n  key: 1\n\n# @beacon-close[\n#   id=s1@0,\n# ]\n# @beacon[\n#   id=b4@0,\n#   slice_labels=lab-b4,\n#   kind=ast,\n#   comment=Comment of b4@0.,\n# ]\nf4:\n  key: 1\n\n# @beacon[\n#   id=x9@0,\n#   slice_labels=lab-x9,\n#   kind=ast,\n#   comment=Comment of x9@0.,\n",
+   "sha256": "c56bbec6bc43acf37040921ef03666f0d99da4c03e21f394d90c98ca29fb7601",
+   "bytes": 669,
+   "lines": 50,
+   "fixed_candidate": "C1+C2",
+   "result": {
+    "good_now": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_now": {
+     "x9@0": {
+      "line": 46,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "good_nonswallowing": {
+     "b1@0": "same",
+     "b2@0": "same",
+     "s1@0": "same",
+     "b3@0": "same",
+     "b4@0": "same"
+    },
+    "extra_nonswallowing": {
+     "x9@0": {
+      "line": 46,
+      "kind": "ast",
+      "labels": "lab-x9",
+      "comment": null,
+      "span": [
+       null,
+       null
+      ]
+     }
+    },
+    "diag_blocks": [
+     [
+      1,
+      6,
+      "kept",
+      "b1@0",
+      []
+     ],
+     [
+      10,
+      15,
+      "kept",
+      "b2@0",
+      []
+     ],
+     [
+      19,
+      24,
+      "kept",
+      "s1@0",
+      []
+     ],
+     [
+      25,
+      30,
+      "kept",
+      "b3@0",
+      []
+     ],
+     [
+      37,
+      42,
+      "kept",
+      "b4@0",
+      []
+     ],
+     [
+      46,
+      null,
+      "kept",
+      "x9@0",
+      []
+     ]
+    ]
+   },
+   "verification": {
+    "reproduced": true,
+    "ids_missing_from_text": []
+   },
+   "frozen_source": "area1_q1/sources/yaml_k9_unterminated_at_eof.yaml.txt"
+  }
+ ]
+}

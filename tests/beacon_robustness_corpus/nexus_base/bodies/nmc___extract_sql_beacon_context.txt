@@ -1,0 +1,154 @@
+def _extract_sql_beacon_context(
+    lines: list[str],
+    comment_line: int,
+    beacon_id: Optional[str] = None,
+) -> List[str]:
+    """Extract nearby SQL comments (non-beacon) around a SQL beacon.
+    This populates the "CONTEXT COMMENTS (SQL)" section of Workflowy notes.
+
+    Includes:
+    - Lines that are part of a line comment starting with '--'
+    - Lines that are part of a block comment /* ... */ above/below the beacon
+      (we treat the entire contiguous comment region as context).
+
+    Excludes:
+    - Any @beacon[...] / @beacon-close[...] delimiter blocks (and their metadata lines).
+    Close-block semantics:
+    - When encountering a @beacon-close block, treat it as the terminator ONLY if
+      its id matches `beacon_id` (supports overlapping/nested span beacons).
+    """
+    context: List[str] = []
+
+    n = len(lines)
+    # @beacon[
+    #   id=auto-beacon@_extract_sql_beacon_context._sql_body-lr4m,
+    #   role=ƒ _sql_body(raw_line: str),
+    #   slice_labels=ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _sql_body(raw_line: str) -> str:
+        s = raw_line.lstrip()
+        if s.startswith("--"):
+            return s[2:].lstrip()
+        return s
+    # @beacon[
+    #   id=auto-beacon@_extract_sql_beacon_context._is_meta_block_end-y1eq,
+    #   role=ƒ _is_meta_block_end(body: str),
+    #   slice_labels=ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _is_meta_block_end(body: str) -> bool:
+        return body.strip().startswith("]")
+
+    # Precompute which lines are comment-like and a cleaned text version.
+    # For block comments we treat every line between /* and */ (inclusive)
+    # as comment-like, so that interior lines are visible in CONTEXT COMMENTS.
+    comment_mask: list[bool] = [False] * n
+    cleaned: list[str] = ["" for _ in range(n)]
+    in_block = False
+
+    for idx, raw in enumerate(lines, start=1):
+        stripped = raw.lstrip()
+        if not stripped:
+            continue
+        # Do not treat beacon delimiter blocks as human context.
+        if "@beacon" in stripped:
+            continue
+
+        is_comment = False
+        text = ""
+
+        if not in_block:
+            if stripped.startswith("--"):
+                is_comment = True
+                text = stripped[2:].lstrip()
+            elif "/*" in stripped:
+                is_comment = True
+                in_block = True
+                after = stripped.split("/*", 1)[1]
+                if "*/" in after:
+                    before_close, _ = after.split("*/", 1)
+                    text = before_close.strip()
+                    in_block = False
+                else:
+                    text = after.strip()
+        else:
+            # Inside a /* ... */ block
+            is_comment = True
+            if "*/" in stripped:
+                before_close, _ = stripped.split("*/", 1)
+                text = before_close.strip()
+                in_block = False
+            else:
+                text = stripped
+
+        if is_comment:
+            comment_mask[idx - 1] = True
+            cleaned[idx - 1] = text
+
+    # Determine end of the beacon metadata block (similar to parse_sql_beacon_blocks)
+    j = comment_line
+    block_end = comment_line
+    while j <= n:
+        body = _sql_body(lines[j - 1])
+        if _is_meta_block_end(body):
+            block_end = j
+            break
+        j += 1
+
+    # Above
+    j = comment_line - 1
+    while j >= 1:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j -= 1
+            continue
+        if comment_mask[j - 1]:
+            if cleaned[j - 1]:
+                context.insert(0, cleaned[j - 1])
+            j -= 1
+            continue
+        break
+
+    # Below
+    j = block_end + 1
+    while j <= n:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j += 1
+            continue
+        body = _sql_body(raw)
+        # Skip nested beacon opener blocks entirely.
+        if body.startswith("@beacon["):
+            j += 1
+            while j <= n:
+                inner_body = _sql_body(lines[j - 1])
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            continue
+        # Stop at a matching close block; ignore close blocks for other beacon ids.
+        if body.startswith("@beacon-close["):
+            close_id: Optional[str] = None
+            j += 1
+            while j <= n:
+                inner_body = _sql_body(lines[j - 1]).strip()
+                if inner_body.startswith("id=") and close_id is None:
+                    close_id = inner_body.split("=", 1)[1].strip()
+                    close_id = close_id.rstrip(",").rstrip("]").strip()
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            if beacon_id and close_id and close_id != beacon_id:
+                continue
+            break
+        if comment_mask[j - 1]:
+            if cleaned[j - 1]:
+                context.append(cleaned[j - 1])
+            j += 1
+            continue
+        break
+
+    return _strip_beacon_meta_blocks_from_context(context)

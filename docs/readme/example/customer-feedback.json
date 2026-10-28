@@ -1,0 +1,109 @@
+{
+  "markdown": "# 💬 Customer feedback #wfy-ns\n\nWhat customers tell us: support tickets, store reviews and interviews, one node per theme. Agents summarize new tickets here.\n\n## \"My list disappears in the store\": 14 tickets this month #offline\n\n> \"No signal in the basement aisle, and my list was blank.\"\n> \"Lost three items I added in the parking garage.\"\n\nPattern: underground stores, rural shops, parking garages. All on version 1.9.\n\n## Request: share one list with my partner #sharing\n\n31 requests since August. Most want both phones to edit the same list, live.\n\n## Praise: recipe import\n\n> \"Saves me twenty minutes every Sunday.\"\n\n## Review digest · Oct 12–18\n\n★ 4.6 from 212 reviews. Top themes: offline (18), sharing (11), scanner speed (6).\n\n## Old idea: download the whole product catalog #offline--deprecated\n\nSuperseded by the sync design: too big for older phones.",
+  "rows": [
+    {
+      "uuid": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "depth": 0,
+      "name": "💬 Customer feedback #wfy-ns",
+      "ancestor_path": [],
+      "occurrence": 0,
+      "created": 1793135162,
+      "modified": 1793135223
+    },
+    {
+      "uuid": "240683c8-3cc3-4444-8c88-3f068d886734",
+      "depth": 1,
+      "name": "\"My list disappears in the store\": 14 tickets this month #offline",
+      "ancestor_path": [
+        "786aeb66-594c-4551-abe5-2f9056db7f8c"
+      ],
+      "occurrence": 0,
+      "created": 1793135163,
+      "modified": 1793135245
+    },
+    {
+      "uuid": "7f8b756b-fb25-49a5-8080-8807bcca501f",
+      "depth": 1,
+      "name": "Request: share one list with my partner #sharing",
+      "ancestor_path": [
+        "786aeb66-594c-4551-abe5-2f9056db7f8c"
+      ],
+      "occurrence": 0,
+      "created": 1793135164,
+      "modified": 1793135246
+    },
+    {
+      "uuid": "d727d5dd-0f0a-4d04-b35c-b3ac5df1ee2a",
+      "depth": 1,
+      "name": "Praise: recipe import",
+      "ancestor_path": [
+        "786aeb66-594c-4551-abe5-2f9056db7f8c"
+      ],
+      "occurrence": 0,
+      "created": 1793135165,
+      "modified": 1793135165
+    },
+    {
+      "uuid": "03eac702-6f89-46ea-84ef-d9954b63b053",
+      "depth": 1,
+      "name": "Review digest · Oct 12–18",
+      "ancestor_path": [
+        "786aeb66-594c-4551-abe5-2f9056db7f8c"
+      ],
+      "occurrence": 0,
+      "created": 1793135166,
+      "modified": 1793135166
+    },
+    {
+      "uuid": "5a7d09f5-368c-4127-bb70-5a6a1cadf840",
+      "depth": 1,
+      "name": "Old idea: download the whole product catalog #offline--deprecated",
+      "ancestor_path": [
+        "786aeb66-594c-4551-abe5-2f9056db7f8c"
+      ],
+      "occurrence": 0,
+      "created": 1793135168,
+      "modified": 1793135248
+    }
+  ],
+  "render_spec": {
+    "kind": "raw_root",
+    "group_id": null,
+    "group_name": null,
+    "root_uuid": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+    "lightning": null,
+    "focus": null,
+    "match_scope": "name_and_note",
+    "descend_policy": "all",
+    "recursive": true,
+    "sort_by": "none",
+    "sort_direction": "asc",
+    "since": null,
+    "recent_by": null,
+    "headings_only": false,
+    "ancestor_notes": false,
+    "full_uuids": false,
+    "as_markdown": true,
+    "content_format": "markdown",
+    "tree_mode": "render_tree"
+  },
+  "render_scope": {
+    "kind": "raw_root",
+    "group_id": null,
+    "group_name": null,
+    "root_uuid": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+    "sort_by": "none",
+    "sort_direction": "asc",
+    "since": null,
+    "recent_by": null,
+    "headings_only": false,
+    "content_format": "markdown",
+    "tree_mode": "render_tree",
+    "match_scope": "name_and_note",
+    "descend_policy": "all",
+    "recursive": true,
+    "focus": null,
+    "live_gui_sync_supported": false,
+    "live_gui_sync_skipped_reason": "raw_dump"
+  }
+}

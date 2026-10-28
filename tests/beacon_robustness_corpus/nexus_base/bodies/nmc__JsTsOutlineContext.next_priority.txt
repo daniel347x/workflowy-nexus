@@ -1,0 +1,10 @@
+    def next_priority(self) -> int:
+        """Return the next priority value (100, 200, 300, ...) and advance.
+
+        Encapsulates the ``[100]`` mutable list that was previously
+        threaded as a closure variable. Each emitted outline node should
+        set ``"priority": ctx.next_priority()`` exactly once.
+        """
+        p = self.priority_counter[0]
+        self.priority_counter[0] += 100
+        return p

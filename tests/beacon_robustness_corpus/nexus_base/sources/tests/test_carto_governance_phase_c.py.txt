@@ -1,0 +1,621 @@
+from __future__ import annotations
+
+import ast
+import asyncio
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import psutil
+import pytest
+
+import nexus_map_codebase
+from workflowy_mcp import carto_job_governance as gov
+
+REPO = Path(__file__).resolve().parents[1]
+ACCOUNT = "a" * 32
+
+
+def _cache() -> dict[str, dict]:
+    return {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "folder": {"id": "folder", "parent_id": "repo"},
+        "file": {"id": "file", "parent_id": "folder"},
+        "other": {"id": "other", "parent_id": "repo"},
+    }
+
+
+def _snapshot(path: Path) -> dict:
+    # S02: governed snapshots carry the v1 lineage wrapper (legacy wrappers
+    # are bootstrap-only and no longer accepted at this seam).
+    payload = {
+        "snapshot_schema_version": 1,
+        "snapshot_timestamp": gov.utc_now_iso(),
+        "account_scope_id": ACCOUNT,
+        "epoch_number": 0,
+        "epoch_id": "e" * 32,
+        "incorporated_through_seq": 0,
+        "publication_kind": "full_refresh",
+        "nodes_export": {"nodes": list(_cache().values())},
+    }
+    gov.atomic_write_json(path, payload)
+    usable = gov.load_usable_nodes_export_snapshot(path)
+    usable["cache_by_id"] = _cache()
+    usable["freshness_disposition"] = "performed"
+    return usable
+
+
+def _claim(
+    tmp_path: Path, *, dedupe: str, job_id: str = "active", footprint=None, job_type="CARTO_REFRESH"
+):
+    process = psutil.Process(os.getpid())
+    return gov.build_claim(
+        job_id=job_id,
+        job_type=job_type,
+        dedupe_key=dedupe,
+        account_scope_id=ACCOUNT,
+        footprint=footprint
+        or gov.compute_footprint(tmp_path / "repo" / "a.py", "file", _cache(), kind="file"),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=os.getpid(),
+        pid_create_time=process.create_time(),
+        handoff_state="running",
+        spawn_started_at=None,
+        execution_owner="detached_worker",
+    )
+
+
+def _write_job(jobs: Path, claim: dict, *, status="running") -> Path:
+    path = jobs / f"{claim['job_id']}.json"
+    gov.atomic_write_json(
+        path,
+        {
+            "id": claim["job_id"],
+            "type": claim["job_type"],
+            "status": status,
+            "claim_id": claim["claim_id"],
+            "pid": claim["pid"],
+            "logs_path": str(jobs / f"{claim['job_id']}.log"),
+        },
+    )
+    return path
+
+
+def test_real_subprocess_folder_vs_contained_file_admission_race(tmp_path):
+    jobs = tmp_path / "jobs"
+    repo_path = tmp_path / "repo"
+    file_path = repo_path / "a.py"
+    repo_path.mkdir()
+    file_path.write_text("x", encoding="utf-8")
+    code = r"""
+import asyncio, os, sys, time
+from workflowy_mcp import carto_job_governance as gov
+jobs, target, root, kind, job_id = sys.argv[1:]
+cache = {"vault":{"id":"vault"}, "folder":{"id":"folder","parent_id":"vault"}, "file":{"id":"file","parent_id":"folder"}}
+footprint = gov.compute_footprint(target, root, cache, kind=kind)
+async def run():
+    try:
+        await gov.admit_carto_job(
+            job_file=os.path.join(jobs, job_id + ".json"),
+            job_payload={"id": job_id},
+            job_type="CARTO_REFRESH",
+            dedupe_key=("a" if kind == "folder" else "b") * 64,
+            account_scope_id="c" * 32,
+            footprint=footprint,
+            launcher="system",
+            parent_job_id=None,
+            prepared=False,
+            jobs_root=jobs,
+        )
+        print("WIN", flush=True)
+        time.sleep(1.5)
+    except gov.AdmissionRefusal:
+        print("LOSE", flush=True)
+asyncio.run(run())
+"""
+    processes = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                code,
+                str(jobs),
+                str(repo_path),
+                "folder",
+                "folder",
+                "folder-job",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ),
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                code,
+                str(jobs),
+                str(file_path),
+                "file",
+                "file",
+                "file-job",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ),
+    ]
+    outputs = []
+    for process in processes:
+        out, err = process.communicate(timeout=8)
+        assert process.returncode == 0, err
+        outputs.append(out.strip())
+    assert sorted(outputs) == ["LOSE", "WIN"]
+
+
+def test_negative_gate_dedupe_and_exact_cooldown_precede_freshness(tmp_path):
+    jobs = tmp_path / "jobs"
+    dedupe = gov.derive_dedupe_key(
+        account_scope_id=ACCOUNT,
+        job_type="CARTO_REFRESH",
+        mode="file",
+        root_uuid="file",
+    )
+    claim = _claim(tmp_path, dedupe=dedupe)
+    gov.write_claim(claim, jobs)
+    _write_job(jobs, claim)
+    hit = asyncio.run(gov.negative_exact_intent_gate(dedupe_key=dedupe, jobs_root=jobs))
+    assert hit["deduplicated"] is True
+    assert "no second preparation ran" in hit["note"]
+
+    terminal_job = json.loads((jobs / "active.json").read_text(encoding="utf-8"))
+    terminal_job["status"] = "completed"
+    gov.atomic_write_json(jobs / "active.json", terminal_job)
+    assert gov.finalize_claim(claim["claim_id"], jobs, now_epoch=100)
+    cooldown = asyncio.run(
+        gov.negative_exact_intent_gate(
+            dedupe_key=dedupe,
+            jobs_root=jobs,
+            now_epoch=110,
+            cooldown_seconds=60,
+        )
+    )
+    assert cooldown["error_kind"] == "cooldown_active"
+    assert cooldown["retry_after"] == 50
+
+
+def test_nonidentical_overlap_is_not_decided_by_negative_gate(tmp_path):
+    jobs = tmp_path / "jobs"
+    active = _claim(tmp_path, dedupe="b" * 64)
+    gov.write_claim(active, jobs)
+    _write_job(jobs, active)
+    assert asyncio.run(gov.negative_exact_intent_gate(dedupe_key="c" * 64, jobs_root=jobs)) is None
+
+
+def test_full_admission_refuses_claim_and_q3_overlap(tmp_path):
+    jobs = tmp_path / "jobs"
+    footprint = gov.compute_footprint(tmp_path / "repo" / "a.py", "file", _cache(), kind="file")
+    leases = gov.acquire_q3_leases([footprint], account_scope_id=ACCOUNT, jobs_root=jobs)
+    try:
+        with pytest.raises(gov.AdmissionRefusal) as caught:
+            asyncio.run(
+                gov.admit_carto_job(
+                    job_file=jobs / "new.json",
+                    job_payload={"id": "new"},
+                    job_type="CARTO_REFRESH",
+                    dedupe_key="d" * 64,
+                    account_scope_id=ACCOUNT,
+                    footprint=footprint,
+                    launcher="system",
+                    parent_job_id=None,
+                    prepared=False,
+                    jobs_root=jobs,
+                )
+            )
+        assert caught.value.kind == "overlap_conflict"
+    finally:
+        assert gov.release_q3_leases(leases, jobs_root=jobs) == []
+
+
+def test_claim_and_initial_job_are_one_admission_decision(tmp_path):
+    jobs = tmp_path / "jobs"
+    result = asyncio.run(
+        gov.admit_carto_job(
+            job_file=jobs / "new.json",
+            job_payload={"id": "new", "type": "CARTO_REFRESH"},
+            job_type="CARTO_REFRESH",
+            dedupe_key="e" * 64,
+            account_scope_id=ACCOUNT,
+            footprint=gov.compute_footprint(
+                tmp_path / "repo" / "a.py", "file", _cache(), kind="file"
+            ),
+            launcher="system",
+            parent_job_id=None,
+            prepared=False,
+            jobs_root=jobs,
+        )
+    )
+    assert result["admitted"] is True
+    job = json.loads((jobs / "new.json").read_text(encoding="utf-8"))
+    assert job["claim_id"] == result["claim"]["claim_id"]
+    assert job["status"] == "spawning"
+
+
+def test_job_json_failure_finalizes_without_claim_leak(tmp_path):
+    jobs = tmp_path / "jobs"
+
+    def fail_on_job(path, payload):
+        if Path(path).name == "new.json":
+            raise OSError("job write failed")
+        gov.atomic_write_json(path, payload)
+
+    with pytest.raises(OSError):
+        asyncio.run(
+            gov.admit_carto_job(
+                job_file=jobs / "new.json",
+                job_payload={"id": "new"},
+                job_type="CARTO_REFRESH",
+                dedupe_key="f" * 64,
+                account_scope_id=ACCOUNT,
+                footprint=gov.compute_footprint(
+                    tmp_path / "repo" / "a.py", "file", _cache(), kind="file"
+                ),
+                launcher="system",
+                parent_job_id=None,
+                prepared=False,
+                jobs_root=jobs,
+                atomic_writer=fail_on_job,
+            )
+        )
+    assert list(gov.governance_paths(jobs).claims_dir.glob("*.json")) == []
+    assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_prepared_launch_ack_precedes_b0_and_uses_frozen_empty_bytes(tmp_path):
+    async def scenario():
+        jobs = tmp_path / "jobs"
+        snapshot = _snapshot(tmp_path / "snapshot.json")
+        started = asyncio.Event()
+        release = asyncio.Event()
+        prepared = []
+        tasks = []
+
+        async def freshness():
+            started.set()
+            await release.wait()
+            return snapshot
+
+        async def preparation(payload, _selection):
+            prepared.append((payload["name"], payload["note"]))
+            return {"success": False, "operation": "noop"}
+
+        def task_factory(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        worker = tmp_path / "worker.py"
+        worker.write_text("# worker", encoding="utf-8")
+        digest = gov.derive_preparation_input_digest("ast_beacon_write", "file", "", "")
+        result = await gov.launch_carto_refresh_job(
+            root_uuid="file",
+            mode="file",
+            account_scope_id=ACCOUNT,
+            footprint_factory=lambda _selection: gov.compute_footprint(
+                tmp_path / "repo" / "a.py", "file", _cache(), kind="file"
+            ),
+            jobs_root=jobs,
+            worker_script=worker,
+            env={},
+            preparation=preparation,
+            preparation_gate=lambda _value: {"proceed": False, "status": "completed"},
+            frozen_payload={"name": "", "note": ""},
+            preparation_input_digest=digest,
+            initial_footprint=gov.compute_footprint(
+                tmp_path / "repo" / "a.py", "file", _cache(), kind="file"
+            ),
+            freshness_callback=freshness,
+            task_factory=task_factory,
+        )
+        assert result["success"] is True and result["preparing"] is True
+        assert prepared == []
+        await started.wait()
+        release.set()
+        await tasks[0]
+        assert prepared == [("", "")]
+        assert not list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+
+    asyncio.run(scenario())
+
+
+def test_prepared_b0_missing_snapshot_fails_and_finalizes(tmp_path):
+    async def scenario():
+        jobs = tmp_path / "jobs"
+        worker = tmp_path / "worker.py"
+        worker.write_text("# worker", encoding="utf-8")
+        tasks = []
+        prepared = []
+
+        def task_factory(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        result = await gov.launch_carto_refresh_job(
+            root_uuid="file",
+            mode="file",
+            account_scope_id=ACCOUNT,
+            footprint_factory=lambda _selection: {},
+            jobs_root=jobs,
+            worker_script=worker,
+            env={},
+            preparation=lambda *_args: prepared.append(True),
+            initial_footprint=gov.compute_footprint(
+                tmp_path / "repo" / "a.py", "file", _cache(), kind="file"
+            ),
+            freshness_callback=lambda: {"snapshot_path": tmp_path / "missing.json"},
+            task_factory=task_factory,
+        )
+        assert result["success"] is True
+        await tasks[0]
+        assert prepared == []
+        job = next(jobs.glob("*.json"))
+        assert json.loads(job.read_text(encoding="utf-8"))["status"] == "failed"
+        assert not list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+
+    asyncio.run(scenario())
+
+
+def test_exact_parent_child_coclaim_and_folder_contained_child_refusal(tmp_path):
+    jobs = tmp_path / "jobs"
+    parent_fp = gov.compute_footprint(tmp_path / "repo" / "a.md", "file", _cache(), kind="file")
+    parent = _claim(
+        tmp_path,
+        dedupe="1" * 64,
+        job_id="parent",
+        footprint=parent_fp,
+        job_type="CARTO_MARKDOWN_GENERATE",
+    )
+    gov.write_claim(parent, jobs)
+    _write_job(jobs, parent)
+    child = asyncio.run(
+        gov.admit_carto_job(
+            job_file=jobs / "child.json",
+            job_payload={"id": "child"},
+            job_type="CARTO_REFRESH",
+            dedupe_key="2" * 64,
+            account_scope_id=ACCOUNT,
+            footprint=parent_fp,
+            launcher="system",
+            parent_job_id="parent",
+            prepared=False,
+            jobs_root=jobs,
+        )
+    )
+    assert child["continuation_parent"]["job_id"] == "parent"
+
+    # A folder parent does not privilege a merely-contained file child.
+    other_jobs = tmp_path / "other-jobs"
+    folder_fp = gov.compute_footprint(tmp_path / "repo", "folder", _cache(), kind="folder")
+    folder_parent = _claim(
+        tmp_path,
+        dedupe="3" * 64,
+        job_id="folder-parent",
+        footprint=folder_fp,
+        job_type="CARTO_MARKDOWN_GENERATE",
+    )
+    gov.write_claim(folder_parent, other_jobs)
+    _write_job(other_jobs, folder_parent)
+    with pytest.raises(gov.AdmissionRefusal):
+        asyncio.run(
+            gov.admit_carto_job(
+                job_file=other_jobs / "child.json",
+                job_payload={"id": "contained-child"},
+                job_type="CARTO_REFRESH",
+                dedupe_key="4" * 64,
+                account_scope_id=ACCOUNT,
+                footprint=parent_fp,
+                launcher="system",
+                parent_job_id="folder-parent",
+                prepared=False,
+                jobs_root=other_jobs,
+            )
+        )
+
+
+def test_worker_adoption_by_suffix_before_bootstrap_contract(tmp_path):
+    jobs = tmp_path / "jobs"
+    dedupe = "5" * 64
+    claim = _claim(tmp_path, dedupe=dedupe, job_id="adopt-me")
+    claim["handoff_state"] = "spawning"
+    claim["spawn_started_at"] = gov.utc_now_iso()
+    claim["execution_owner"] = "launcher"
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim, status="spawning")
+    adopted = gov.adopt_carto_worker_claim(job_file)
+    assert adopted["claim"]["handoff_state"] == "running"
+    assert adopted["claim"]["execution_owner"] == "detached_worker"
+    assert adopted["job"]["status"] == "running"
+
+
+def test_worker_adoption_claim_id_mismatch_is_zero_mutation_refusal(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, dedupe="6" * 64, job_id="mismatch")
+    claim["handoff_state"] = "spawning"
+    claim["spawn_started_at"] = gov.utc_now_iso()
+    claim["execution_owner"] = "launcher"
+    gov.write_claim(claim, jobs)
+    job_file = _write_job(jobs, claim, status="spawning")
+    payload = json.loads(job_file.read_text(encoding="utf-8"))
+    payload["claim_id"] = "0" * 32
+    gov.atomic_write_json(job_file, payload)
+    with pytest.raises(gov.GovernanceConflictError):
+        gov.adopt_carto_worker_claim(job_file)
+    assert (
+        gov.read_claim(next(gov.governance_paths(jobs).claims_dir.glob("*.json")))["handoff_state"]
+        == "spawning"
+    )
+
+
+def test_claimed_c0_repair_atomic_cancel_and_noop(tmp_path):
+    path = tmp_path / "poisoned.md"
+    original = b"# H\ntext\x0bpath\n"
+    path.write_bytes(original)
+    with pytest.raises(RuntimeError):
+        nexus_map_codebase.repair_markdown_c0_controls_on_disk(
+            str(path), claim_id="claim", cancel_check=lambda: True
+        )
+    assert path.read_bytes() == original
+    logs = []
+    result = nexus_map_codebase.repair_markdown_c0_controls_on_disk(
+        str(path), claim_id="claim", log_callback=logs.append
+    )
+    assert result["changed"] is True
+    assert result["counts"]["VT"] == 1
+    assert b"\\v" in path.read_bytes()
+    mtime = path.stat().st_mtime_ns
+    noop = nexus_map_codebase.repair_markdown_c0_controls_on_disk(str(path), claim_id="claim")
+    assert noop["changed"] is False
+    assert path.stat().st_mtime_ns == mtime
+    assert logs and "counts" in logs[0]
+
+
+def _runtime_files() -> list[Path]:
+    roots = list((REPO / "src").rglob("*.py"))
+    roots.extend(
+        REPO / name
+        for name in (
+            "beacon_mutation_contract.py",
+            "beacon_obtain_code_snippet.py",
+            "glimpse_deploy_trampoline.py",
+            "markdown_roundtrip.py",
+            "nexus_map_codebase.py",
+        )
+    )
+    return [path for path in roots if path.is_file() and ".venv" not in path.parts]
+
+
+def _callers_of(symbol: str) -> set[str]:
+    callers = set()
+    for path in _runtime_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for function in [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]:
+            if function.name == symbol:
+                continue
+            if any(
+                isinstance(node, ast.Call)
+                and (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == symbol
+                    or isinstance(node.func, ast.Attribute)
+                    and node.func.attr == symbol
+                )
+                for node in ast.walk(function)
+            ):
+                callers.add(function.name)
+    return callers
+
+
+def test_phase_c_matrix_static_caller_closure():
+    assert _callers_of("launch_carto_refresh_job") == {
+        "_start_carto_refresh_job",
+        "_launch_phase8_refresh_via_authority",
+    }
+    assert _callers_of("_start_carto_refresh_job") == {
+        "_handle_refresh_file_node",
+        "_handle_refresh_folder_node",
+        "_handle_materialize_markdown_file",
+        "_handle_bulk_materialize_markdown",
+        "_beacon_map_refresh_impl",
+        "cartographer_refresh_async",
+    }
+    assert _callers_of("_start_carto_markdown_generate_job") == {
+        "_handle_generate_markdown_file",
+        "_handle_bulk_generate_markdown",
+    }
+    assert _callers_of("_start_carto_bulk_visible_apply_job") == {"_handle_bulk_apply_visible_nodes"}
+
+
+def test_reconcile_and_q3_matrix_static_caller_closure():
+    assert _callers_of("refresh_file_node_beacons") == {
+        "_handle_open_node_in_windsurf",  # dry_run=True N6
+        "_run_carto_bulk_visible_apply_job",  # claimed N4
+        "main",  # adopted worker N5
+        "refresh_folder_cartographer_sync",  # primitive-internal N2
+    }
+    assert _callers_of("refresh_folder_cartographer_sync") == {
+        "main",  # adopted folder worker
+        "refresh_file_node_beacons",  # primitive-internal N1
+    }
+    assert _callers_of("acquire_q3_leases_async") == {
+        "_acquire_single_beacon_q3_lease",
+        "_lightning_rod_mutate_beacons",
+    }
+
+
+def test_no_direct_carto_worker_spawn_outside_governance_authority():
+    offenders = []
+    for path in _runtime_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for function in [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]:
+            text = ast.get_source_segment(path.read_text(encoding="utf-8"), function) or ""
+            if "--carto-job-file" in text and any(
+                isinstance(node, ast.Call)
+                and (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "popen_factory"
+                    or isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "Popen"
+                )
+                for node in ast.walk(function)
+            ):
+                offenders.append((path.name, function.name))
+    assert offenders == [("carto_job_governance.py", "_spawn_governed_worker")]
+
+
+def test_worker_adoption_textually_precedes_client_import_and_cache_bootstrap():
+    source = (REPO / "src/workflowy_mcp/weave_worker.py").read_text(encoding="utf-8")
+    assert source.index("adopt_carto_worker_claim(args.carto_job_file)") < source.index(
+        "from workflowy_mcp.client.api_client import WorkFlowyClient"
+    )
+    # S03-B Gate (c): job-basis lineage validation, then the SINGLE current
+    # manifest-head adoption via the worker pin (audit A3) before mutation work.
+    assert source.index("adopt_carto_worker_claim(args.carto_job_file)") < source.index(
+        "pin_worker_operation_cache("
+    )
+    assert "Refreshing /nodes-export cache for WEAVE worker" not in source
+
+
+def test_freshness_disposition_vocabulary_and_matrix_ids_are_closed():
+    expected_ids = {
+        *(f"L{index}" for index in range(1, 12)),
+        *(f"Q{index}" for index in range(1, 4)),
+        *(f"N{index}" for index in range(1, 7)),
+        *(f"R{index}" for index in range(1, 6)),
+    }
+    assert set(gov.PHASE_C_ORIGIN_MATRIX) == expected_ids
+    spec = (REPO / "docs/SPEC-cartographer-safety-governance-v14.md").read_text(encoding="utf-8")
+    for row in [f"L{index}" for index in range(1, 12)]:
+        assert f"| {row} |" in spec
+    source = "\n".join(path.read_text(encoding="utf-8") for path in _runtime_files())
+    for disposition in (
+        "performed",
+        "skipped",
+        "gesture_performed",
+        "inherited_parent",
+    ):
+        assert disposition in source

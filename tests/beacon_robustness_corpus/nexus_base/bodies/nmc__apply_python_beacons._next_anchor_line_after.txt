@@ -1,0 +1,17 @@
+    def _next_anchor_line_after(line_no: int) -> Optional[int]:
+        """Find the next significant line, crossing only owned decorator syntax.
+
+        ``line_no`` is the beacon opener's 1-based line. A beacon embedded
+        inside a decorator expression is not a leading AST beacon. Unlike
+        reverse matching, forward mapping still permits ordinary comments.
+        """
+        if line_no - 1 in decorator_lines:
+            return None
+        for idx in range(line_no + 1, len(lines) + 1):
+            if idx - 1 in decorator_lines:
+                continue
+            stripped = lines[idx - 1].lstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            return idx
+        return None

@@ -1,0 +1,4 @@
+    def _assigned_name_note_label(name: str, *, qual_prefix: Optional[str]) -> str:
+        if qual_prefix is None and len(name) > 4 and name.startswith("__") and name.endswith("__"):
+            return "Module global"
+        return "Constant"

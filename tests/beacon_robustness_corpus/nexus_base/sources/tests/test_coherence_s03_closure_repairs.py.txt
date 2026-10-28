@@ -1,0 +1,760 @@
+"""S03 post-closure one-off repairs — work-order findings S03-CR-01 .. S03-CR-04.
+
+Each section names its finding:
+
+- S03-CR-01: F12+3 (MARKDOWN_GENERATE) jobs persist ``snapshot_lineage`` so
+  the detached worker's manifest-lineage validation accepts the job
+  (``weave_worker.main`` refuses a lineage-less job before current-head
+  pinning, with zero mutation).
+- S03-CR-02 (sparse repair, SUPERSEDING the 4fb06a1 ID-only overlay and
+  its forward task-snapshot advance): every epoch/lineage publication
+  route rebases through the ONE sparse transition-effect merge (per-field
+  authority — reflect / stale-carry / conflict-offer-wins, with
+  legacy-dirty evidence on every non-clean resolution), and a running
+  operation's task snapshot keeps its PINNED generation plus only its own
+  sparse write (never the newer publisher generation).
+- S03-CR-03: the selectable legacy MCP profile is boundary-migrated at
+  registration (never boundaryless-loud, never fail-soft), and
+  ``_modal_cache_nodes_by_id`` fails closed on a missing boundary.
+- S03-CR-04: CARTO launch admission footprints derive from the operation's
+  pinned view (one operation, one generation); the freshness selection's
+  map is the no-boundary fallback only.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import NOW, s02_node
+
+from workflowy_mcp.coherence import (
+    initialize_manifest_if_absent,
+    manifest_with_updates,
+    new_bootstrap_manifest,
+    read_manifest,
+    write_manifest,
+)
+from workflowy_mcp.coherence.operation_cache import (
+    cache_operation_boundary,
+    current_operation_cache,
+)
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+BASE_NODES = [
+    s02_node("A", name="alpha"),
+    s02_node("B", name="beta", parent_id="A"),
+    s02_node("C", name="gamma", parent_id="B"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Client factories (isolated jobs root + snapshot dir, real client semantics)
+# ---------------------------------------------------------------------------
+
+
+def _make_client(tmp_path: Path, monkeypatch):
+    from pydantic import SecretStr
+
+    from workflowy_mcp.client.api_client_core import WorkFlowyClientCore
+    from workflowy_mcp.models import APIConfiguration
+
+    jobs_root = tmp_path / "cartographer_jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.get_cartographer_jobs_dir",
+        lambda: jobs_root,
+    )
+
+    def _runtime_subdir(*parts):
+        if parts == ("nodes_export_cache",):
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            return snapshot_dir
+        return tmp_path.joinpath(*parts)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.client.api_client_core.get_runtime_subdir", _runtime_subdir
+    )
+    config = APIConfiguration(
+        api_key=SecretStr("test-key-1234"), base_url="https://workflowy.com/api/v1"
+    )
+    return WorkFlowyClientCore(config), jobs_root, snapshot_dir
+
+
+def _populate(client, nodes=BASE_NODES, *, epoch_id: str = "e" * 32, seq: int = 0):
+    return client._publish_lineage_view(
+        {"nodes": [dict(n) for n in nodes]},
+        epoch_number=1,
+        epoch_id=epoch_id,
+        adopted_sequence=seq,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+
+
+def _node_model(node_id: str, **fields):
+    from workflowy_mcp.models import WorkFlowyNode
+
+    return WorkFlowyNode(id=node_id, **fields)
+
+
+def _seed_lineage(probe, snapshot_dir: Path, nodes=BASE_NODES):
+    paths = probe._coherence_paths()
+    manifest = initialize_manifest_if_absent(
+        paths, new_bootstrap_manifest(paths.account_root.name, now=NOW)
+    )
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": [dict(n) for n in nodes]},
+        account_scope_id=paths.account_root.name,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=candidate, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    return paths
+
+
+def _make_lineage_client(tmp_path: Path, monkeypatch, nodes=BASE_NODES):
+    probe, _jr, snapshot_dir = _make_client(tmp_path, monkeypatch)
+    paths = _seed_lineage(probe, snapshot_dir, nodes)
+    client, _jr2, _sd2 = _make_client(tmp_path, monkeypatch)
+    return client, paths
+
+
+def _make_lineage_nexus_client(tmp_path: Path, monkeypatch, nodes=BASE_NODES):
+    """A WorkFlowyClientNexus warm-started populated from the same lineage."""
+
+    _client, paths = _make_lineage_client(tmp_path, monkeypatch, nodes=nodes)
+
+    from pydantic import SecretStr
+
+    from workflowy_mcp.client.api_client_nexus import WorkFlowyClientNexus
+    from workflowy_mcp.models import APIConfiguration
+
+    config = APIConfiguration(
+        api_key=SecretStr("test-key-1234"), base_url="https://workflowy.com/api/v1"
+    )
+    return WorkFlowyClientNexus(config), paths
+
+
+# ===========================================================================
+# S03-CR-02 — cross-epoch publication vs transition-COW write
+# ===========================================================================
+
+
+def test_cr02_first_attempt_rebases_cow_overlay(tmp_path, monkeypatch):
+    """CR-02/WO-1 (first-attempt path): the lineage adapter is entered with
+    the COW chain ALREADY current — no CAS race is needed for the bug.  A
+    STALE newer epoch payload (carrying the pre-write value) must not erase
+    the verified local write: the sparse effect carries its OWNED field,
+    leaves legacy-dirty evidence, and preserves the offer's unrelated
+    content (never whole-node)."""
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    client._apply_update_to_nodes_export_cache(_node_model("A", name="local-write"))
+    assert set(client._transition_cow_effects) == {"A"}
+
+    published = client._publish_lineage_view(
+        {
+            "nodes": [
+                s02_node("A", name="alpha"),  # stale: carries the pre-write value
+                s02_node("B", name="beta-b-new", parent_id="A"),
+            ]
+        },
+        epoch_number=2,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+
+    assert published.epoch_number == 2
+    assert published.nodes_by_id["A"]["name"] == "local-write"  # owned field carried
+    assert published.nodes_by_id["B"]["name"] == "beta-b-new"  # offer adopted otherwise
+    # The offer predated the write: the effect survives (with dirty
+    # evidence) until a reflecting offer retires it.
+    assert set(client._transition_cow_effects) == {"A"}
+    assert set(client._transition_cow_effects["A"].fields) == {"name", "completed"}
+    assert "A" in client._nodes_export_dirty_ids
+
+
+def test_cr02_cas_race_rebases_onto_cow_successor(tmp_path, monkeypatch):
+    """CR-02/WO-1 (the finding's deterministic repro): a COW successor wins
+    the CAS race between the lineage adapter's capture and its publish;
+    the retry must rebase the local write SPARSELY onto the epoch payload."""
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    publisher = client._cache_view_publisher
+
+    real_publish = publisher.publish_with_commit
+    fired = {"done": False}
+
+    def _racing_publish(new_view, *, expected_current, commit=None):
+        if not fired["done"]:
+            fired["done"] = True
+            # A transition-COW write lands between the lineage adapter's
+            # capture and its CAS attempt (through the REAL client bridge,
+            # so the sparse effect accumulates exactly as in production).
+            client._apply_update_to_nodes_export_cache(
+                _node_model("A", name="local-write")
+            )
+        return real_publish(new_view, expected_current=expected_current, commit=commit)
+
+    monkeypatch.setattr(publisher, "publish_with_commit", _racing_publish)
+
+    published = client._publish_lineage_view(
+        {
+            "nodes": [
+                s02_node("A", name="alpha"),  # stale: predates the write
+                s02_node("B", name="beta", parent_id="A"),
+            ]
+        },
+        epoch_number=2,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+
+    assert fired["done"] is True  # the race really fired
+    assert published.epoch_number == 2
+    assert published.nodes_by_id["A"]["name"] == "local-write"
+    assert set(client._transition_cow_effects) == {"A"}
+    assert "A" in client._nodes_export_dirty_ids
+
+
+@async_test
+async def test_cr02_reverse_order_task_snapshot_pins_t1_plus_own_write(
+    tmp_path, monkeypatch
+):
+    """CR-02/WO-3 (Contracts A/B): the epoch advance wins first; the
+    operation's own COW patch then rebases onto the newer generation for
+    the PROCESS publisher, while the operation's task snapshot keeps its
+    PINNED T1 markers and gains ONLY its own sparse write — never the
+    unrelated T2 changes (no mid-operation re-adoption)."""
+    client, paths = _make_lineage_client(tmp_path, monkeypatch)
+
+    async with cache_operation_boundary(client, "op") as snapshot:
+        pinned_epoch_id = snapshot.view.epoch_id
+        pinned_markers = (
+            snapshot.view.epoch_number,
+            snapshot.view.adopted_sequence,
+        )
+        # A racing refresh (same host) publishes the newer epoch FIRST, with
+        # an UNRELATED T2 change to B (A stays at its pre-write value).  The
+        # refresh cuts the epoch on disk AND adopts locally — mirror both.
+        t2_nodes = [
+            s02_node("A", name="alpha"),
+            s02_node("B", name="t2-beta", parent_id="A"),
+            s02_node("C", name="gamma", parent_id="B"),
+        ]
+        manifest = read_manifest(paths, required=True)
+        candidate = write_snapshot_candidate(
+            new_snapshot_candidate_path(tmp_path / "snapshots"),
+            {"nodes": [dict(n) for n in t2_nodes]},
+            account_scope_id=paths.account_root.name,
+            epoch_number=manifest.epoch_number + 1,
+            epoch_id="f" * 32,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+        )
+        write_manifest(
+            paths,
+            manifest_with_updates(
+                manifest,
+                epoch_number=manifest.epoch_number + 1,
+                epoch_id="f" * 32,
+                previous_epoch_id=manifest.epoch_id,
+                base_snapshot_path=candidate,
+                base_incorporated_through_seq=0,
+                journal_floor_seq=1,
+                journal_head_seq=0,
+            ),
+            expected_epoch_id=manifest.epoch_id,
+            expected_head_seq=manifest.journal_head_seq,
+        )
+        stale = client._publish_lineage_view(
+            {"nodes": [dict(n) for n in t2_nodes]},
+            epoch_number=snapshot.view.epoch_number + 1,
+            epoch_id="f" * 32,
+            adopted_sequence=0,
+            snapshot_timestamp=NOW,
+            account_scope_id=client._safe_account_scope_id(),
+            clear_dirty=True,
+        )
+        assert stale.epoch_id == "f" * 32
+        # The operation's pinned generation is undisturbed (pinning intact).
+        assert current_operation_cache().view.epoch_id == pinned_epoch_id
+        assert current_operation_cache().nodes_by_id["A"]["name"] == "alpha"
+        assert current_operation_cache().nodes_by_id["B"]["name"] == "beta"
+
+        # The operation's own eager write rebases onto the newer generation.
+        client._apply_update_to_nodes_export_cache(_node_model("A", name="local-write"))
+
+        # Publisher: T2 + the operation's write...
+        published_view = client._cache_view_publisher.capture()
+        assert published_view.epoch_id == "f" * 32
+        assert published_view.nodes_by_id["A"]["name"] == "local-write"
+        assert published_view.nodes_by_id["B"]["name"] == "t2-beta"
+        # ...task snapshot: T1 markers + ONLY the operation's own write —
+        # it must NOT import the unrelated T2 change to B.
+        verifier = current_operation_cache()
+        assert verifier.nodes_by_id["A"]["name"] == "local-write"  # read-your-writes
+        assert verifier.nodes_by_id["B"]["name"] == "beta"  # NOT t2-beta
+        assert verifier.view.epoch_id == pinned_epoch_id
+        assert (
+            verifier.view.epoch_number,
+            verifier.view.adopted_sequence,
+        ) == pinned_markers
+        assert verifier.operation_id == snapshot.operation_id
+
+    # A NEW operation captures T2 normally (boundary adoption).
+    async with cache_operation_boundary(client, "op-next") as fresh:
+        assert fresh.view.epoch_id == "f" * 32
+        assert fresh.nodes_by_id["A"]["name"] == "local-write"
+        assert fresh.nodes_by_id["B"]["name"] == "t2-beta"
+
+
+def test_cr02_carries_local_create_and_delete(tmp_path, monkeypatch):
+    """CR-02: a locally created node is carried INTO the epoch payload and a
+    locally deleted node is carried OUT of it (both stay in the store with
+    dirty evidence until a reflecting offer retires them)."""
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client, nodes=BASE_NODES[:2])  # A, B only
+    client._apply_create_to_nodes_export_cache(
+        _node_model("N", name="created"), parent_id="A"
+    )
+    client._apply_delete_to_nodes_export_cache("B")
+    assert set(client._transition_cow_effects) == {"N", "B"}
+
+    published = client._publish_lineage_view(
+        {
+            "nodes": [  # payload predates both mutations: has B, lacks N
+                s02_node("A", name="alpha"),
+                s02_node("B", name="beta", parent_id="A"),
+            ]
+        },
+        epoch_number=2,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+
+    assert "N" in published.nodes_by_id  # creation carried forward
+    assert published.nodes_by_id["N"]["name"] == "created"
+    assert "B" not in published.nodes_by_id  # deletion carried forward
+    assert set(client._transition_cow_effects) == {"N", "B"}  # still unreflected
+    assert client._nodes_export_dirty_ids >= {"N", "B"}  # dirty evidence marked
+
+
+def test_cr02_overlay_carries_until_an_offer_reflects_the_write(tmp_path, monkeypatch):
+    """CR-02/Contract E: consecutive non-reflecting publications never lose
+    the write (dirty evidence persists); the first offer that REFLECTS the
+    write retires the effect and the state goes clean."""
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    client._apply_update_to_nodes_export_cache(_node_model("A", name="local-write"))
+
+    # Publication 1: payload predates the write (mini-epoch shape).
+    first = client._publish_lineage_view(
+        {"nodes": [s02_node("A", name="alpha"), s02_node("B", name="beta", parent_id="A")]},
+        epoch_number=2,
+        epoch_id="f" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+    assert first.nodes_by_id["A"]["name"] == "local-write"
+    assert set(client._transition_cow_effects) == {"A"}
+    assert "A" in client._nodes_export_dirty_ids
+
+    # Publication 2: also non-reflecting — the write survives again.
+    second = client._publish_lineage_view(
+        {"nodes": [s02_node("A", name="alpha"), s02_node("B", name="beta", parent_id="A")]},
+        epoch_number=3,
+        epoch_id="1" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+    assert second.nodes_by_id["A"]["name"] == "local-write"
+    assert set(client._transition_cow_effects) == {"A"}
+    assert "A" in client._nodes_export_dirty_ids
+
+    # Publication 3: a refresh whose export captured the write — every
+    # owned field reflects, the effect retires, and the state goes clean.
+    # (Production export nodes always carry `completed` per the P6 probe, so
+    # the fixture mirrors that shape for the semantic reflection check.)
+    third = client._publish_lineage_view(
+        {
+            "nodes": [
+                s02_node("A", name="local-write", completed=False),
+                s02_node("B", name="beta", parent_id="A", completed=False),
+            ]
+        },
+        epoch_number=4,
+        epoch_id="2" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+    assert third.nodes_by_id["A"]["name"] == "local-write"
+    assert client._transition_cow_effects == {}
+    assert "A" not in client._nodes_export_dirty_ids
+
+
+def test_cr02_equal_marker_offer_still_preserves_cow_chain(tmp_path, monkeypatch):
+    """CR-02 regression guard: the equal-marker rule is untouched — an
+    equal-identity lineage offer never replaces the cumulative COW chain."""
+    client, _jr, _sd = _make_client(tmp_path, monkeypatch)
+    _populate(client)
+    client._apply_update_to_nodes_export_cache(_node_model("A", name="local-write"))
+    current = client._cache_view_publisher.capture()
+
+    returned = client._publish_lineage_view(
+        {"nodes": [s02_node("A", name="stale-refresh")]},
+        epoch_number=1,
+        epoch_id="e" * 32,
+        adopted_sequence=0,
+        snapshot_timestamp=NOW,
+        account_scope_id=client._safe_account_scope_id(),
+        clear_dirty=True,
+    )
+
+    assert returned is current
+    assert client._cache_view_publisher.capture().nodes_by_id["A"]["name"] == "local-write"
+    assert set(client._transition_cow_effects) == {"A"}
+
+
+# ===========================================================================
+# S03-CR-01 — F12+3 jobs persist snapshot_lineage
+# ===========================================================================
+
+
+def _install_markdown_launch_mocks(monkeypatch, tmp_path: Path, captured: list):
+    from workflowy_mcp import server
+
+    monkeypatch.setattr(server, "_carto_account_scope_and_env", lambda: ("0" * 32, {}))
+    monkeypatch.setattr(server, "_get_carto_jobs_base_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(server, "_governance_jobs_root", lambda: str(tmp_path))
+
+    async def _no_gate(**kwargs):
+        return None
+
+    monkeypatch.setattr(server, "negative_exact_intent_gate", _no_gate)
+
+    async def _no_coherence_gate(paths, *, operation):
+        return None
+
+    # S04: the hard-stop launch gate is covered separately by the S04 suites;
+    # these tests exercise launch/admission mechanics in isolation.
+    monkeypatch.setattr(
+        "workflowy_mcp.coherence.admission.require_coherence_mutation_admission",
+        _no_coherence_gate,
+    )
+    monkeypatch.setattr(
+        server,
+        "_carto_footprint_from_selection",
+        lambda **kwargs: {"kind": "file", "path": "C:\\repo\\x.md"},
+    )
+
+    async def _admit(**kwargs):
+        captured.append(kwargs["job_payload"])
+        return {"deduplicated": False, "claim": {"claim_id": "claim-1"}}
+
+    monkeypatch.setattr(server, "admit_carto_job", _admit)
+
+    async def _spawn(**kwargs):
+        return {"success": True, "pid": 4242}
+
+    monkeypatch.setattr(server, "_spawn_governed_worker", _spawn)
+    return server
+
+
+@async_test
+async def test_cr01_markdown_generate_payload_carries_snapshot_lineage(
+    tmp_path, monkeypatch
+):
+    """CR-01 (single F12+3): the admitted job payload records the selected
+    snapshot's manifest lineage (the worker's pre-pin validation requires it)."""
+    captured: list = []
+    server = _install_markdown_launch_mocks(monkeypatch, tmp_path, captured)
+    lineage = {
+        "account_scope_id": "0" * 32,
+        "epoch_number": 3,
+        "epoch_id": "f" * 32,
+        "incorporated_through_seq": 7,
+    }
+
+    async def fake_select(**kwargs):
+        return {
+            "snapshot_path": str(tmp_path / "sel.json"),
+            "cache_by_id": {"root": {"id": "root"}},
+            "freshness_disposition": "performed",
+            "snapshot_lineage": dict(lineage),
+        }
+
+    monkeypatch.setattr(server, "_carto_select_snapshot", fake_select)
+
+    result = await server._start_carto_markdown_generate_job("root-uuid")
+    assert result["success"] is True
+    (payload,) = captured
+    assert payload["snapshot_lineage"] == lineage
+
+
+@async_test
+async def test_cr01_selected_snapshot_branch_carries_envelope_lineage(
+    tmp_path, monkeypatch
+):
+    """CR-01 (bulk F12+3 gesture): the selected_snapshot branch loads the
+    shared gesture envelope and records ITS lineage in the child payload."""
+    captured: list = []
+    server = _install_markdown_launch_mocks(monkeypatch, tmp_path, captured)
+
+    envelope = write_snapshot_candidate(
+        new_snapshot_candidate_path(tmp_path),
+        {"nodes": [s02_node("root")]},
+        account_scope_id="0" * 32,
+        epoch_number=4,
+        epoch_id="a" * 32,
+        incorporated_through_seq=2,
+        publication_kind="full_refresh",
+    )
+
+    result = await server._start_carto_markdown_generate_job(
+        "root-uuid", selected_snapshot={"snapshot_path": str(envelope)}
+    )
+    assert result["success"] is True
+    (payload,) = captured
+    lineage = payload["snapshot_lineage"]
+    assert isinstance(lineage, dict) and lineage
+    assert lineage["epoch_id"] == "a" * 32
+    assert lineage["epoch_number"] == 4
+    assert lineage["incorporated_through_seq"] == 2
+
+
+# ===========================================================================
+# S03-CR-04 — CARTO launch admission uses the operation's one generation
+# ===========================================================================
+
+
+def _install_footprint_probes(monkeypatch, seen: dict):
+    from workflowy_mcp import server
+
+    def fake_resolve(*, node_id, nodes_by_id):
+        seen["resolve_map"] = nodes_by_id
+        return {"abs_path": "C:\\repo\\x.md"}
+
+    def fake_footprint(path, root_uuid, cache_by_id, *, kind):
+        seen["footprint_map"] = cache_by_id
+        return {"kind": kind, "path": path, "root_uuid": root_uuid}
+
+    monkeypatch.setattr(
+        "workflowy_mcp.client.api_client_nexus.resolve_cartographer_path_from_node",
+        fake_resolve,
+    )
+    monkeypatch.setattr(server, "compute_footprint", fake_footprint)
+    return server
+
+
+@async_test
+async def test_cr04_footprint_uses_pinned_view_inside_boundary(tmp_path, monkeypatch):
+    """CR-04: inside an operation boundary the admission footprint derives
+    from the operation's PINNED view (the generation that resolved and
+    classified the target), never the freshness selection's newer map."""
+    seen: dict = {}
+    server = _install_footprint_probes(monkeypatch, seen)
+    client, _paths = _make_lineage_client(tmp_path, monkeypatch)
+
+    selection = {"cache_by_id": {"R": {"id": "R", "note": "Path: C:\\repo\\new.md"}}}
+    async with cache_operation_boundary(client, "op") as snapshot:
+        server._carto_footprint_from_selection(
+            root_uuid="R",
+            mode="file",
+            selection=selection,
+            source_regime="standard",
+        )
+        # The pinned generation's map (BASE_NODES A/B/C), NOT the selection's R.
+        assert "A" in seen["resolve_map"]
+        assert "R" not in seen["resolve_map"]
+        assert seen["resolve_map"] == dict(snapshot.nodes_by_id)
+        assert "A" in seen["footprint_map"]
+        assert "R" not in seen["footprint_map"]
+
+
+def test_cr04_footprint_falls_back_to_selection_map_without_boundary(
+    tmp_path, monkeypatch
+):
+    """CR-04: with no operation boundary active (launcher-internal/defensive
+    paths), the selection's cache_by_id remains the footprint source."""
+    seen: dict = {}
+    server = _install_footprint_probes(monkeypatch, seen)
+
+    selection_map = {"R": {"id": "R", "note": "Path: C:\\repo\\new.md"}}
+    server._carto_footprint_from_selection(
+        root_uuid="R",
+        mode="file",
+        selection={"cache_by_id": selection_map},
+        source_regime="standard",
+    )
+    assert seen["resolve_map"] == selection_map
+    assert seen["footprint_map"] == selection_map
+
+
+# ===========================================================================
+# S03-CR-03 — legacy profile boundary migration
+# ===========================================================================
+
+
+def test_cr03_cache_free_set_matches_registry_derivation() -> None:
+    """CR-03 classification fence: the runtime cache-free set equals the set
+    derived from LEGACY_TOOL_MAPPING plus the family OperationSpecs'
+    cache_backed flags (single-source truth — drift fails loudly here)."""
+    from workflowy_mcp import server
+    from workflowy_mcp.legacy_tool_mapping import LEGACY_TOOL_MAPPING
+
+    registries = (
+        server.SYSTEM_REGISTRY,
+        server.NODE_REGISTRY,
+        server.TAG_REGISTRY,
+        server.ANCHOR_REGISTRY,
+        server.SLICE_GROUP_REGISTRY,
+        server.BEACON_REGISTRY,
+        server.GLIMPSE_REGISTRY,
+        server.LIGHTNING_ROD_REGISTRY,
+    )
+    all_specs = [spec for registry in registries for spec in registry.operations()]
+    cache_backed_targets = {
+        spec.canonical_name for spec in all_specs if spec.cache_backed
+    }
+    all_targets = {spec.canonical_name for spec in all_specs}
+    # Every mapping target must resolve to a real consolidated operation, or
+    # the derivation itself is unsound.
+    missing = {
+        target
+        for row in LEGACY_TOOL_MAPPING
+        for target in row.targets
+        if target not in all_targets
+    }
+    assert not missing, f"LEGACY_TOOL_MAPPING targets with no registry spec: {missing}"
+
+    expected_free = {
+        row.legacy_tool
+        for row in LEGACY_TOOL_MAPPING
+        if not any(target in cache_backed_targets for target in row.targets)
+    }
+    assert server._LEGACY_CACHE_FREE_TOOLS == expected_free
+
+
+def test_cr03_active_profile_wraps_cache_backed_and_skips_free(monkeypatch) -> None:
+    """CR-03: under the legacy profile the registration gate wraps every
+    cache-backed handler in the operation boundary and leaves cache-free
+    tools untouched (zero-coherence-work contracts preserved)."""
+    from workflowy_mcp import server
+
+    monkeypatch.setattr(server, "REGISTRATION_PROFILE", "legacy")
+    registered: list = []
+
+    def fake_tool(*args, **kwargs):
+        def deco(fn):
+            registered.append(fn)
+            return fn
+
+        return deco
+
+    monkeypatch.setattr(server.mcp, "tool", fake_tool)
+
+    async def probe():
+        return None
+
+    server._legacy_tool(name="workflowy_scry")(probe)
+    server._legacy_tool(name="nexus_ping")(probe)
+
+    assert registered[0] is not probe  # cache-backed → boundary-wrapped
+    assert registered[1] is probe  # cache-free → registered verbatim
+
+
+@async_test
+async def test_cr03_wrapped_legacy_tool_executes_inside_boundary(
+    tmp_path, monkeypatch
+):
+    """CR-03 end-to-end: the boundary-wrapped legacy route reaches the cache
+    accessor successfully (pre-migration this route raised CacheViewError)."""
+    from workflowy_mcp import server
+
+    client, _paths = _make_lineage_nexus_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(server, "get_client", lambda: client)
+
+    observed: dict = {}
+
+    async def probe(node_id=None, **_kwargs):
+        observed["snapshot"] = current_operation_cache(required=False)
+        # The loud §6.4 accessor — the exact call that failed pre-migration.
+        return client._get_nodes_export_cache_nodes()
+
+    wrapped = server._wrap_legacy_cache_operation_boundary(probe, "workflowy_scry")
+    nodes = await wrapped(node_id="A")
+
+    assert observed["snapshot"] is not None
+    assert observed["snapshot"].label == "legacy:workflowy_scry"
+    assert {str(n.get("id")) for n in nodes} == {"A", "B", "C"}
+    # The boundary reset on exit (no leaked snapshot in this task).
+    assert current_operation_cache(required=False) is None
+
+
+def test_cr03_modal_cache_nodes_by_id_fails_closed_without_boundary(
+    tmp_path, monkeypatch
+):
+    """CR-03: a missing operation boundary is a migration bug — the modal
+    cache map now fails CLOSED (previously the broad handler returned {})."""
+    from workflowy_mcp.coherence.errors import CacheViewError
+
+    client, _paths = _make_lineage_nexus_client(tmp_path, monkeypatch)
+    with pytest.raises(CacheViewError):
+        client._modal_cache_nodes_by_id()
+
+
+@async_test
+async def test_cr03_modal_cache_nodes_by_id_returns_map_inside_boundary(
+    tmp_path, monkeypatch
+):
+    """CR-03: inside a boundary the modal map builds normally (the fail-soft
+    {} path survives only for genuinely unavailable cache reads)."""
+    client, _paths = _make_lineage_nexus_client(tmp_path, monkeypatch)
+    async with cache_operation_boundary(client, "op"):
+        by_id = client._modal_cache_nodes_by_id()
+    assert set(by_id) == {"A", "B", "C"}

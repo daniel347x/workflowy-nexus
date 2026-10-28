@@ -1,0 +1,3022 @@
+{
+  "schema": 1,
+  "basis": "Master §5: 219 required rows plus five supplementary A9 mechanisms",
+  "attribution": "Owning unit Results and named suites; live-repository recon counts remain attributed starting data, not a fresh check.",
+  "unit_commits": {
+    "U01": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+    "U02": "004d1baf40ba893ce483f189c4ad351b49df0629",
+    "U03": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+    "U04": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+    "U05": "352b582824b71184998282ebb18264e677307bf0",
+    "U06": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+    "U07": "8b981ee (full: 8b981ee - see commit range)",
+    "U08": "d8da543801e71c2b2f7cd436b05fd15316154e7b"
+  },
+  "rows": [
+    {
+      "id": "A1-D1",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D2",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D3",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "forced code-crossing ranges refuse only the attempted plan/legacy/kit edit with expected/actual evidence; unchanged bytes/mtime and safe-neighbour continuation are pinned.",
+      "evidence": "[ap:Z0A3OQ] line 265",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D4",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D5",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D6",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D7",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D8",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r1_r2_retention_before_seed_and_uuid_recovery"
+      ],
+      "destination": "Work package J R1",
+      "disposition": "Failed-file retention supplied as policy; protected consumption is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A1-D9",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_one_analyzer_exception_costs_one_row_and_retains_observation"
+      ],
+      "destination": null,
+      "disposition": "check's file-local containment covers read/analysis failure and vanish with safe neighbours, not a blanket folder abort.",
+      "evidence": "[ap:QSF0GY] line 410",
+      "status": "linked"
+    },
+    {
+      "id": "A1-D10",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D11",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D12",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D13",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A1-D14",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D1",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D2",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D3",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_incomplete_claim_is_selected_not_absent_and_neighbour_is_writable",
+        "test_missing_comment_extent_is_field_local_to_known_label_splice"
+      ],
+      "destination": null,
+      "disposition": "Fixed: incomplete claimed records are selected for owned field work or return an extent answer, never create-beside.",
+      "evidence": "[ap:2805XL] line 410",
+      "status": "linked"
+    },
+    {
+      "id": "A2-D4",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D5",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D6",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D7",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D8",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D9",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D10",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D11",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D12",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D13",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D14",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "legacy Python/JS qualname and Markdown MD_PATH deletion outlines, byte ranges and fingerprints consume the same initial snapshot; their extra observation is gone.",
+      "evidence": "[ap:Z0A3OQ] line 266",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D15",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "kit untag consumes the shared proof before IO; inherited extent overshoot cannot publish code damage. Selection itself remains U03's concern.",
+      "evidence": "[ap:Z0A3OQ] line 267",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A2-D16",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_lost_bracket_candidates_reparse_separate_ids_without_other_changes"
+      ],
+      "destination": null,
+      "disposition": "lost-bracket candidates reparse as separate own-id blocks; exact-byte repair and neighbour tests in test_beacon_fix_resolutions.py.",
+      "evidence": "[ap:17V4PV] line 342; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A2-D17",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_lost_wrapper_candidate_reveals_headings_and_keeps_stray_arrow"
+      ],
+      "destination": null,
+      "disposition": "missing-wrapper candidates reveal headings without consuming later arrows/comments; every offered boundary passes U02, under Q1.",
+      "evidence": "[ap:17V4PV] line 343; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A2-D18",
+      "owner": "L",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger (conductor; not edited by this program)",
+      "disposition": "§5: 'D18 → L: interim operating ban is not changed by a source-only branch.'",
+      "evidence": "[ap:E4M6VX] §5 line 158",
+      "status": "ledger_only"
+    },
+    {
+      "id": "A3-D1",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_scoped_note_records_preserve_all_headers_and_decode_only_once",
+        "test_original_p3_legacy_absent_and_phantom_comment_witnesses"
+      ],
+      "destination": null,
+      "disposition": "Fixed: header-scoped metadata.",
+      "evidence": "[ap:2805XL] line 411",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D2",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_absolute_comment_authority_absence_conflicts_and_field_errors",
+        "test_legacy_scoped_comment_authority_conflicts_and_invalid_field_locality"
+      ],
+      "destination": null,
+      "disposition": "Fixed under the locked note-authoritative choice (not recon recommendation (a)).",
+      "evidence": "[ap:2805XL] line 412",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D3",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_legacy_headerless_adoption_keeps_comment_labels_and_implicit_kind"
+      ],
+      "destination": null,
+      "disposition": "Fixed: headerless adoption unions labels and preserves metadata.",
+      "evidence": "[ap:2805XL] line 413",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D4",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_implicit_kind_and_unrequested_snippets_stay_exact"
+      ],
+      "destination": null,
+      "disposition": "Fixed: snippets stay raw-identical on ordinary edits.",
+      "evidence": "[ap:2805XL] line 414",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D5",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_canonical_dedupe_and_delta_tokens_never_cascade",
+        "test_legacy_rich_fields_are_raw_identical_and_removals_are_reported"
+      ],
+      "destination": null,
+      "disposition": "Fixed under the locked absolute-label choice (not three-way merge): canonical first-occurrence dedupe and reported removals.",
+      "evidence": "[ap:2805XL] line 415",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D6",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_comment_matrix_roundtrip_and_semantic_idempotence",
+        "test_unquoted_historical_loss_is_not_guessed"
+      ],
+      "destination": null,
+      "disposition": "Fixed: quote-protected semantic roundtrip/idempotence.",
+      "evidence": "[ap:2805XL] line 416",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D7",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_rich_fields_are_raw_identical_except_requested_label_value"
+      ],
+      "destination": null,
+      "disposition": "Fixed without a blanket unknown-field veto: opaque assignments bound fields and survive safe label splices.",
+      "evidence": "[ap:2805XL] line 417",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D8",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "test_beacon_vue_sections.py::test_legacy_lost_bracket_selection_is_local_and_good_script_commits",
+        "test_original_vue_p5_legacy_bracket_comment_and_stale_beta_never_rebuild"
+      ],
+      "destination": null,
+      "disposition": "discharged through U03 §14: Vue finder/section loops removed.",
+      "evidence": "[ap:2805XL] line 418",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D9",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: stale beta adopts its attached block rather than duplicating.",
+      "evidence": "[ap:2805XL] line 419",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D10",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_original_markdown_p3_adoption_resurrection_comment_and_owned_wrapper"
+      ],
+      "destination": null,
+      "disposition": "Fixed: ordinary Markdown sync adopts the unique attached id rather than resurrecting beside it.",
+      "evidence": "[ap:2805XL] line 420",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D11",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_invalid_create_note_comment_does_not_block_labels"
+      ],
+      "destination": null,
+      "disposition": "Fixed: post-decode invalid note comments are withheld only as a field; labels still land.",
+      "evidence": "[ap:2805XL] line 421",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D12",
+      "owner": "L/declined",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger proposal / declined requirement",
+      "disposition": "§5: 'D12 → L/declined new token ban: structural recognition fixes its trigger; do not prohibit harmless marker text for Dan's own good.'",
+      "evidence": "[ap:E4M6VX] §5 line 159",
+      "status": "ledger_only"
+    },
+    {
+      "id": "A3-D13",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "all owned ordinary paths preserve outside bytes, including BOM, endings, controls, EOF and mode; explicit generation/C0 operations retain their named intent.",
+      "evidence": "[ap:Z0A3OQ] line 268",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A3-D14",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_metadata_cannot_introduce_code_and_invalid_comment_is_local",
+        "test_invalid_comment_preserves_disk_and_applies_labels"
+      ],
+      "destination": null,
+      "disposition": "invalid identifiable tags fail only their row; invalid ensure comment preserves disk text and applies valid labels with a failed comment-field outcome.",
+      "evidence": "[ap:17V4PV] line 344; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D15",
+      "owner": "U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_three_siblings_count_untagged_heading_before_tagged_candidates",
+        "test_nested_repeated_paths_follow_generator_priority_not_path_sort"
+      ],
+      "destination": null,
+      "disposition": "base still places second/third tagged sibling blocks on headings 1/2; final places them exactly on 2/3, including nested/normalized repeated paths.",
+      "evidence": "[ap:UT7L69] line 328; test names from its golden entries (lines 586-617)",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D16",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_create_scoped_fallback_validates_and_mints_no_role"
+      ],
+      "destination": null,
+      "disposition": "Fixed: preserve disk role, mint none.",
+      "evidence": "[ap:2805XL] line 422",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D17",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A3-D18",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_existing_api_never_resurrects_stale_note_text"
+      ],
+      "destination": null,
+      "disposition": "Fixed: no stale-note resurrection on existing API preserve/fill.",
+      "evidence": "[ap:2805XL] line 423",
+      "status": "linked"
+    },
+    {
+      "id": "A3-D19",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A4-D1",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_blocked_gap_does_not_hide_safe_neighbour"
+      ],
+      "destination": null,
+      "disposition": "Fixed: no substring gap permission; whole structural comments/stacks remain visible.",
+      "evidence": "[ap:2805XL] line 424",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D2",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_paired_implicit_span_never_promotes"
+      ],
+      "destination": null,
+      "disposition": "Fixed: explicit/paired implicit spans never become AST adoption candidates.",
+      "evidence": "[ap:2805XL] line 425",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D3",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_implicit_kind_and_unrequested_snippets_stay_exact"
+      ],
+      "destination": null,
+      "disposition": "Fixed: no kind materialization on implicit-kind updates.",
+      "evidence": "[ap:2805XL] line 426",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D4",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: a bare unidentifiable twin cannot overwrite its sibling.",
+      "evidence": "[ap:2805XL] line 427",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D5",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_identifiable_twin_writes_and_current_signature_witness_creates",
+        "test_stale_twin_signature_order_returns_candidates_and_safe_neighbour_commits"
+      ],
+      "destination": null,
+      "disposition": "Fixed: independently identifiable twins write; source-backed signatures can support the bare twin, stale ordinals alone cannot.",
+      "evidence": "[ap:2805XL] line 428",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D6",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_mapper_and_writer_production_comment_gap_witness"
+      ],
+      "destination": null,
+      "disposition": "Fixed: one comment/decorator attachment rule across mapper/writers/kit; recon's resemblance-based refusal NOT adopted (resemblance stays advisory).",
+      "evidence": "[ap:2805XL] line 429",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D7",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py"
+      ],
+      "destination": null,
+      "disposition": "offered remedies branch on structure/attachment/capability evidence; no unconditional refresh-as-repair advice. Stale-note writer projection remains U06.",
+      "evidence": "[ap:QSF0GY] line 412",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A4-D8",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: incomplete id-match is not absence; safe neighbours continue.",
+      "evidence": "[ap:2805XL] line 430",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D9",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_unmapped_orphan_reports_candidates_but_does_not_block_create"
+      ],
+      "destination": null,
+      "disposition": "Fixed: detached orphan preserved/reported without blocking a real create.",
+      "evidence": "[ap:2805XL] line 431",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D10",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: shared grouping plus lowest attached survivor, no top-position relocation.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D11",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_js_generator_and_exported_decorator_production_mapper_witness"
+      ],
+      "destination": null,
+      "disposition": "Fixed: real block-comment state and tree-owned TS decorators.",
+      "evidence": "[ap:2805XL] line 432",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D12",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: headerless adoption keeps comment and old labels.",
+      "evidence": "[ap:2805XL] line 433",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D13",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: stale reordered symbol/heading identity conflicts instead of wrong-block success; safe independent item still commits.",
+      "evidence": "[ap:2805XL] line 434",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D14",
+      "owner": "U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_m02_detached_ast_relocation_reports_original_metadata_and_target",
+        "test_m04_m05_m10_omissions_retain_source_metadata_and_safe_heading"
+      ],
+      "destination": null,
+      "disposition": "m02 relocation and m04/m05/m10 silent omissions reproduce at base; final pure preparation returns original metadata and reason/position/target rows.",
+      "evidence": "[ap:UT7L69] line 331; test names from its golden entries (lines 586-617)",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D15",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_retained_writer_codes_on_injected_adapter_disagreement"
+      ],
+      "destination": null,
+      "disposition": "every actual outline target is examined, with foreign/incomplete/implicit and resemblance facts separate from map/parser capability.",
+      "evidence": "[ap:QSF0GY] line 413",
+      "status": "linked"
+    },
+    {
+      "id": "A4-D16",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py"
+      ],
+      "destination": null,
+      "disposition": "module-level AST block above a docstring yields a finding with choices; no silent drop or FILE-node capability expansion.",
+      "evidence": "[ap:QSF0GY] line 414",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A4-D17",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_prepared_relocation_mapping_is_verified_before_publication"
+      ],
+      "destination": null,
+      "disposition": "selected relocation is prepared and mapping-verified before one commit; no write/restore safety mechanism.",
+      "evidence": "[ap:17V4PV] line 345; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D1",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: anchored duplicate's second block alone updates/deletes; exact-id span ambiguity item-local with candidates.",
+      "evidence": "[ap:2805XL] line 435",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D2",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: swap/reuse conflicts, rename adopts attached id, missing-id results have reasons; protected noop success mapping remains J's R7.",
+      "evidence": "[ap:2805XL] line 436",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D3",
+      "owner": "U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_equal_note_ids_keep_both_own_labels_comment_fields_and_duplicate_choice",
+        "test_several_records_on_one_heading_remain_selectable_and_neighbour_works"
+      ],
+      "destination": null,
+      "disposition": "at base U03 already prevents wrong-heading overwrite, but the second shared-id carrier is refused and remains blockless; final emits both own blocks and a U05 duplicate_id choice.",
+      "evidence": "[ap:UT7L69] line 329; test names from its golden entries (lines 586-617)",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D4",
+      "owner": "U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_duplicate_analyzer_is_read_only_then_explicit_u06_rename_changes_chosen_pair_only",
+        "test_mgp_id_byte_table_changes_only_duplicate_id_value"
+      ],
+      "destination": null,
+      "disposition": "base U02 already refuses the opener-only span rename with plan_mismatch; final default is read-only ambiguity, and either explicitly chosen keeper permits a paired opener/close rename through U06.",
+      "evidence": "[ap:UT7L69] line 330; test names from its golden entries (lines 586-617)",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D5",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: DR eight quoted Q2 fixtures twice, Q2b/P4e hijack, distinct-name spans and ambiguity controls.",
+      "evidence": "[ap:2805XL] line 437",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D6",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: no file-wide id cardinality veto ahead of anchoring.",
+      "evidence": "[ap:2805XL] line 438",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D7",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A5-D8",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A5-D9",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_close_only_file_cli_matches_core",
+        "test_check_clean_f1_reports_shared_info_and_shape_orphan",
+        "test_check_f2_shared_rows_and_kit_checks"
+      ],
+      "destination": null,
+      "disposition": "same kit parity disposition as A9-D13; supported fixtures and CLI witnesses pass.",
+      "evidence": "[ap:QSF0GY] line 415",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D10",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py"
+      ],
+      "destination": null,
+      "disposition": "every physical duplicate copy keeps its per-block findings; no id-unique gate.",
+      "evidence": "[ap:QSF0GY] line 416",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A5-D11",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_stale_span_remove_is_not_a_satisfied_noop_and_lists_rename_candidates"
+      ],
+      "destination": null,
+      "disposition": "stale span remove stays noop with note_beacon_id_missing_on_disk, warning and current rename_candidates; satisfied=false, no claimed removal.",
+      "evidence": "[ap:17V4PV] line 346; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D12",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "Fixed: MI forced-aaaa collision witness, finite fallback, all-section/incomplete reservations and explicit planned-id sets; only the new id changes.",
+      "evidence": "[ap:2805XL] line 439",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D13",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: nobody chooses an id when ids differ; numeric preference retired.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A5-D14",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py"
+      ],
+      "destination": null,
+      "disposition": "file-local U03 resemblance is info only with explicit choices, never a rename/refusal policy.",
+      "evidence": "[ap:QSF0GY] line 417",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A5-D15",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_id_field_choice_renames_unique_close_and_reports_churn_without_prefix_lock"
+      ],
+      "destination": "refusal declined (Master §5); U06 implements the allowed consequence-reporting behaviour",
+      "disposition": "explicit rename allowed with advisory UUID/stale-anchor/dependant consequences; declined prefix/history refusals not implemented.",
+      "evidence": "[ap:17V4PV] line 347; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D1",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices",
+        "test_extra_probes_unchanged_with_local_choice_and_safe_group"
+      ],
+      "destination": null,
+      "disposition": "implemented: F2/incomplete corruption is group-local; no swallowed edit is proposed, and a same-file compatible control still merges.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D2",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: Markdown metadata/wrapper extent comes only from U01 ownership; prose/editor notes stay outside deletions.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D3",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: nearest/lowest member survives in its own form; mapper and writer remain attached.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D4",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: grouping uses the map's actual physical attachment; literals and private next-line heuristics are excluded.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D5",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: id-less/uncertain member yields local choice; no empty id or transfer of a good neighbour's id.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D6",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices",
+        "test_extra_probes_unchanged_with_local_choice_and_safe_group"
+      ],
+      "destination": null,
+      "disposition": "implemented: one splice renderer, validated comment join, field/opaque fidelity and JSDoc preservation.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D7",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: distinct ids return all candidates; no automatic keeper choice.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D8",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_alias_bytes_and_outcomes"
+      ],
+      "destination": null,
+      "disposition": "implemented: alias rename selects real scanner field occurrences only, not code/literals/incomplete tails.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D9",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_alias_bytes_and_outcomes",
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: key-looking continuation/canonical-alias collision stays byte-identical with local candidates.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D10",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "hygiene dispatcher/three variants read one raw snapshot and delegate selected survivor/deletion edits and final publication; no raw truncation, whole-file newline reserialization or private hash-free write remains.",
+      "evidence": "[ap:Z0A3OQ] line 269",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A6-D11",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "alias canonicalization edits only scanner-owned key bytes from the initial snapshot and uses the shared final hash/publisher.",
+      "evidence": "[ap:Z0A3OQ] line 270",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A6-D12",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "tests/test_beacon_hygiene_shared.py",
+        "tests/test_beacon_hygiene_characterization.py"
+      ],
+      "destination": null,
+      "disposition": "implemented: all three passes return raw structured events/skips/findings; canonical ids → U05, protected projection → U09/J.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A6-D13",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_c0_bytes_and_outcomes"
+      ],
+      "destination": "U09/J (BR-09 header seam) for the deferred half",
+      "disposition": "MET for U04's owned path; completed ordinary-FILE C03 refresh DEFERRED to U09/J (BR-09): typed not_utf8 reaches mapper unchanged; missing-LINE-COUNT/sentinel integration remains protected work.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D14",
+      "owner": "U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_text_file_and_preparation_share_exact_e01_e08_tail_rule",
+        "test_eof_e01_e08_changes_only_physical_generation_tail"
+      ],
+      "destination": null,
+      "disposition": "E02-E04 text-form Unicode splits and E06/E08 CRLF conversion reproduce; final text/file/preparation share U02's physical tail rule.",
+      "evidence": "[ap:UT7L69] line 334; test names from its golden entries (lines 586-617)",
+      "status": "linked"
+    },
+    {
+      "id": "A6-D15",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices",
+        "test_extra_probes_unchanged_with_local_choice_and_safe_group"
+      ],
+      "destination": null,
+      "disposition": "consumed and pinned: one physical line/byte model, BOM/CRLF/FF/Unicode, and Vue per-section records; no independent dialect scanner.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "linked"
+    },
+    {
+      "id": "A7-D1",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "ordinary writes no longer pass through the global Markdown sanitizer; explicit claimed C0 repair is separate.",
+      "evidence": "[ap:Z0A3OQ] line 271",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A7-D2",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "unchanged source endings are byte-exact; new rows use the required local ending precedence, including kit CR-only/mixed cases.",
+      "evidence": "[ap:Z0A3OQ] line 272",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A7-D3",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "BOM, trailing blanks, literal separator/control bytes and missing final newline survive outside the edit; first-row deletion is pinned through plan, legacy and kit paths.",
+      "evidence": "[ap:Z0A3OQ] line 273",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A7-D4",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "one initial observation supplies the expected fingerprint, with the actual target hash checked immediately before replace; kit initial-read and restore races are covered. T2 is explicit, not falsely eliminated.",
+      "evidence": "[ap:Z0A3OQ] line 274",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A7-D5",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "test_beacon_commit_faults.py::test_seven_legacy_adapters_have_exact_delegation_and_one_publication_recipe"
+      ],
+      "destination": null,
+      "disposition": "Fixed by rerouting, not adding another verify-only writer: seven adapters use the shared selector/planner.",
+      "evidence": "[ap:2805XL] line 440",
+      "status": "linked"
+    },
+    {
+      "id": "A7-D6",
+      "owner": "U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_equal_note_ids_keep_both_own_labels_comment_fields_and_duplicate_choice"
+      ],
+      "destination": null,
+      "disposition": "base second carrier is a typed beacon_identity_conflict; final gives each heading its own values, supplied id retained on both, duplicate finding returned.",
+      "evidence": "[ap:UT7L69] line 332; test names from its golden entries (lines 586-617)",
+      "status": "linked"
+    },
+    {
+      "id": "A7-D7",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "one canonical binary atomic publisher replaces all owned raw/truncating publication paths, including kit; generated code mirrors its source.",
+      "evidence": "[ap:Z0A3OQ] line 275",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A7-D8",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_file_local_admission_keeps_busy_bytes_and_commits_free_file"
+      ],
+      "destination": null,
+      "disposition": "busy file unchanged (bytes and mtime), independent file commits; shared per-file admission, no retry_after.",
+      "evidence": "[ap:17V4PV] line 348; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A7-D9",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_colliding_pair_only_leaves_safe_neighbour"
+      ],
+      "destination": null,
+      "disposition": "duplicate/colliding pair fails locally; independent third commits.",
+      "evidence": "[ap:17V4PV] line 349; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A7-D10",
+      "owner": "L",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger (not built)",
+      "disposition": "§5: automatic retry → Ledger, not needed for safe correctness; U02: 'Ledger-only rows A7-D10/D16 retries, D13 temp sweep and D14 helper deletion were not built.'",
+      "evidence": "[ap:E4M6VX] §5 line 163 + [ap:Z0A3OQ] line 281",
+      "status": "ledger_only"
+    },
+    {
+      "id": "A7-D11",
+      "owner": "U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_maintenance_failure_is_local_with_same_file_safe_neighbour",
+        "test_compatibility_adapter_reads_once_publishes_once_and_returns_failed_headings"
+      ],
+      "destination": "J (protected phase-6→7 crash window; R-row)",
+      "disposition": "preparation/publisher aborts now prove old-or-new component bytes; the protected phase-6->phase-7 crash window remains outstanding for J, not claimed solved end to end.",
+      "evidence": "[ap:UT7L69] line 333; test names from its golden entries (lines 586-617)",
+      "status": "linked"
+    },
+    {
+      "id": "A7-D12",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r7_interrupted_delete_rerun_is_satisfied_but_unknown_labels_are_not"
+      ],
+      "destination": "Work package J R7",
+      "disposition": "Precise satisfied-noop classification supplied; protected success/gate join is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A7-D13",
+      "owner": "L",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger (not built)",
+      "disposition": "§5: aged temp sweep → Ledger; not built (U02 line 281).",
+      "evidence": "[ap:E4M6VX] §5 line 163 + [ap:Z0A3OQ] line 281",
+      "status": "ledger_only"
+    },
+    {
+      "id": "A7-D14",
+      "owner": "L",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger (not built)",
+      "disposition": "§5: unreachable helper deletion → Ledger; not built (U02 line 281).",
+      "evidence": "[ap:E4M6VX] §5 line 163 + [ap:Z0A3OQ] line 281",
+      "status": "ledger_only"
+    },
+    {
+      "id": "A7-D15",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "pre-commit proof, fsync/atomic publication, mode and byte/failure matrices cover the owned paths; does not claim protected phase-6 integration.",
+      "evidence": "[ap:Z0A3OQ] line 276",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A7-D16",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [],
+      "destination": "Ledger (retry half; U02 built error_kind only)",
+      "disposition": "error_kind only: disk_write_failed and structured expected/actual evidence are returned on owned publication failures; no retry, PermissionError loop or temp sweep was added.",
+      "evidence": "[ap:Z0A3OQ] line 277",
+      "status": "linked_no_test_named"
+    },
+    {
+      "id": "A8-D1",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "tests/test_beacon_hygiene_shared.py",
+        "tests/test_beacon_hygiene_characterization.py"
+      ],
+      "destination": null,
+      "disposition": "implemented as group-local evidence/skip, NOT the recon's whole-file corruption veto; independent groups/map proceed.",
+      "evidence": "[ap:SNQG3B] line 436-450; test links from its golden table clause column (lines 776-833)",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A8-D2",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_never_brittle_four_shapes_four_operations"
+      ],
+      "destination": "Work package J R2/R4/R6",
+      "disposition": "Current preparation findings supplied beside safe work; protected gesture bubbling is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A8-D3",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r2_r3_folder_clean_corrupt_unreadable_and_new_files"
+      ],
+      "destination": "Work package J R2/R3",
+      "disposition": "New-file preparation and failure rows supplied; folder caller join is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A8-D4",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_aggregation_complete_cap_status_and_committed_phase8_failure"
+      ],
+      "destination": "Work package J R3",
+      "disposition": "Mixed useful outcomes have exact counts and completed_with_warnings; terminal join is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A8-D5",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r4_r7_joined_bulk_keeps_refresh_warning_and_partial_success"
+      ],
+      "destination": "Work package J R4",
+      "disposition": "Node evidence retained now; follow-up refresh warnings at protected job await J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A8-D6",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r4_allowed_bulk_projection_keeps_failclosed_trigger_and_all_node_data"
+      ],
+      "destination": "Work package J R4",
+      "disposition": "Additive inner-loop outcomes/counter now; protected mixed terminal mapping awaits J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A8-D7",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r5_r6_one_publication_and_phase8_failure_do_not_erase_disk"
+      ],
+      "destination": "Work package J R6",
+      "disposition": "Separate publication/phase8 presentation supplied; protected job join is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A8-D8",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "selected edits are checked against structural-record ownership before any source publication.",
+      "evidence": "[ap:Z0A3OQ] line 278",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A8-D9",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "intended after-state and untouched identities/attachments/coverage are verified through the offset map; code-crossing/refusal controls and safe repairs pass.",
+      "evidence": "[ap:Z0A3OQ] line 279",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A8-D10",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_raised_item_exception_is_local_after_shared_infrastructure",
+        "test_fifty_items_one_invalid_tag_keeps_49_exact_deltas"
+      ],
+      "destination": null,
+      "disposition": "repeated same symbol retains two indexed error slots; independent third's exact block delta commits.",
+      "evidence": "[ap:17V4PV] line 350; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A8-D11",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_one_analyzer_exception_costs_one_row_and_retains_observation"
+      ],
+      "destination": null,
+      "disposition": "every per-file observe/analyze call in the report loop is contained; only genuine whole-engine infrastructure failure is operation_failed.",
+      "evidence": "[ap:QSF0GY] line 411",
+      "status": "linked"
+    },
+    {
+      "id": "A8-D12",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_extension_aliases_directory_ignore_and_explicit_target"
+      ],
+      "destination": null,
+      "disposition": "Mapper aliases .markdown/.bash aligned; YAML and ignore/explicit target semantics retained.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "implemented"
+    },
+    {
+      "id": "A8-D13",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_previous_front_acknowledgements_retain_findings"
+      ],
+      "destination": null,
+      "disposition": "Bulk comment/docstring corrected; Markdown writer comment was already current after U03.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "implemented"
+    },
+    {
+      "id": "A8-D14",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_aggregation_complete_cap_status_and_committed_phase8_failure"
+      ],
+      "destination": "Work package J R3",
+      "disposition": "200 preview never changes exact totals; full historic events retained; terminal consumption is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A9-D1",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_one_analyzer_exception_costs_one_row_and_retains_observation",
+        "test_exception_before_observation_has_explicit_unobserved_identity",
+        "test_vanished_after_collection_is_missing_and_neighbours_continue"
+      ],
+      "destination": null,
+      "disposition": "one analyzer/read defect becomes check_failed and both good neighbours retain exact rows (three-file tests).",
+      "evidence": "[ap:QSF0GY] line 404",
+      "status": "linked"
+    },
+    {
+      "id": "A9-D2",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r2_r3_folder_clean_corrupt_unreadable_and_new_files"
+      ],
+      "destination": "Work package J R3",
+      "disposition": "Every attempted file, including new failure, retained; protected aggregation awaits J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A9-D3",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_preparation_gates_order_one_final_map_and_analysis"
+      ],
+      "destination": "Work package J R2",
+      "disposition": "Actual U04 repair events and skips retained in preparation; protected callsite propagation is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A9-D4",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_ambiguous_row_matches_check_finding_id_and_public_ack_keeps_it"
+      ],
+      "destination": null,
+      "disposition": "ambiguous row has source_path/language/beacon_id/candidate_lines and the check's exact finding_id from the planning snapshot.",
+      "evidence": "[ap:17V4PV] line 351; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A9-D5",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_noop_and_commit_keep_findings_and_field_candidates",
+        "test_sync_noop_preserves_fail_closed_success_and_adds_current_findings"
+      ],
+      "destination": "R7 remainder → U09/J",
+      "disposition": "owned noop rows have reasons; sync keeps protected success:false. R7 remains U09/J.",
+      "evidence": "[ap:17V4PV] line 352; test names from the unit's symbol delta",
+      "status": "linked"
+    },
+    {
+      "id": "A9-D6",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r5_r6_one_publication_and_phase8_failure_do_not_erase_disk"
+      ],
+      "destination": "Work package J R5/R6",
+      "disposition": "U08 structured heading/omission/relocation results retained by joined components; job join is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A9-D7",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py",
+        "test_r2_duplicate_evidence_includes_unmapped_physical_copy"
+      ],
+      "destination": "Work package J R2/R3; detector transferred under U09 §3/§11.2",
+      "disposition": "check consumes the physical _duplicate_beacon_ids verdict; acn's separate mapped-note warning remains unchanged by boundary and must delegate through U09's manifest, applied by J. U09 supplies physical occurrence projection; sole protected caller drops the observation, so detector transfer is explicit.",
+      "evidence": "[ap:QSF0GY] line 405",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A9-D8",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_pages_concatenate_without_loss_at_curation_scale"
+      ],
+      "destination": null,
+      "disposition": "all findings reachable by exact paging; counts/summary stay global under filters; synthetic 1928 shape, not a claim to have checked the live repository.",
+      "evidence": "[ap:QSF0GY] line 406",
+      "status": "linked"
+    },
+    {
+      "id": "A9-D9",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py"
+      ],
+      "destination": null,
+      "disposition": "canonical content identity, observed witnesses, members and schema-bearing non-executable fixes on every row.",
+      "evidence": "[ap:QSF0GY] line 407",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A9-D10",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_aggregation_complete_cap_status_and_committed_phase8_failure"
+      ],
+      "destination": "Work package J R3",
+      "disposition": "Exact total/by-code/truncated alongside full detail, never capped counts.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A9-D11",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_br09_non_utf8_markdown_preserves_bytes_mtime_and_existing_nodes"
+      ],
+      "destination": "Work package J R1/R2",
+      "disposition": "Parse/read failure policy supplied; BR-09 header/sentinel completion must join retention at J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "A9-D12",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_marker_free_fingerprint_retains_single_binary_read"
+      ],
+      "destination": null,
+      "disposition": "one binary observation supplies scanner/map/attachments/planners and row hash; no legacy check source reread.",
+      "evidence": "[ap:QSF0GY] line 408",
+      "status": "linked"
+    },
+    {
+      "id": "A9-D13",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_close_only_file_cli_matches_core",
+        "test_check_clean_f1_reports_shared_info_and_shape_orphan",
+        "test_check_f2_shared_rows_and_kit_checks",
+        "test_check_orphan_reported_despite_decoy_id_line"
+      ],
+      "destination": null,
+      "disposition": "kit shares the projection/core/planner closures; private empty-id grouping, per-extra-copy rows and open-only problem classification removed.",
+      "evidence": "[ap:QSF0GY] line 409",
+      "status": "linked"
+    },
+    {
+      "id": "A9-D14",
+      "owner": "L",
+      "commit": null,
+      "tests": [],
+      "destination": "NEXUS BEACON CURATION run (handoff data)",
+      "disposition": "§5: 'D14,D15 → L curation data, not edits to product beacon placement.' U09: wrong-relocation candidates = A9-D14's detached server.py block. NEVER corrected.",
+      "evidence": "[ap:E4M6VX] §5 line 165 + u09_prompt_final.md line 106",
+      "status": "curation_data"
+    },
+    {
+      "id": "A9-D15",
+      "owner": "L",
+      "commit": null,
+      "tests": [],
+      "destination": "NEXUS BEACON CURATION run (handoff data)",
+      "disposition": "§5: D14,D15 → L curation data. U09: wrong-relocation candidates = f8_slice_policy.py 1/764 and transforms.py 1. NEVER corrected.",
+      "evidence": "[ap:E4M6VX] §5 line 165 + u09_prompt_final.md line 106",
+      "status": "curation_data"
+    },
+    {
+      "id": "A10-D1",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "tests/test_beacon_snippet_geometry.py",
+        "tests/test_beacon_snippet_outcomes.py"
+      ],
+      "destination": null,
+      "disposition": "MET: 186 clipped-own-block non-test rows now start at their named corrected top; context/AP-comment and full-corpus tests distinguish the base.",
+      "evidence": "[ap:5OMT8G] line 325; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A10-D2",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "tests/test_beacon_snippet_geometry.py",
+        "tests/test_beacon_snippet_outcomes.py"
+      ],
+      "destination": null,
+      "disposition": "MET: 72 foreign-metadata rows now exclude the neighbour; all six context adapters and corrupt-opening/closing/stray/incomplete controls exercise shared boundaries.",
+      "evidence": "[ap:5OMT8G] line 326; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A10-D3",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "tests/test_beacon_snippet_geometry.py",
+        "tests/test_beacon_snippet_outcomes.py"
+      ],
+      "destination": null,
+      "disposition": "MET/CONSUMED U01: background.js clearReconnectTimer 359-394->383-394, scheduleReconnect 359-408->396-408, connectWebSocket 359-574->410-574 are the three U01 mask deltas; no second bocs mask/filter.",
+      "evidence": "[ap:5OMT8G] line 327; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A10-D4",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "tests/test_beacon_snippet_geometry.py",
+        "tests/test_beacon_snippet_outcomes.py"
+      ],
+      "destination": null,
+      "disposition": "MET: shell reads always return a typed result or typed failure, never None/dispatcher TypeError; 154 layouts include shell open-only/empty cases.",
+      "evidence": "[ap:5OMT8G] line 328; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "A10-D5",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_read_open_only_uses_shared_eof_and_keeps_closed_neighbour"
+      ],
+      "destination": null,
+      "disposition": "MET: all 36 real frozen open-only spans read to their named EOF; Vue uses section end; open-only alone is normal, not degraded.",
+      "evidence": "[ap:5OMT8G] line 329; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D6",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_read_span_survives_missing_bracket_and_outline_error_with_physical_lines"
+      ],
+      "destination": null,
+      "disposition": "MET: U01 pairing alone supplies closes; five old helpers are delegates; kit and daemon consume records, retaining their intentional displayed endpoint difference.",
+      "evidence": "[ap:5OMT8G] line 330; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D7",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_duplicate_id_uses_current_anchor_not_a_stale_line",
+        "test_typed_extraction_failure_keeps_siblings_and_current_disk_anchor"
+      ],
+      "destination": null,
+      "disposition": "MET: current U03 independent attachment/signature selects a duplicate copy; id-only/stale-line-only returns complete candidates, not the first block.",
+      "evidence": "[ap:5OMT8G] line 331; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D8",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_client_span_text_cannot_shadow_header_id_or_kind"
+      ],
+      "destination": null,
+      "disposition": "MET: YAML id: admin, kind: ast and fake anchor text in SPAN TEXT cannot shadow the header/prefix; client fixture reads cfg@0's own span.",
+      "evidence": "[ap:5OMT8G] line 332; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D9",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_file_top_uses_one_physical_snapshot_even_after_a_search_miss"
+      ],
+      "destination": null,
+      "disposition": "MET: one physical snapshot supplies lines/outline; BOM/FF/U+2028 numbering stays aligned and parse/analysis failures remain visible with bounded source plus safe controls.",
+      "evidence": "[ap:5OMT8G] line 333; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D10",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_resolved_uuid_extraction_failure_never_falls_back_or_reads_suppression"
+      ],
+      "destination": null,
+      "disposition": "MET: successful Layer-1 resolution followed by vanished source returns source_extraction_failed with resolved_node_id/file/id, with no UUID-text retry or extra suppression read.",
+      "evidence": "[ap:5OMT8G] line 334; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D11",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_near_close_findings_and_closed_geometry_in_both_formats"
+      ],
+      "destination": null,
+      "disposition": "MET: near/orphan/incomplete closes retain useful open-only/degraded windows with U05 rows; no invented severity gate.",
+      "evidence": "[ap:5OMT8G] line 335; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D12",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_beacon_registry_routes_all_six_verbs_with_exact_unpack",
+        "test_snippet_json_format_routes_and_declares_extraction_failure"
+      ],
+      "destination": null,
+      "disposition": "MET: internal BeaconSnippetResult and compatible tuples carry strategy/location/findings; text/json fronts and declared extraction error are wired.",
+      "evidence": "[ap:5OMT8G] line 336; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D13",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "tests/test_agent_kit_commands.py (kit read)"
+      ],
+      "destination": null,
+      "disposition": "MET: kit read uses retained shared records/physical lines, open-only EOF and syntax-error-local span reads; AST/closed CLI presentation unchanged.",
+      "evidence": "[ap:5OMT8G] line 337; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D14",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_vue_ast_prefix_ids_read_their_own_block_and_symbol"
+      ],
+      "destination": null,
+      "disposition": "MET: Vue b2@0 and b2@00 read only their own exact metadata/symbol; all seven-language close layouts use section-aware U01 records.",
+      "evidence": "[ap:5OMT8G] line 338; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A10-D15",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "test_client_markdown_beacon_keeps_own_block_and_heading_authority"
+      ],
+      "destination": null,
+      "disposition": "MET: direct Markdown beacon-id AST reads include the decorated heading's whole canonical section and own wrapper, sharing MD_PATH/C0 heading authority.",
+      "evidence": "[ap:5OMT8G] line 339; test names from its golden entries (lines 1024-1039) / §9 test files",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C1",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_describe_teaches_every_code_and_names_the_doc",
+        "test_reference_doc_lists_every_code"
+      ],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-26 disposition above; final wrapper wording follows the now-reported variants.",
+      "evidence": "[ap:QSF0GY] line 433:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C2",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_describe_teaches_every_code_and_names_the_doc",
+        "test_reference_doc_lists_every_code"
+      ],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-27 disposition above; final repository/authority/test-claim wording.",
+      "evidence": "[ap:QSF0GY] line 434:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C3",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_file_path_returns_the_engines_exact_report",
+        "test_node_handle_root_folder_and_file",
+        "test_describe_teaches_every_code_and_names_the_doc"
+      ],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-24 disposition above; output rename complete.",
+      "evidence": "[ap:QSF0GY] line 435:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C4",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-03 disposition above; recovery/one-line grammar current.",
+      "evidence": "[ap:QSF0GY] line 436:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C5",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_row_details"
+      ],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-19 disposition above; consequences and physical choices current.",
+      "evidence": "[ap:QSF0GY] line 437:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C6",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-21 disposition above; stable text with timestamp confined.",
+      "evidence": "[ap:QSF0GY] line 438:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C7",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-22 disposition above; per-copy rows preserved.",
+      "evidence": "[ap:QSF0GY] line 439:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C8",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-23 disposition above; U01-owned, current vendor check green.",
+      "evidence": "[ap:QSF0GY] line 440:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C9",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-16 disposition above; U01-owned, no duplicate edit.",
+      "evidence": "[ap:QSF0GY] line 441:",
+      "status": "linked"
+    },
+    {
+      "id": "A9-C10",
+      "owner": "U05 (docs sweep shared with U09)",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_folder_check_quiet_but_general_mapping_keeps_ignore_log"
+      ],
+      "destination": "documentation sweep (U05/U09)",
+      "disposition": "CF-01 disposition above; quiet check, general logs preserved.",
+      "evidence": "[ap:QSF0GY] line 442:",
+      "status": "linked"
+    },
+    {
+      "id": "CF-01",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_folder_check_quiet_but_general_mapping_keeps_ignore_log"
+      ],
+      "destination": "M8IPKN pre-merge polish 'with the shared .nexusignore follow-up' (Ledger CF-01 destination)",
+      "disposition": "preserved quiet snapshot check/general mapper logging; no global logger rewrite (regression CONTROL). §5: quiet check-scoped ignore logging is U05 (no general ignore rewrite).",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-02",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_close_only_file_cli_matches_core"
+      ],
+      "destination": "M8IPKN polish (Ledger)",
+      "disposition": "every structural close, incomplete/orphan/adjacent included; marker mentions excluded. §5: disposed against the new behavior.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-03",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [],
+      "destination": "M8IPKN polish (Ledger)",
+      "disposition": "bounded incomplete-record recovery and one-line/comma-space terminator hint follow U01 facts.",
+      "evidence": "see summary source",
+      "status": "linked_no_test_named"
+    },
+    {
+      "id": "CF-04",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "spec errata at FINAL (Ledger)",
+      "disposition": "Ledger CF-04: spec errata only; nothing built changes. No assignment in Master §5.",
+      "evidence": "see summary source",
+      "status": "unassigned"
+    },
+    {
+      "id": "CF-05",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "closed in prior pass",
+      "disposition": "Ledger CF-05 status: done (U02 @b2ce31a, certified) in the prior pass; describe/docs guidance row.",
+      "evidence": "see summary source",
+      "status": "prior_program_done"
+    },
+    {
+      "id": "CF-06",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger destination: U01 implementer / auditor (open)",
+      "disposition": "Ledger CF-06: U01 implementer judgment call; auditor aware. No mention in U01's Result.",
+      "evidence": "see summary source",
+      "status": "unassigned"
+    },
+    {
+      "id": "CF-07",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger destination: Conductor Report (open)",
+      "disposition": "Ledger CF-07: Conductor Report with the folder choice. No assignment in §5.",
+      "evidence": "see summary source",
+      "status": "unassigned"
+    },
+    {
+      "id": "CF-08",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py (pair/CF-08 retirement witnesses)"
+      ],
+      "destination": null,
+      "disposition": "§5: 'CF-08 addressed by structural pairing (U01), not by another parser.' U01 retired the substring close tests of all six second passes via the structural opener/close grammar.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-09",
+      "owner": "U01/U03",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_writer_reconciliation.py (92 cases)"
+      ],
+      "destination": null,
+      "disposition": "§5: 'CF-09 retained with its 92-case regression.' U01: 'including the existing CF-09 92-case regression closure' (focused runs); U03: 'CF-09-style raw-byte controls retained'.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-10",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "spec errata at FINAL (open half)",
+      "disposition": "Ledger CF-10: describe/doc clauses done (U02 @b2ce31a, prior pass); R3/T2.10 spec errata OPEN.",
+      "evidence": "see summary source",
+      "status": "prior_program_done"
+    },
+    {
+      "id": "CF-11",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "Ledger destination: U01 implementer (one loop) / FINAL errata (open)",
+      "disposition": "Ledger CF-11: U01 implementer runs the §9 comparison over tracked files AND corpus (+ §9.2 fixtures); errata at FINAL. No mention in U01's Result.",
+      "evidence": "see summary source",
+      "status": "unassigned"
+    },
+    {
+      "id": "CF-12",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "tests/test_beacon_hygiene_characterization.py",
+        "tests/test_beacon_hygiene_shared.py"
+      ],
+      "destination": null,
+      "disposition": "implemented for both concerns: hygiene and aliases moved onto shared scanner/attachment authorities behind frozen characterization and positive controls.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-13",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_close_only_file_cli_matches_core",
+        "test_check_clean_f1_reports_shared_info_and_shape_orphan",
+        "test_check_f2_shared_rows_and_kit_checks",
+        "test_check_orphan_reported_despite_decoy_id_line"
+      ],
+      "destination": null,
+      "disposition": "tether closed on kit check; one shared authority, stdlib-only/forbidden-word build, no extension expansion.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-14",
+      "owner": "U01/U03",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "test_beacon_vue_sections.py::test_legacy_lost_bracket_selection_is_local_and_good_script_commits"
+      ],
+      "destination": null,
+      "disposition": "§5: 'CF-14 U01/U03.' U01 fixed the structural grammar; U03 discharged the legacy Vue writer through §14 (A3-D8).",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-15",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "spec errata at FINAL (Ledger; open)",
+      "disposition": "Ledger CF-15: U01 §11 item 5 literal search nit; spec errata at FINAL / U02 audit.",
+      "evidence": "see summary source",
+      "status": "unassigned"
+    },
+    {
+      "id": "CF-16",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [],
+      "destination": "U01 upkeep; verify the branch's final comment above _parse_disk_beacons_for_language",
+      "disposition": "U05: 'U01-owned structural/comment upkeep retained; no repeated behavioral edit here.' §5: disposed against the new behavior (never by copying stale prose).",
+      "evidence": "see summary source",
+      "status": "linked_no_test_named"
+    },
+    {
+      "id": "CF-17",
+      "owner": "U09/curation",
+      "commit": {
+        "U09": null
+      },
+      "tests": [],
+      "destination": "NEXUS BEACON CURATION run (U09 handoff)",
+      "disposition": "detached real server beacon remains curation data; not edited.",
+      "evidence": "see summary source",
+      "status": "curation_data"
+    },
+    {
+      "id": "CF-18",
+      "owner": "U01/U05",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [],
+      "destination": "T2.4 narrowing follow-up (Dan; Ledger)",
+      "disposition": "§5: 'CF-18/T2.4 narrowing ... lands in U01/U05.' U05: same shared wrapper-ownership evidence and controls as CF-26; no widening metadata ownership into prose.",
+      "evidence": "see summary source",
+      "status": "linked_no_test_named"
+    },
+    {
+      "id": "CF-19",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_row_details"
+      ],
+      "destination": null,
+      "disposition": "each code's consequence/remedy reflects the actual selector/field geometry; duplicate/twin/tuple absence is not a blanket write veto.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-20",
+      "owner": "U09/curation",
+      "commit": {
+        "U09": null
+      },
+      "tests": [],
+      "destination": "NEXUS BEACON CURATION run (U09 handoff)",
+      "disposition": "real repository module/JS beacon cleanup remains curation data; not edited.",
+      "evidence": "see summary source",
+      "status": "curation_data"
+    },
+    {
+      "id": "CF-21",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py"
+      ],
+      "destination": null,
+      "disposition": "mapper message/identity stable for unchanged bytes; timestamped sentinel is detail.name only, documented and tested.",
+      "evidence": "see summary source",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "CF-22",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_r2_duplicate_evidence_includes_unmapped_physical_copy"
+      ],
+      "destination": "Work package J R2/R3",
+      "disposition": "physical analysis retains duplicate-copy facts; U09 warning integration still explicitly deferred. U09 physical duplicate projection is ready; acn detector transfer is measured and explicit, not an active hook.",
+      "evidence": "see summary source",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "CF-23",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [],
+      "destination": "closed by U01 (upkeep decision recorded)",
+      "disposition": "U05: 'U01-owned vendor/local upkeep retained; current K vendor regeneration/check verifies closure.' U01 final: CF-23 labeling decision on _vue_sfc_sections / _parse_vue_sfc_tree (thin helpers remain unlabeled deliberately).",
+      "evidence": "see summary source",
+      "status": "linked_no_test_named"
+    },
+    {
+      "id": "CF-24",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_file_path_returns_the_engines_exact_report",
+        "test_node_handle_root_folder_and_file",
+        "test_describe_teaches_every_code_and_names_the_doc"
+      ],
+      "destination": "Dan's ruling (M8IPKN) applied",
+      "disposition": "target.resolved_uuid in both call forms, docs/describe/tests; input tolerated slips are not exposed aliases.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-25",
+      "owner": "(none in §5)",
+      "commit": null,
+      "tests": [],
+      "destination": "none unless triggered (Ledger)",
+      "disposition": "Ledger CF-25: shared _TOOL_PATH_HOST_RULE fragment wording; 'none unless triggered'.",
+      "evidence": "see summary source",
+      "status": "unassigned"
+    },
+    {
+      "id": "CF-26",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_describe_teaches_every_code_and_names_the_doc",
+        "test_reference_doc_lists_every_code"
+      ],
+      "destination": "M8IPKN pre-merge cleanup (recommended)",
+      "disposition": "four damaged Markdown wrapper variants (prose arrow, mermaid, HTML comment, heading-after-stray) report; canonical/inline/blank-gap controls remain valid.",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "CF-27",
+      "owner": "U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "test_describe_teaches_every_code_and_names_the_doc",
+        "test_reference_doc_lists_every_code"
+      ],
+      "destination": "M8IPKN pre-merge cleanup (recommended)",
+      "disposition": "repository path in returns and suffix, no dated NEXUS source lines, exact 34 authority triples, resolved_uuid, and named entry points (not universal no-call proof).",
+      "evidence": "see summary source",
+      "status": "linked"
+    },
+    {
+      "id": "U1",
+      "owner": "U01",
+      "commit": "9f48aa8b75109219f4aaa1e7f01d1fa61c934c89",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U2",
+      "owner": "U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U3",
+      "owner": "U02/U08/U09",
+      "commit": {
+        "U02": "004d1baf40ba893ce483f189c4ad351b49df0629",
+        "U08": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+        "U09": null
+      },
+      "tests": [
+        "tests/test_beacon_markdown_preparation.py",
+        "tests/test_beacon_markdown_publish.py",
+        "test_r5_r6_one_publication_and_phase8_failure_do_not_erase_disk"
+      ],
+      "destination": "Work package J R5/R6",
+      "disposition": "one observation, one publication, external-save locality and safe-neighbour controls pass; joined phase-8/job-state evidence remains U09/J's. U09 joined-component witnesses keep pre-publication bytes and committed disk evidence; whole-gesture activation is J.",
+      "evidence": "[ap:UT7L69] line 336",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "U4",
+      "owner": "U01/U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py",
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U5",
+      "owner": "U02/U05",
+      "commit": "352b582824b71184998282ebb18264e677307bf0",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py",
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py"
+      ],
+      "destination": null,
+      "disposition": "U05's shared read-only observation/findings side is delivered; U02's byte-proof/executor mechanisms are consumed, not rebuilt.",
+      "evidence": "[ap:QSF0GY] line 443",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U6",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U7",
+      "owner": "U03/U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py",
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U8",
+      "owner": "U03/U06/U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py",
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py",
+        "tests/test_beacon_snippet_geometry.py",
+        "tests/test_beacon_snippet_outcomes.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U9",
+      "owner": "U02/U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py",
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U10",
+      "owner": "U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U11",
+      "owner": "U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_many_candidates_do_not_multiply_full_analysis"
+      ],
+      "destination": "Work package J R2/R4",
+      "disposition": "533 candidate preparation uses one full final-file analysis; protected cadence consumption is J.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "U12",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "tests/test_beacon_hygiene_shared.py",
+        "tests/test_beacon_hygiene_characterization.py"
+      ],
+      "destination": null,
+      "disposition": "implemented: stacked explicit AST same-symbol/same-id compatible pairs merge; different-id/conflicting pairs remain choices.",
+      "evidence": "[ap:SNQG3B] line 451",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "U13",
+      "owner": "U05/U09",
+      "commit": {
+        "U05": "352b582824b71184998282ebb18264e677307bf0",
+        "U09": null
+      },
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py",
+        "tests/test_beacon_refresh_support.py",
+        "tests/test_beacon_integration_contract.py",
+        "test_r2_r3_folder_clean_corrupt_unreadable_and_new_files"
+      ],
+      "destination": "Work package J R2/R3",
+      "disposition": "U05 complete current-disk report/paging/containment is delivered; U09's joined refresh/job propagation remains pending by name. U09 adds identical new-file preparation and named failures; mapper aliases/explicit ignore scope are active, protected preparation join is J.",
+      "evidence": "[ap:QSF0GY] line 444",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "U14",
+      "owner": "U01/U09",
+      "commit": "d53a6ba7e38ad174d8105004295d60677c7ea666",
+      "tests": [
+        "test_r1_r2_retention_before_seed_and_uuid_recovery"
+      ],
+      "destination": "Work package J R1",
+      "disposition": "Whole-file failure differs from valid empty; fake UUIDs retained through recovery; J consumes policy.",
+      "evidence": "U09 repository component/front witnesses; NOT activated protected gestures",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "F1",
+      "owner": "U01/U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py",
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "F2",
+      "owner": "U04",
+      "commit": "208a0d765ba79a11b4d172229a4cf0dca17a83b9",
+      "tests": [
+        "test_frozen_area6_bytes_and_local_choices"
+      ],
+      "destination": null,
+      "disposition": "implemented: lost bracket/wrapper never lends ownership across source; ordinary bytes and safe groups are retained.",
+      "evidence": "[ap:SNQG3B] line 452 + golden rows py_06/js_02/md_04",
+      "status": "linked"
+    },
+    {
+      "id": "F3",
+      "owner": "U01/U02",
+      "commit": "004d1baf40ba893ce483f189c4ad351b49df0629",
+      "tests": [
+        "tests/test_beacon_structure_recovery.py",
+        "tests/test_beacon_source_snapshot.py",
+        "tests/test_beacon_lexical_code.py",
+        "tests/test_beacon_lexical_shell_data.py",
+        "tests/test_beacon_recorded_context.py",
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "F4",
+      "owner": "U02/U03",
+      "commit": "ab0653d92539e27ec9ce8ac3c307bf5ac01b2786",
+      "tests": [
+        "tests/test_beacon_byte_edits.py",
+        "tests/test_beacon_commit_faults.py",
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "F5",
+      "owner": "U03/U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py",
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "U09 closure links the Master-assigned concern to the owning unit suites; historical recon probes are not newly replayed against live repositories.",
+      "evidence": "Master §5 assignment + owning unit test suites; U01 final reference 6673f3cd",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "F6",
+      "owner": "U03/U05/U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py",
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py",
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "U05 exposes physical ambiguity/witness/action data using U03's selector evidence; applying a resolution is U06, not simulated here.",
+      "evidence": "[ap:QSF0GY] line 445",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "F7",
+      "owner": "U03/U05/U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_target_selection.py",
+        "tests/test_beacon_field_fidelity.py",
+        "tests/test_beacon_duplicate_reconcile.py",
+        "tests/test_beacon_minting.py",
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py",
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "U05 exposes advisory resemblance/attachment choices without selecting or renaming; U03 evidence retained and U06 execution remains pending.",
+      "evidence": "[ap:QSF0GY] line 446",
+      "status": "coverage_linked"
+    },
+    {
+      "id": "F8",
+      "owner": "U05/U09",
+      "commit": {
+        "U05": "352b582824b71184998282ebb18264e677307bf0",
+        "U09": null
+      },
+      "tests": [
+        "tests/test_beacon_findings_identity.py",
+        "tests/test_beacon_check_engine.py",
+        "tests/test_beacon_check_paging.py",
+        "tests/test_beacon_check_verb.py",
+        "tests/test_beacon_refresh_support.py",
+        "tests/test_beacon_integration_contract.py",
+        "test_never_brittle_four_shapes_four_operations"
+      ],
+      "destination": "Work package J R1-R7",
+      "disposition": "check-side file-local failures and complete aggregate/report data delivered; refresh/job/UI propagation is U09/J, not inferred from component tests. U09 supplies exact cadence/containment/terminal components and permitted front evidence; protected gesture consumption is J.",
+      "evidence": "[ap:QSF0GY] line 447",
+      "status": "component_ready_join_outstanding"
+    },
+    {
+      "id": "F9",
+      "owner": "U02/U08",
+      "commit": "d8da543801e71c2b2f7cd436b05fd15316154e7b",
+      "tests": [
+        "test_maintenance_failure_is_local_with_same_file_safe_neighbour"
+      ],
+      "destination": "J R5 (join)",
+      "disposition": "component abort stages plus atomic-replace/CAS witnesses pass; protected gesture join deferred to J R5.",
+      "evidence": "[ap:UT7L69] line 335",
+      "status": "linked"
+    },
+    {
+      "id": "F10",
+      "owner": "U07",
+      "commit": "8b981ee (full: 8b981ee - see commit range)",
+      "tests": [
+        "tests/test_beacon_snippet_geometry.py",
+        "tests/test_beacon_snippet_outcomes.py"
+      ],
+      "destination": null,
+      "disposition": "MET: independent five finders/foreign-window absorption/shell None/free-text missing outcomes in the inventory's F10 row are replaced by shared geometry and typed local outcomes, exercised through production APIs, not a test sidecar.",
+      "evidence": "[ap:5OMT8G] line 340",
+      "status": "linked"
+    },
+    {
+      "id": "A9-M1",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "consumes U05's bf1 content-derived finding identity, no alternative id/store. [supplementary: Area-9 mechanism row, not a Master §5 numbered D row]",
+      "evidence": "[ap:17V4PV] line 353",
+      "status": "supplementary"
+    },
+    {
+      "id": "A9-M2",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "consumes current witnesses/offered action schemas, with additive Q1/Q2 operands only. [supplementary: Area-9 mechanism row, not a Master §5 numbered D row]",
+      "evidence": "[ap:17V4PV] line 354",
+      "status": "supplementary"
+    },
+    {
+      "id": "A9-M3",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "test_beacon_fix_verb.py (M3 verb tests)"
+      ],
+      "destination": null,
+      "disposition": "beacon.fix is registered, implemented and tested; it delegates to U02, not a legacy text writer. [supplementary: Area-9 mechanism row, not a Master §5 numbered D row]",
+      "evidence": "[ap:17V4PV] line 355",
+      "status": "supplementary"
+    },
+    {
+      "id": "A9-M4",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "current findings re-derived, caller's choice validated, stale honest; no waiver/store. [supplementary: Area-9 mechanism row, not a Master §5 numbered D row]",
+      "evidence": "[ap:17V4PV] line 356",
+      "status": "supplementary"
+    },
+    {
+      "id": "A9-M5",
+      "owner": "U06",
+      "commit": "a3e0bca98319df600e7bf4447c8ed73b2f78feae",
+      "tests": [
+        "tests/test_beacon_fix_resolutions.py",
+        "tests/test_beacon_fix_verb.py",
+        "tests/test_beacon_batch_local_admission.py"
+      ],
+      "destination": null,
+      "disposition": "ordered complete local outcomes and findings now survive fix and owned tags/sync fronts; protected gesture joins explicitly remain U09/J. [supplementary: Area-9 mechanism row, not a Master §5 numbered D row]",
+      "evidence": "[ap:17V4PV] line 357",
+      "status": "supplementary"
+    }
+  ],
+  "curation_starting_data": [
+    {
+      "ids": [
+        "CF-17",
+        "CF-20",
+        "A9-D14"
+      ],
+      "candidate": "Detached server _shape_glimpse_family_return block formerly at server.py:25197; choose relocation/keep/re-id/delete only in curation.",
+      "edited": false
+    },
+    {
+      "ids": [
+        "CF-17",
+        "CF-20",
+        "A9-D15"
+      ],
+      "candidate": "Module-level f8_slice_policy.py formerly 1/764 and transforms.py formerly 1; re-find and choose span/relocation/delete/keep in curation.",
+      "edited": false
+    },
+    {
+      "ids": [
+        "CF-17",
+        "CF-20"
+      ],
+      "candidate": "Review earlier frozenDomCapturedTree relocation evidence; JS last-line marker currently hides no later beacon (attributed recon correction). Old 24/20/4 counts are not a current live check.",
+      "edited": false
+    }
+  ],
+  "ledger": "Existing sealed/deferred rows are destinations, not new proposals or edits to the Ledger."
+}

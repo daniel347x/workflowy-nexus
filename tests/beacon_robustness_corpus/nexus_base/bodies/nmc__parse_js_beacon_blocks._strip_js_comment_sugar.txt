@@ -1,0 +1,15 @@
+    def _strip_js_comment_sugar(text: str) -> str:
+        t = text.lstrip()
+        # Leading JS comment prefixes
+        if t.startswith("//"):
+            t = t[2:].lstrip()
+        if t.startswith("/*"):
+            t = t[2:].lstrip()
+        if t.startswith("*/"):
+            t = t[2:].lstrip()
+        if t.startswith("*"):
+            t = t[1:].lstrip()
+        # Trailing block-comment closer
+        if t.endswith("*/"):
+            t = t[:-2].rstrip()
+        return t

@@ -1,0 +1,349 @@
+"""Area 1 measurement library (read-only; imports the a345dc7 snapshot only).
+
+- per-language line predicates restating each first-pass parser's own tests
+- an anomaly classifier for every block a parser's first pass collected
+- patched copies of the six parsers with an extra candidate stop condition
+"""
+from __future__ import annotations
+
+import inspect
+import io
+import os
+import re
+import sys
+import tokenize
+
+SNAP = "/mnt/c/tmp/beacon_robustness/probes/snapshot"
+for _p in (SNAP + "/src", SNAP):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+import nexus_map_codebase as n  # noqa: E402
+import beacon_mutation_contract as bmc  # noqa: E402
+
+assert os.path.dirname(os.path.abspath(n.__file__)) == SNAP, n.__file__
+
+LANG_BY_EXT = {
+    ".py": "python", ".js": "js_ts", ".jsx": "js_ts", ".ts": "js_ts",
+    ".tsx": "js_ts", ".vue": "vue", ".md": "markdown", ".markdown": "markdown",
+    ".sql": "sql", ".yml": "yaml", ".yaml": "yaml", ".sh": "shell",
+    ".bash": "shell",
+}
+PARSER_NAME = {
+    "python": "parse_python_beacon_blocks",
+    "js_ts": "parse_js_beacon_blocks",
+    "markdown": "parse_markdown_beacon_blocks",
+    "sql": "parse_sql_beacon_blocks",
+    "shell": "parse_sh_beacon_blocks",
+    "yaml": "parse_yaml_beacon_blocks",
+}
+FIELD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+def js_sugar(text: str) -> str:
+    t = text.lstrip()
+    if t.startswith("//"):
+        t = t[2:].lstrip()
+    if t.startswith("/*"):
+        t = t[2:].lstrip()
+    if t.startswith("*/"):
+        t = t[2:].lstrip()
+    if t.startswith("*"):
+        t = t[1:].lstrip()
+    if t.endswith("*/"):
+        t = t[:-2].rstrip()
+    return t
+
+
+def body_of(lang: str, line: str) -> str:
+    """The prefix-stripped text the language's first pass tests for ']'."""
+    if lang in ("python", "shell", "yaml"):
+        s = line.lstrip()
+        return s.lstrip("#").lstrip() if s.startswith("#") else s
+    if lang == "sql":
+        s = line.lstrip()
+        return s.lstrip("-").lstrip() if s.startswith("--") else s
+    if lang == "js_ts":
+        return js_sugar(line)
+    if lang == "markdown":
+        t = line.strip()
+        if t.startswith("<!--"):
+            t = t[4:].lstrip()
+        if t.startswith("#"):
+            t = t.lstrip("#").lstrip()
+        elif t.startswith("//"):
+            t = t[2:].lstrip()
+        return t
+    raise ValueError(lang)
+
+
+def is_opener(lang: str, line: str) -> bool:
+    """The first pass's own opener test."""
+    if lang == "js_ts":
+        return "@beacon[" in line
+    if lang == "markdown":
+        return body_of("markdown", line).startswith("@beacon[")
+    s = line.lstrip()
+    pfx = "--" if lang == "sql" else "#"
+    return s.startswith(pfx) and body_of(lang, line).startswith("@beacon[")
+
+
+def is_close_opener(lang: str, line: str) -> bool:
+    """A structural @beacon-close[ line (prefix-stripped body starts with it)."""
+    return body_of(lang, line).startswith("@beacon-close[")
+
+
+def ends_block(lang: str, line: str) -> bool:
+    """The first pass's own end test (the ']'-led line)."""
+    return body_of(lang, line).strip().startswith("]")
+
+
+def has_prefix(lang: str, line: str, opener_line: str) -> bool:
+    """Does an interior line carry the opener's comment prefix? (N/A -> True)"""
+    s = line.lstrip()
+    if lang in ("python", "shell", "yaml"):
+        return s.startswith("#")
+    if lang == "sql":
+        return s.startswith("--")
+    if lang == "js_ts":
+        o = opener_line.lstrip()
+        if o.startswith("//"):
+            return s.startswith("//")
+        return True  # /* */ and JSDoc forms: interior lines may carry no prefix
+    return True  # markdown: no prefix
+
+
+# ---------------------------------------------------------------------------
+# candidate stop conditions (fire on an INTERIOR line, i.e. after the opener)
+# ---------------------------------------------------------------------------
+def _c_opener(lang, line, opener_line):
+    return is_opener(lang, line) or is_close_opener(lang, line)
+
+
+def _c_opener_only(lang, line, opener_line):
+    return is_opener(lang, line)
+
+
+def _c_noprefix(lang, line, opener_line):
+    return bool(line.strip()) and not has_prefix(lang, line, opener_line)
+
+
+def _c_blank(lang, line, opener_line):
+    return not line.strip()
+
+
+def _c_prefix_only(lang, line, opener_line):
+    return bool(line.strip()) and not body_of(lang, line).strip() and has_prefix(lang, line, opener_line)
+
+
+def _c_md_close(lang, line, opener_line):
+    return lang == "markdown" and "-->" in line
+
+
+def _c_md_comment_open(lang, line, opener_line):
+    return lang == "markdown" and line.strip().startswith("<!--")
+
+
+CANDIDATES = {
+    "C1_opener_or_close": (_c_opener,),
+    "C1a_opener_only": (_c_opener_only,),
+    "C2_no_prefix_line": (_c_noprefix,),
+    "C3a_blank_line": (_c_blank,),
+    "C3b_prefix_only_line": (_c_prefix_only,),
+    "C1+C2": (_c_opener, _c_noprefix),
+    "C1+C2+C3a": (_c_opener, _c_noprefix, _c_blank),
+    "MD_dashdash_gt": (_c_md_close,),
+    "MD_C1+dashdash_gt": (_c_opener, _c_md_close),
+    "MD_C1+dashdash_gt+lt_bang": (_c_opener, _c_md_close, _c_md_comment_open),
+}
+
+
+def candidate_fires(name, lang, line, opener_line) -> bool:
+    return any(f(lang, line, opener_line) for f in CANDIDATES[name])
+
+
+# ---------------------------------------------------------------------------
+# strings (Python tokenize; JS: opener not written as a comment)
+# ---------------------------------------------------------------------------
+def python_string_rows(text: str):
+    """Set of 1-based rows that lie inside a STRING token (excluding the row a
+    string starts on before its first quote). None when tokenize fails."""
+    rows = set()
+    try:
+        toks = tokenize.generate_tokens(io.StringIO(text).readline)
+        for tok in toks:
+            if tok.type == tokenize.STRING or (hasattr(tokenize, "FSTRING_START") and tok.type in (tokenize.FSTRING_MIDDLE,)):
+                (r1, c1), (r2, c2) = tok.start, tok.end
+                for r in range(r1, r2 + 1):
+                    rows.add(r)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    return rows
+
+
+def opener_in_string(lang, lines, comment_line, string_rows) -> bool | None:
+    line = lines[comment_line - 1]
+    if lang == "python":
+        if string_rows is None:
+            return None
+        return comment_line in string_rows
+    if lang == "js_ts":
+        s = line.lstrip()
+        return not (s.startswith("//") or s.startswith("/*") or s.startswith("*"))
+    return False
+
+
+# ---------------------------------------------------------------------------
+# anomaly classification of one diagnostics block record
+# ---------------------------------------------------------------------------
+def classify_block(lang, lines, rec, string_rows=None):
+    cl = rec["line"]
+    end = rec["end_line"]
+    last = (end - 1) if end is not None else len(lines)  # last interior line (1-based)
+    opener_line = lines[cl - 1]
+    interior = list(range(cl + 1, last + 1))  # 1-based
+    out = {
+        "line": cl,
+        "end_line": end,
+        "outcome": rec["outcome"],
+        "id": rec.get("id"),
+        "kind_raw": rec.get("kind_raw"),
+        "unterminated": end is None,
+        "interior_openers": [k for k in interior if is_opener(lang, lines[k - 1])],
+        "interior_close_openers": [k for k in interior if is_close_opener(lang, lines[k - 1])],
+        "interior_noprefix": [k for k in interior if _c_noprefix(lang, lines[k - 1], opener_line)],
+        "interior_blank": [k for k in interior if not lines[k - 1].strip()],
+        "interior_prefix_only": [k for k in interior if _c_prefix_only(lang, lines[k - 1], opener_line)],
+        "id_lines": [k for k in interior if FIELD_RE.match(body_of(lang, lines[k - 1]).strip() or "") and FIELD_RE.match(body_of(lang, lines[k - 1]).strip()).group(1) == "id"],
+        "end_text": None if end is None else body_of(lang, lines[end - 1]).strip(),
+        "in_string": opener_in_string(lang, lines, cl, string_rows),
+        "one_line_opener": ("]" in body_of(lang, opener_line).split("@beacon[", 1)[-1]),
+    }
+    # keys and continuation lines (the field parser's view of the interior)
+    keys = []
+    cont_by_key = {}
+    cur = None
+    for k in interior:
+        t = body_of(lang, lines[k - 1]).strip()
+        if not t or t.startswith("@beacon") or t.startswith("<!--") or t.startswith("-->"):
+            continue
+        m = FIELD_RE.match(t)
+        if m and m.group(1) in bmc.BEACON_FIELD_KEYS:
+            cur = m.group(1)
+            keys.append(cur)
+        else:
+            cont_by_key[cur] = cont_by_key.get(cur, 0) + 1
+    out["keys"] = keys
+    out["dup_keys"] = sorted({k for k in keys if keys.count(k) > 1})
+    out["continuations"] = cont_by_key
+    out["swallowed"] = bool(out["interior_openers"])
+    out["stolen_id"] = bool(out["interior_openers"]) and any(
+        il > min(out["interior_openers"]) for il in out["id_lines"]
+    )
+    out["crossed_code"] = bool(out["interior_noprefix"])
+    out["anomalous"] = bool(
+        out["unterminated"] or out["swallowed"] or out["interior_close_openers"]
+        or out["crossed_code"] or out["one_line_opener"]
+    )
+    for name in CANDIDATES:
+        fired = [k for k in interior if candidate_fires(name, lang, lines[k - 1], opener_line)]
+        out.setdefault("fires", {})[name] = fired[0] if fired else None
+    return out
+
+
+# ---------------------------------------------------------------------------
+# patched parsers: one extra stop condition (stop BEFORE the firing line)
+# ---------------------------------------------------------------------------
+_PATCHED: dict[tuple[str, str], object] = {}
+
+
+def _replace_once(src, old, new, what):
+    c = src.count(old)
+    if c != 1:
+        raise AssertionError(f"{what}: expected 1 occurrence, found {c}: {old!r}")
+    return src.replace(old, new)
+
+
+def patched_parser(lang: str, cand: str):
+    key = (lang, cand)
+    if key in _PATCHED:
+        return _PATCHED[key]
+    fn = getattr(n, PARSER_NAME[lang])
+    src = inspect.getsource(fn)
+    if lang in ("python", "shell", "yaml", "sql"):
+        ind = " " * 20
+        src = _replace_once(src, "block_end_line = None\n", "block_end_line = None; __early__ = False\n", "init")
+        src = _replace_once(
+            src, f"{ind}block_lines.append(next_body)\n",
+            f"{ind}if __STOP__({lang!r}, {cand!r}, lines[i], lines[comment_line - 1]):\n"
+            f"{ind}    __early__ = True\n{ind}    break\n"
+            f"{ind}block_lines.append(next_body)\n", "collect")
+        src = _replace_once(
+            src, "inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []",
+            "inner_lines = (block_lines[1:] if __early__ else block_lines[1:-1]) if len(block_lines) >= 2 else []", "inner")
+        ind2 = " " * 12
+        src = _replace_once(
+            src, f"{ind2}if body.strip().startswith(\"]\"):\n{ind2}    open_end = j\n",
+            f"{ind2}if j > comment_line and __STOP__({lang!r}, {cand!r}, lines[j - 1], lines[comment_line - 1]):\n"
+            f"{ind2}    open_end = j - 1\n{ind2}    break\n"
+            f"{ind2}if body.strip().startswith(\"]\"):\n{ind2}    open_end = j\n", "open_end")
+    elif lang == "js_ts":
+        ind = " " * 16
+        src = _replace_once(src, "block_end_line = None\n", "block_end_line = None; __early__ = False\n", "init")
+        src = _replace_once(
+            src, f"{ind}block_lines.append(lines[i])\n",
+            f"{ind}if __STOP__({lang!r}, {cand!r}, lines[i], lines[comment_line - 1]):\n"
+            f"{ind}    __early__ = True\n{ind}    break\n"
+            f"{ind}block_lines.append(lines[i])\n", "collect")
+        src = _replace_once(
+            src, "inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []",
+            "inner_lines = (block_lines[1:] if __early__ else block_lines[1:-1]) if len(block_lines) >= 2 else []", "inner")
+        ind2 = " " * 12
+        src = _replace_once(
+            src, f"{ind2}if body.strip().startswith(\"]\"):\n{ind2}    open_end = j\n",
+            f"{ind2}if j > comment_line and __STOP__({lang!r}, {cand!r}, lines[j - 1], lines[comment_line - 1]):\n"
+            f"{ind2}    open_end = j - 1\n{ind2}    break\n"
+            f"{ind2}if body.strip().startswith(\"]\"):\n{ind2}    open_end = j\n", "open_end")
+    elif lang == "markdown":
+        ind = " " * 16
+        src = _replace_once(src, "block_end_line = None\n", "block_end_line = None; __early__ = False\n", "init")
+        src = _replace_once(
+            src, f"{ind}block_lines.append(lines[i])\n",
+            f"{ind}if __STOP__({lang!r}, {cand!r}, lines[i], lines[comment_line - 1]):\n"
+            f"{ind}    __early__ = True\n{ind}    break\n"
+            f"{ind}block_lines.append(lines[i])\n", "collect")
+        src = _replace_once(
+            src, "inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []",
+            "inner_lines = (block_lines[1:] if __early__ else block_lines[1:-1]) if len(block_lines) >= 2 else []", "inner")
+        ind2 = " " * 12
+        src = _replace_once(
+            src, f"{ind2}if _is_structural_beacon_close_2(raw):\n{ind2}    open_end = j\n",
+            f"{ind2}if j > comment_line and __STOP__({lang!r}, {cand!r}, lines[j - 1], lines[comment_line - 1]):\n"
+            f"{ind2}    open_end = j - 1\n{ind2}    break\n"
+            f"{ind2}if _is_structural_beacon_close_2(raw):\n{ind2}    open_end = j\n", "open_end")
+    # strip the decorator-free def's leading indentation (module-level defs: none)
+    ns = dict(vars(n))
+    ns["__STOP__"] = lambda lg, cd, line, opener: candidate_fires(cd, lg, line, opener)
+    exec(compile(src, f"<patched {lang} {cand}>", "exec"), ns)
+    pf = ns[PARSER_NAME[lang]]
+    _PATCHED[key] = pf
+    return pf
+
+
+BEACON_KEYS = ("id", "role", "slice_labels", "kind", "start_snippet", "end_snippet",
+               "comment", "show_span", "span_lineno_start", "span_lineno_end")
+
+
+def beacon_sig(b):
+    return tuple((k, b.get(k)) for k in BEACON_KEYS)
+
+
+def diff_parses(a, b):
+    """Blocks (by comment_line) whose record differs or exists on one side."""
+    am = {x["comment_line"]: beacon_sig(x) for x in a}
+    bm = {x["comment_line"]: beacon_sig(x) for x in b}
+    changed = sorted(cl for cl in set(am) | set(bm) if am.get(cl) != bm.get(cl))
+    detail = []
+    for cl in changed:
+        detail.append({"line": cl, "before": dict(am[cl]) if cl in am else None,
+                       "after": dict(bm[cl]) if cl in bm else None})
+    return detail

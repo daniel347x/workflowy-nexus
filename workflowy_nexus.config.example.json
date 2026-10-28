@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "paths": {
+    "nexusRunsBase": "/absolute/path/to/your/nexus_runs",
+    "cartographerJobsDir": "/absolute/path/to/your/cartographer_jobs",
+    "windsurfExeCandidates": [
+      "C:/Users/YOUR_USERNAME/AppData/Local/Programs/Windsurf/Windsurf.exe"
+    ],
+    "glimpseAgentWorkspace": "/absolute/path/to/your/glimpse_workspace",
+    "glimpseCacheSource": "/absolute/path/to/workflowy-glimpse-cache/glimpse-cache-client.js",
+    "workflowyAppAsar": "C:/Users/YOUR_USERNAME/AppData/Local/Programs/WorkFlowy/resources/app.asar",
+    "workflowyElectronCacheDirs": [
+      "C:/Users/YOUR_USERNAME/AppData/Roaming/WorkFlowy/Cache",
+      "C:/Users/YOUR_USERNAME/AppData/Roaming/WorkFlowy/Code Cache",
+      "C:/Users/YOUR_USERNAME/AppData/Roaming/WorkFlowy/GPUCache"
+    ],
+    "glimpseWslRepoDir": "",
+    "glimpseStagingSubdir": "staging"
+  },
+  "websocket": {
+    "host": "localhost",
+    "port": 8765
+  },
+  "timing": {
+    "websocketReconnectDelayMs": 3000,
+    "cartoJobsPollIntervalMs": 1000,
+    "refreshSettleSeconds": 2.0
+  },
+  "retention": {
+    "cartoJobMaxAgeSeconds": 3600
+  },
+  "governance": {
+    "cartoFolderFileDeleteThreshold": 10,
+    "cartoReconcileDeleteThreshold": 100
+  },
+  "coherence": {
+    "checkpointRecordThreshold": 500,
+    "checkpointByteThreshold": 67108864,
+    "journalRecordWarningBytes": 8388608,
+    "checkpointMaxCatchupPasses": 3
+  }
+}

@@ -1,0 +1,41 @@
+    def _extract_ast_comment_context(start_lineno: int, decor_start: Optional[int]) -> list[str]:
+        context: list[str] = []
+        # Above: skip decorator region between decor_start and the AST node.
+        j = start_lineno - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j -= 1
+                continue
+            if decor_start is not None and decor_start <= j < start_lineno:
+                # Inside decorator region (including multiline decorators);
+                # skip these lines entirely so we can reach comments that
+                # truly lead the AST node.
+                j -= 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.insert(0, body)
+                j -= 1
+                continue
+            break
+
+        # Below: immediate top-of-body comments (before docstring or code)
+        j = start_lineno + 1
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j += 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.append(body)
+                j += 1
+                continue
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)

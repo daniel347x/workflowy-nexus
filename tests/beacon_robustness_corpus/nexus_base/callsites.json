@@ -1,0 +1,703 @@
+{
+ "note": "AST call sites (ast.Call) in the named external consumers; matched on the callee's own name (Name.id / Attribute.attr), class methods only with the JsTsOutlineContext receiver. Frozen base sources at a345dc7; no consumer was edited.",
+ "base_commit": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+ "per_consumer": {
+  "acn": {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "calls": [
+    {
+     "consumer": "acn",
+     "file": "src/workflowy_mcp/client/api_client_nexus.py",
+     "line": 534,
+     "col": 30,
+     "callee": "_parse_disk_beacons_for_language",
+     "receiver": "carto",
+     "callee_full": "carto._parse_disk_beacons_for_language",
+     "enclosing": "_compute_beacon_write_plan",
+     "source_line": "lines, disk_beacons = carto._parse_disk_beacons_for_language(language, source_path)"
+    },
+    {
+     "consumer": "acn",
+     "file": "src/workflowy_mcp/client/api_client_nexus.py",
+     "line": 645,
+     "col": 19,
+     "callee": "_beacon_block_extent_for_language",
+     "receiver": "carto",
+     "callee_full": "carto._beacon_block_extent_for_language",
+     "enclosing": "_compute_beacon_write_plan",
+     "source_line": "_ext = carto._beacon_block_extent_for_language(language, lines, id_matches[0])"
+    },
+    {
+     "consumer": "acn",
+     "file": "src/workflowy_mcp/client/api_client_nexus.py",
+     "line": 705,
+     "col": 19,
+     "callee": "_beacon_block_extent_for_language",
+     "receiver": "carto",
+     "callee_full": "carto._beacon_block_extent_for_language",
+     "enclosing": "_compute_beacon_write_plan",
+     "source_line": "_ext = carto._beacon_block_extent_for_language(language, lines, id_matches[0])"
+    },
+    {
+     "consumer": "acn",
+     "file": "src/workflowy_mcp/client/api_client_nexus.py",
+     "line": 16202,
+     "col": 27,
+     "callee": "map_codebase",
+     "receiver": "cartographer",
+     "callee_full": "cartographer.map_codebase",
+     "enclosing": "WorkFlowyClientNexus.refresh_file_node_beacons",
+     "source_line": "file_map = cartographer.map_codebase(  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "acn",
+     "file": "src/workflowy_mcp/client/api_client_nexus.py",
+     "line": 18853,
+     "col": 35,
+     "callee": "map_codebase",
+     "receiver": "cartographer",
+     "callee_full": "cartographer.map_codebase",
+     "enclosing": "WorkFlowyClientNexus.refresh_folder_cartographer_sync",
+     "source_line": "file_map = cartographer.map_codebase(  # type: ignore[attr-defined]"
+    }
+   ]
+  },
+  "bi": {
+   "file": "src/workflowy_mcp/beacon_integrity.py",
+   "calls": [
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 165,
+     "col": 23,
+     "callee": "_vue_sfc_sections",
+     "receiver": "carto",
+     "callee_full": "carto._vue_sfc_sections",
+     "enclosing": "check_beacon_file",
+     "source_line": "sections = carto._vue_sfc_sections(source_bytes, carto._parse_vue_sfc_tree(source_bytes))"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 165,
+     "col": 61,
+     "callee": "_parse_vue_sfc_tree",
+     "receiver": "carto",
+     "callee_full": "carto._parse_vue_sfc_tree",
+     "enclosing": "check_beacon_file",
+     "source_line": "sections = carto._vue_sfc_sections(source_bytes, carto._parse_vue_sfc_tree(source_bytes))"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 173,
+     "col": 21,
+     "callee": "_vue_section_beacons",
+     "receiver": "carto",
+     "callee_full": "carto._vue_section_beacons",
+     "enclosing": "check_beacon_file",
+     "source_line": "for b in carto._vue_section_beacons(section, diagnostics=diag):"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 176,
+     "col": 32,
+     "callee": "_parse_disk_beacons_for_language",
+     "receiver": "carto",
+     "callee_full": "carto._parse_disk_beacons_for_language",
+     "enclosing": "check_beacon_file",
+     "source_line": "lines, writer_beacons = carto._parse_disk_beacons_for_language(\"vue\", abs_path)"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 178,
+     "col": 25,
+     "callee": "_parse_disk_beacons_for_language",
+     "receiver": "carto",
+     "callee_full": "carto._parse_disk_beacons_for_language",
+     "enclosing": "check_beacon_file",
+     "source_line": "lines, beacons = carto._parse_disk_beacons_for_language(language, abs_path, diagnostics=diag)"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 256,
+     "col": 15,
+     "callee": "map_codebase",
+     "receiver": "carto",
+     "callee_full": "carto.map_codebase",
+     "enclosing": "check_beacon_file",
+     "source_line": "tree = carto.map_codebase(abs_path, repo_root=repo_root)"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 330,
+     "col": 14,
+     "callee": "_beacon_block_extent_for_language",
+     "receiver": "carto",
+     "callee_full": "carto._beacon_block_extent_for_language",
+     "enclosing": "check_beacon_file",
+     "source_line": "ext = carto._beacon_block_extent_for_language(language, lines, b)"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 380,
+     "col": 14,
+     "callee": "_beacon_block_extent_for_language",
+     "receiver": "carto",
+     "callee_full": "carto._beacon_block_extent_for_language",
+     "enclosing": "check_beacon_file",
+     "source_line": "ext = carto._beacon_block_extent_for_language(language, lines, block)"
+    },
+    {
+     "consumer": "bi",
+     "file": "src/workflowy_mcp/beacon_integrity.py",
+     "line": 498,
+     "col": 24,
+     "callee": "check_beacon_file",
+     "receiver": null,
+     "callee_full": "check_beacon_file",
+     "enclosing": "run_beacon_check",
+     "source_line": "all_rows.extend(check_beacon_file(f[\"abs_path\"], display_path=f.get(\"display_path\"), repo_root=repo_root))"
+    }
+   ]
+  },
+  "bocs": {
+   "file": "beacon_obtain_code_snippet.py",
+   "calls": [
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 676,
+     "col": 33,
+     "callee": "parse_beacon_field_lines",
+     "receiver": null,
+     "callee_full": "parse_beacon_field_lines",
+     "enclosing": "_python_find_closing_beacon_span",
+     "source_line": "fields: Dict[str, str] = parse_beacon_field_lines(field_texts)"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 900,
+     "col": 29,
+     "callee": "_build_js_comment_mask",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase._build_js_comment_mask",
+     "enclosing": "_comment_block_span_js",
+     "source_line": "comment_mask, _cleaned = nexus_map_codebase._build_js_comment_mask(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 981,
+     "col": 24,
+     "callee": "parse_file_outline",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_file_outline",
+     "enclosing": "_python_snippet_for_beacon",
+     "source_line": "outline_nodes = nexus_map_codebase.parse_file_outline(file_path)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 986,
+     "col": 18,
+     "callee": "parse_python_beacon_blocks",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_python_beacon_blocks",
+     "enclosing": "_python_snippet_for_beacon",
+     "source_line": "beacons = nexus_map_codebase.parse_python_beacon_blocks(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 1202,
+     "col": 33,
+     "callee": "parse_beacon_field_lines",
+     "receiver": null,
+     "callee_full": "parse_beacon_field_lines",
+     "enclosing": "_js_ts_find_closing_beacon_span",
+     "source_line": "fields: Dict[str, str] = parse_beacon_field_lines(field_texts)"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 1301,
+     "col": 24,
+     "callee": "parse_js_ts_outline",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_js_ts_outline",
+     "enclosing": "_js_ts_snippet_for_beacon",
+     "source_line": "outline_nodes = nexus_map_codebase.parse_js_ts_outline(file_path)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 1306,
+     "col": 18,
+     "callee": "parse_js_beacon_blocks",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_js_beacon_blocks",
+     "enclosing": "_js_ts_snippet_for_beacon",
+     "source_line": "beacons = nexus_map_codebase.parse_js_beacon_blocks(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 1515,
+     "col": 33,
+     "callee": "parse_beacon_field_lines",
+     "receiver": null,
+     "callee_full": "parse_beacon_field_lines",
+     "enclosing": "_markdown_find_closing_beacon_span",
+     "source_line": "fields: Dict[str, str] = parse_beacon_field_lines(field_texts)"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 1629,
+     "col": 18,
+     "callee": "parse_markdown_beacon_blocks",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_markdown_beacon_blocks",
+     "enclosing": "_markdown_snippet_for_beacon",
+     "source_line": "beacons = nexus_map_codebase.parse_markdown_beacon_blocks(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 1817,
+     "col": 18,
+     "callee": "parse_yaml_beacon_blocks",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_yaml_beacon_blocks",
+     "enclosing": "_yaml_snippet_for_beacon",
+     "source_line": "beacons = nexus_map_codebase.parse_yaml_beacon_blocks(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 1983,
+     "col": 33,
+     "callee": "parse_beacon_field_lines",
+     "receiver": null,
+     "callee_full": "parse_beacon_field_lines",
+     "enclosing": "_sql_find_closing_beacon_span",
+     "source_line": "fields: Dict[str, str] = parse_beacon_field_lines(field_texts)"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 2099,
+     "col": 18,
+     "callee": "parse_sql_beacon_blocks",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_sql_beacon_blocks",
+     "enclosing": "_sql_snippet_for_beacon",
+     "source_line": "beacons = nexus_map_codebase.parse_sql_beacon_blocks(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 2301,
+     "col": 33,
+     "callee": "parse_beacon_field_lines",
+     "receiver": null,
+     "callee_full": "parse_beacon_field_lines",
+     "enclosing": "_sh_find_closing_beacon_span",
+     "source_line": "fields: Dict[str, str] = parse_beacon_field_lines(field_texts)"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 2412,
+     "col": 18,
+     "callee": "parse_sh_beacon_blocks",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_sh_beacon_blocks",
+     "enclosing": "_sh_snippet_for_beacon",
+     "source_line": "beacons = nexus_map_codebase.parse_sh_beacon_blocks(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 2521,
+     "col": 24,
+     "callee": "parse_file_outline",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_file_outline",
+     "enclosing": "get_snippet_for_ast_qualname",
+     "source_line": "outline_nodes = nexus_map_codebase.parse_file_outline(file_path)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 2610,
+     "col": 24,
+     "callee": "parse_js_ts_outline",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_js_ts_outline",
+     "enclosing": "get_snippet_for_ast_qualname_js_ts",
+     "source_line": "outline_nodes = nexus_map_codebase.parse_js_ts_outline(file_path)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 2697,
+     "col": 24,
+     "callee": "parse_vue_outline",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_vue_outline",
+     "enclosing": "get_snippet_for_ast_qualname_vue",
+     "source_line": "outline_nodes = nexus_map_codebase.parse_vue_outline(file_path)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 2784,
+     "col": 24,
+     "callee": "parse_vue_outline",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_vue_outline",
+     "enclosing": "_vue_snippet_for_beacon",
+     "source_line": "outline_nodes = nexus_map_codebase.parse_vue_outline(file_path)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 3176,
+     "col": 18,
+     "callee": "parse_markdown_beacon_blocks",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_markdown_beacon_blocks",
+     "enclosing": "_md_beacon_has_brief_label",
+     "source_line": "beacons = nexus_map_codebase.parse_markdown_beacon_blocks(lines)  # type: ignore[attr-defined]"
+    },
+    {
+     "consumer": "bocs",
+     "file": "beacon_obtain_code_snippet.py",
+     "line": 3408,
+     "col": 20,
+     "callee": "parse_markdown_structure",
+     "receiver": "nexus_map_codebase",
+     "callee_full": "nexus_map_codebase.parse_markdown_structure",
+     "enclosing": "get_snippet_for_md_path",
+     "source_line": "outline_nodes = nexus_map_codebase.parse_markdown_structure(file_path)"
+    }
+   ]
+  },
+  "kit_code_map": {
+   "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+   "calls": [
+    {
+     "consumer": "kit_code_map",
+     "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+     "line": 213,
+     "col": 28,
+     "callee": "parse_file_outline_core",
+     "receiver": "_engine",
+     "callee_full": "_engine.parse_file_outline_core",
+     "enclosing": "Repository.children",
+     "source_line": "nodes = _engine.parse_file_outline_core(abs_path)[0]"
+    },
+    {
+     "consumer": "kit_code_map",
+     "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+     "line": 215,
+     "col": 28,
+     "callee": "parse_js_ts_outline_core",
+     "receiver": "_engine",
+     "callee_full": "_engine.parse_js_ts_outline_core",
+     "enclosing": "Repository.children",
+     "source_line": "nodes = _engine.parse_js_ts_outline_core(abs_path)[0]"
+    },
+    {
+     "consumer": "kit_code_map",
+     "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+     "line": 851,
+     "col": 17,
+     "callee": "_beacon_block_extent_for_language",
+     "receiver": "_engine",
+     "callee_full": "_engine._beacon_block_extent_for_language",
+     "enclosing": "_resolve_block_span",
+     "source_line": "extent = _engine._beacon_block_extent_for_language(language, lines, block)"
+    },
+    {
+     "consumer": "kit_code_map",
+     "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+     "line": 855,
+     "col": 16,
+     "callee": "_find_beacon_close_block_extent",
+     "receiver": "_engine",
+     "callee_full": "_engine._find_beacon_close_block_extent",
+     "enclosing": "_resolve_block_span",
+     "source_line": "close = _engine._find_beacon_close_block_extent(language, lines, name, extent[1] + 1)"
+    },
+    {
+     "consumer": "kit_code_map",
+     "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+     "line": 1097,
+     "col": 13,
+     "callee": "_beacon_block_extent_for_language",
+     "receiver": "_engine",
+     "callee_full": "_engine._beacon_block_extent_for_language",
+     "enclosing": "_attached_block",
+     "source_line": "extent = _engine._beacon_block_extent_for_language(language, lines, attached[0])"
+    },
+    {
+     "consumer": "kit_code_map",
+     "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+     "line": 1205,
+     "col": 20,
+     "callee": "parse_file_outline_core",
+     "receiver": "_engine",
+     "callee_full": "_engine.parse_file_outline_core",
+     "enclosing": "_verify_written_block",
+     "source_line": "nodes = _engine.parse_file_outline_core(abs_path)[0]"
+    },
+    {
+     "consumer": "kit_code_map",
+     "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+     "line": 1207,
+     "col": 20,
+     "callee": "parse_js_ts_outline_core",
+     "receiver": "_engine",
+     "callee_full": "_engine.parse_js_ts_outline_core",
+     "enclosing": "_verify_written_block",
+     "source_line": "nodes = _engine.parse_js_ts_outline_core(abs_path)[0]"
+    }
+   ]
+  }
+ },
+ "expected_line_checks": [
+  {
+   "consumer": "acn",
+   "symbols": [
+    "_parse_disk_beacons_for_language"
+   ],
+   "lines": [
+    534
+   ],
+   "found_lines": [
+    534
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "acn",
+   "symbols": [
+    "_beacon_block_extent_for_language"
+   ],
+   "lines": [
+    645,
+    705
+   ],
+   "found_lines": [
+    645,
+    705
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "acn",
+   "symbols": [
+    "map_codebase"
+   ],
+   "lines": [
+    16202,
+    18853
+   ],
+   "found_lines": [
+    16202,
+    18853
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "bi",
+   "symbols": [
+    "_parse_disk_beacons_for_language"
+   ],
+   "lines": [
+    176,
+    178
+   ],
+   "found_lines": [
+    176,
+    178
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "bi",
+   "symbols": [
+    "_beacon_block_extent_for_language"
+   ],
+   "lines": [
+    330,
+    380
+   ],
+   "found_lines": [
+    330,
+    380
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "bi",
+   "symbols": [
+    "map_codebase"
+   ],
+   "lines": [
+    256
+   ],
+   "found_lines": [
+    256
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "bi",
+   "symbols": [
+    "_vue_sfc_sections",
+    "_parse_vue_sfc_tree",
+    "_vue_section_beacons"
+   ],
+   "lines": [
+    165,
+    173
+   ],
+   "found_lines": [
+    165,
+    173
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "bocs",
+   "symbols": [
+    "parse_beacon_field_lines"
+   ],
+   "lines": [
+    676,
+    1202,
+    1515,
+    1983,
+    2301
+   ],
+   "found_lines": [
+    676,
+    1202,
+    1515,
+    1983,
+    2301
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "bocs",
+   "symbols": [
+    "_build_js_comment_mask"
+   ],
+   "lines": [
+    900
+   ],
+   "found_lines": [
+    900
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "bocs",
+   "symbols": [
+    "parse_python_beacon_blocks",
+    "parse_js_beacon_blocks",
+    "parse_markdown_beacon_blocks",
+    "parse_sql_beacon_blocks",
+    "parse_sh_beacon_blocks",
+    "parse_yaml_beacon_blocks"
+   ],
+   "lines": [
+    986,
+    1306,
+    1629,
+    1817,
+    2099,
+    2412,
+    3176
+   ],
+   "notes": "the lead prompt's extra line 1616 is a DOCSTRING mention of parse_markdown_beacon_blocks(); the actual call sits at 1629 (AST)",
+   "found_lines": [
+    986,
+    1306,
+    1629,
+    1817,
+    2099,
+    2412,
+    3176
+   ],
+   "missing": [],
+   "extras": [],
+   "match": true
+  },
+  {
+   "consumer": "kit_code_map",
+   "symbols": [
+    "_beacon_block_extent_for_language",
+    "_find_beacon_close_block_extent",
+    "parse_file_outline_core",
+    "parse_js_ts_outline_core",
+    "map_codebase",
+    "_parse_disk_beacons_for_language",
+    "_beacon_block_diagnostic"
+   ],
+   "lines": [
+    213,
+    851,
+    855,
+    1097,
+    1205
+   ],
+   "notes": "213 / 1205 are the parse_file_outline_core calls; the sibling parse_js_ts_outline_core call shares the same statement one line later (215 / 1207) -- those are the [extras]",
+   "found_lines": [
+    213,
+    215,
+    851,
+    855,
+    1097,
+    1205,
+    1207
+   ],
+   "missing": [],
+   "extras": [
+    215,
+    1207
+   ],
+   "match": true
+  }
+ ],
+ "all_expected_match": true
+}

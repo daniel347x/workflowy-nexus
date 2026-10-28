@@ -1,0 +1,222 @@
+"""File-backed note replacement through the existing node.edit authority.
+
+Only file ingestion is new: real dispatch/admission/cache boundary/resolution
+and edit-core composition are exercised with isolated runtime and mocked HTTP
+client methods. No production vault, cache or governance state is mutated.
+"""
+from __future__ import annotations
+
+import asyncio
+import copy
+import html
+import json
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+
+from coherence_harness import make_boundary_capable, make_coherence_root, s04_raise_barrier
+from n05_region_harness import isolate_claim_scope
+from workflowy_mcp import server
+from workflowy_mcp.client import api_client_nexus as nx
+from workflowy_mcp.coherence.operation_cache import current_operation_cache
+from workflowy_mcp.mcp_api_registry import dispatch_operation, validate_params
+from workflowy_mcp.models.node import WorkFlowyNode
+
+ROOT = "11111111-1111-4111-8111-111111111111"
+CHILD = "22222222-2222-4222-8222-222222222222"
+NAME = "[ap:FILE01] Existing #keep"
+
+
+def setup(monkeypatch, tmp_path):
+    paths = make_coherence_root(tmp_path)
+    monkeypatch.setattr(server, "_admission_coherence_paths", lambda: paths)
+    client = make_boundary_capable(object.__new__(server.WorkFlowyClient), nodes=[
+        {"id": ROOT, "name": NAME, "note": "old note", "parent_id": None, "priority": 10},
+        {"id": CHILD, "name": "Keep child", "note": "child body", "parent_id": ROOT},
+    ])
+    isolate_claim_scope(client, tmp_path)
+    current = WorkFlowyNode(id=ROOT, name=NAME, note=html.escape("old note"))
+    client.get_node = AsyncMock(return_value=current)
+    async def update(node_id, request, *, basis=None):
+        return WorkFlowyNode(
+            id=node_id, name=request.name if request.name is not None else NAME,
+            note=html.escape(request.note) if request.note is not None else current.note,
+        )
+    client.update_node = AsyncMock(side_effect=update)
+    client.create_node = AsyncMock(side_effect=AssertionError("no create"))
+    client.move_node = AsyncMock(side_effect=AssertionError("no move"))
+    client.delete_node = AsyncMock(side_effect=AssertionError("no delete"))
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    return client, paths, current
+
+
+def dispatch(params):
+    return asyncio.run(dispatch_operation(
+        server.build_node_registry(), "edit", {"node_handle": ROOT, **params},
+        operation_boundary=server._mcp_operation_boundary,
+        mutation_admission=server._mcp_mutation_admission,
+        exception_mapper=server._mcp_exception_mapper,
+        result_finalizer=server._mcp_operation_result_finalizer,
+    ))
+
+
+@pytest.mark.parametrize("handle", [ROOT, ROOT[:8], f"[{ROOT[:8]}]", "[ap:FILE01]"])
+def test_replace_note_existing_identity_title_children_and_file_unchanged(monkeypatch, tmp_path, handle):
+    client, _, current = setup(monkeypatch, tmp_path)
+    path = tmp_path / "[ap_OTHER] Completely different title #different.md"
+    text = "# Heading\r\n\t\u00a0📊 &lt; <tool-arg>\rLast\n"
+    path.write_bytes(text.encode("utf-8"))
+    before = path.read_bytes()
+    view = client._cache_view_publisher.capture()
+    snapshot = copy.deepcopy(view.nodes_export)
+    reader = Mock(wraps=nx._read_note_file_text)
+    monkeypatch.setattr(nx, "_read_note_file_text", reader)
+    result = json.loads(dispatch({"node_handle": handle, "note_file": str(path), "return_diff": False}))
+    assert result["success"] is True
+    client.update_node.assert_awaited_once()
+    node_id, request = client.update_node.await_args.args
+    assert node_id == ROOT
+    assert request.note == "# Heading\n\t\u00a0📊 &lt; <tool-arg>\nLast\n"
+    assert request.name is None and request.layoutMode is None
+    assert result["node_id"] == ROOT
+    assert "note" not in result and "children" not in result
+    assert result["note_chars"] == len("# Heading\n\t\u00a0📊 &lt; <tool-arg>\nLast\n")
+    assert current.note == "old note"
+    assert path.read_bytes() == before
+    # The reader/front never patches cache or touches a sibling/child. The
+    # mocked update is the only mutation request, through the unchanged core.
+    assert client._cache_view_publisher.capture() is view
+    assert view.nodes_export == snapshot
+    client.create_node.assert_not_awaited()
+    client.move_node.assert_not_awaited()
+    client.delete_node.assert_not_awaited()
+    client.get_node.assert_awaited_once_with(ROOT)  # same live snapshot as every report mode
+    reader.assert_called_once_with(str(path), context="node.edit")
+    assert current_operation_cache(required=False) is None
+
+
+@pytest.mark.parametrize("text", ["", "\ufeff# BOM retained\r\n", '{"name":"literal JSON","children":[]}'])
+def test_empty_bom_and_json_text_match_capture_reader(monkeypatch, tmp_path, text):
+    client, _, _ = setup(monkeypatch, tmp_path)
+    path = tmp_path / "replacement.md"
+    path.write_bytes(text.encode("utf-8"))
+    captured, _ = nx._node_payload_from_note_file(str(path))
+    # return_diff=false keeps this reader-parity test on the acknowledgement
+    # path ([ap:4JSBO5] made the unflagged whole-note default the diff report).
+    result = json.loads(dispatch({"note_file": str(path), "return_diff": False}))
+    assert result["success"] is True
+    assert client.update_node.await_args.args[1].note == captured[0]["note"]
+
+
+def test_name_and_layout_still_follow_existing_protected_edit_path(monkeypatch, tmp_path):
+    client, _, current = setup(monkeypatch, tmp_path)
+    path = tmp_path / "ignored title.md"
+    path.write_text("new note", encoding="utf-8")
+    result = json.loads(dispatch({"note_file": str(path), "name": "Renamed", "layout_mode": "h2", "return_diff": False}))
+    assert result["success"] is True
+    request = client.update_node.await_args.args[1]
+    assert request.note == "new note"
+    assert request.name == "[ap:FILE01] Renamed #keep"
+    assert request.layoutMode == "h2"
+    client.get_node.assert_awaited_once_with(ROOT)
+    assert current.name == NAME and current.note == "old note"
+
+
+@pytest.mark.parametrize("name,code", [("Renamed #new", "tags_in_name_rejected"), ("[ap:OTHER] Renamed", "ap_id_mutation_rejected")])
+def test_file_input_does_not_bypass_protected_name_rules(monkeypatch, tmp_path, name, code):
+    client, _, _ = setup(monkeypatch, tmp_path)
+    path = tmp_path / "body.txt"
+    path.write_text("body", encoding="utf-8")
+    result = dispatch({"note_file": str(path), "name": name})
+    assert result["success"] is False and result["error"]["code"] == code
+    client.update_node.assert_not_awaited()
+
+
+@pytest.mark.parametrize("extra", [
+    {"note": "inline"}, {"note": ""}, {"note_search": "x"},
+    {"note_search": ""}, {"note_replace": ""}, {"note_edits": []},
+    {"note_edits": "[]"}, {"note": "x", "note_search": "y", "note_replace": "z"},
+])
+def test_conflicts_rejected_before_file_read_or_edit(monkeypatch, tmp_path, extra):
+    client, _, _ = setup(monkeypatch, tmp_path)
+    reader = Mock(side_effect=AssertionError("must reject before file I/O"))
+    monkeypatch.setattr(nx, "_read_note_file_text", reader)
+    result = dispatch({"note_file": str(tmp_path / "missing.md"), **extra})
+    assert result["error"]["code"] == "invalid_parameter_combination"
+    assert result["operation_doc"] == server.build_node_registry().describe_full("edit")
+    reader.assert_not_called()
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+
+
+@pytest.mark.parametrize("kind,needle", [
+    ("empty", "empty path"), ("relative", "ABSOLUTE"),
+    ("missing", "not an existing file"), ("directory", "not an existing file"),
+    ("binary", "not valid UTF-8"), ("unreadable", "could not be read"),
+])
+def test_file_failures_leave_existing_note_untouched(monkeypatch, tmp_path, kind, needle):
+    client, _, _ = setup(monkeypatch, tmp_path)
+    path = tmp_path / "replacement.md"
+    value = str(path)
+    if kind == "empty":
+        value = " "
+    elif kind == "relative":
+        value = "notes/replacement.md"
+    elif kind == "directory":
+        value = str(tmp_path)
+    elif kind == "binary":
+        path.write_bytes(b"\xff\xfe\x00")
+    elif kind == "unreadable":
+        path.write_text("not read", encoding="utf-8")
+        # Host-aware file paths ([ap:1T7JZ0]): the note_file read's open()
+        # now lives in the ONE resolver module, so the permission failure is
+        # simulated there (9.5(e) update — same intent, new home).
+        from workflowy_mcp import tool_path_resolution as tpr
+
+        monkeypatch.setattr(tpr, "open", Mock(side_effect=PermissionError("denied")), raising=False)
+    result = dispatch({"note_file": value})
+    assert result["success"] is False
+    assert "node.edit note_file" in result["error"]["message"]
+    assert needle in result["error"]["message"]
+    assert result["operation_doc"] == server.build_node_registry().describe_full("edit")
+    client.get_node.assert_not_awaited()
+    client.update_node.assert_not_awaited()
+    client.create_node.assert_not_awaited()
+
+
+def test_null_file_preserves_inline_edit_and_no_param_mutation(monkeypatch):
+    impl = AsyncMock(return_value={"id": ROOT})
+    reader = Mock(side_effect=AssertionError("null file must be ignored"))
+    monkeypatch.setattr(server, "_node_edit_impl", impl)
+    monkeypatch.setattr(nx, "_read_note_file_text", reader)
+    params = {"node_handle": ROOT, "note": "inline", "note_file": None}
+    before = copy.deepcopy(params)
+    result = asyncio.run(dispatch_operation(server.build_node_registry(), "edit", params))
+    assert result["success"] is True and params == before
+    impl.assert_awaited_once_with(ROOT, name=None, note="inline", note_search=None, note_replace=None, note_edits=None, layout_mode=None, replace_all=False, diff=None, return_diff=None, replace_emoji=False)
+    reader.assert_not_called()
+
+
+def test_hard_barrier_refuses_before_file_ingestion(monkeypatch, tmp_path):
+    client, paths, _ = setup(monkeypatch, tmp_path)
+    s04_raise_barrier(paths)
+    reader = Mock(side_effect=AssertionError("hard barrier must precede file read"))
+    monkeypatch.setattr(nx, "_read_note_file_text", reader)
+    result = dispatch({"note_file": str(tmp_path / "not-read.md")})
+    assert result["error"]["code"] == "coherence_barrier_active"
+    reader.assert_not_called()
+    client.update_node.assert_not_awaited()
+
+
+def test_registry_and_top_level_descriptions_disclose_file_replacement():
+    registry = server.build_node_registry()
+    spec = registry.resolve("edit")
+    assert spec.cache_backed and spec.side_effects == ("workflowy_mutation",)
+    full = registry.describe_full("edit")
+    assert full["params_schema"]["properties"]["note_file"]["type"] == ["string", "null"]
+    assert "empty file clears" in full["params_schema"]["properties"]["note_file"]["description"]
+    for example in full["examples"]:
+        validate_params(spec, example["call"]["params"])
+    tool = next(t for t in asyncio.run(server.mcp.list_tools()) if t.name == "node")
+    assert "note_file replaces the whole note" in tool.description

@@ -1,0 +1,6 @@
+    def is_function_like(self, v: Any) -> bool:
+        """Return True when ``v`` is an arrow_function or function expression.
+
+        Wrapper around the Phase A module-level ``_js_is_function_like``.
+        """
+        return _js_is_function_like(v)

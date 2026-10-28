@@ -1,0 +1,414 @@
+"""S03-A §14.1/§5.4 — epoch reload semantics (adopt_manifest_head)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    NOW,
+    make_coherence_root,
+    s02_node,
+    write_malformed,
+)
+
+from workflowy_mcp.coherence import (
+    CacheView,
+    CacheViewPublisher,
+    JournalProducer,
+    SemanticEffect,
+    adopt_manifest_head,
+    append_journal_transaction,
+    journal_record_filename,
+    manifest_with_updates,
+    read_manifest,
+    unpopulated_cache_view,
+    write_manifest,
+)
+from workflowy_mcp.coherence.durable_io import atomic_write_json_durable
+from workflowy_mcp.coherence.errors import (
+    CoherenceSchemaError,
+    CoherenceStateMissingError,
+)
+from workflowy_mcp.coherence.schema import JournalTransaction
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+BASE_NODES = [s02_node("A", name="alpha"), s02_node("B", name="beta")]
+
+
+def _producer() -> JournalProducer:
+    return JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+    )
+
+
+def _append(paths, effects):
+    return append_journal_transaction(
+        paths, operation_kind="test", effects=effects, producer=_producer()
+    )
+
+
+def _setup_base(paths, tmp_path: Path, nodes, *, watermark: int = 0):
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    manifest = read_manifest(paths, required=True)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": nodes},
+        account_scope_id=paths.account_root.name,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=watermark,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest,
+            base_snapshot_path=candidate,
+            coherence_mode="transition",
+            base_incorporated_through_seq=watermark,
+            journal_floor_seq=watermark + 1,
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=manifest.journal_head_seq,
+    )
+    return read_manifest(paths, required=True)
+
+
+def _cut_epoch(paths, tmp_path: Path, new_nodes, *, watermark: int = 0):
+    """Simulate an S02 epoch cut: new base + new epoch identity on the
+    manifest (previous_epoch_id recorded, journal floor advanced)."""
+
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    manifest = read_manifest(paths, required=True)
+    new_id = "f" * 32
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": new_nodes},
+        account_scope_id=paths.account_root.name,
+        epoch_number=manifest.epoch_number + 1,
+        epoch_id=new_id,
+        incorporated_through_seq=watermark,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest,
+            epoch_number=manifest.epoch_number + 1,
+            epoch_id=new_id,
+            previous_epoch_id=manifest.epoch_id,
+            base_snapshot_path=candidate,
+            base_incorporated_through_seq=watermark,
+            journal_floor_seq=watermark + 1,
+            journal_head_seq=max(watermark, manifest.journal_head_seq),
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=manifest.journal_head_seq,
+    )
+    return read_manifest(paths, required=True)
+
+
+def _write_raw_record(paths, sequence: int, effects, *, epoch_id: str):
+    record = JournalTransaction(
+        schema_version=1,
+        account_scope_id=paths.account_root.name,
+        sequence=sequence,
+        previous_sequence=sequence - 1,
+        transaction_id=f"raw{sequence:027d}",
+        published_epoch_id=epoch_id,
+        operation_kind="test",
+        committed_at=NOW,
+        producer=_producer(),
+        verification=(),
+        effects=tuple(effects),
+    )
+    atomic_write_json_durable(
+        paths.journal_dir / journal_record_filename(sequence), record.to_dict()
+    )
+    return record
+
+
+def _adopt(paths, publisher, tmp_path):
+    return adopt_manifest_head(
+        paths=paths, publisher=publisher, snapshot_dir=tmp_path / "snapshots"
+    )
+
+
+# ---------------------------------------------------------------------------
+# §5.4 — epoch reload
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_epoch_mismatch_reloads_manifest_base_and_active_range(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+
+    # Local view pinned to the OLD epoch (seq 0).
+    old_view = CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id=ACCOUNT_A,
+    )
+    publisher = CacheViewPublisher(old_view)
+
+    # Epoch cut: new base carries an extra node.
+    new_nodes = BASE_NODES + [s02_node("X", name="xray")]
+    _cut_epoch(paths, tmp_path, new_nodes, watermark=0)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "epoch_reloaded"
+    assert result.view.epoch_number == manifest.epoch_number + 1
+    assert result.view.epoch_id == "f" * 32
+    assert result.view.nodes_by_id["X"]["name"] == "xray"
+    assert result.from_epoch_id == manifest.epoch_id
+
+
+@async_test
+async def test_reload_uses_only_the_manifest_base_never_timestamp_order(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+
+    # A NEWER-named decoy snapshot with different content: must be ignored.
+    snapshot_dir = tmp_path / "snapshots"
+    decoy = snapshot_dir / "99999999-999999-999999_pid9999_nodes_export_snapshot.json"
+    decoy.write_text(
+        json.dumps({"snapshot_timestamp": NOW, "nodes_export": {"nodes": [{"id": "DECOY"}]}}),
+        encoding="utf-8",
+    )
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "epoch_reloaded"
+    assert "DECOY" not in result.view.nodes_by_id
+    assert result.view.nodes_by_id["A"]["name"] == "alpha"
+
+
+@async_test
+async def test_reload_never_reuses_old_epoch_node_objects(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    old_view = CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": list(BASE_NODES)},
+        account_scope_id=ACCOUNT_A,
+    )
+    publisher = CacheViewPublisher(old_view)
+    _cut_epoch(paths, tmp_path, list(BASE_NODES), watermark=0)
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.view.nodes_by_id["A"] is not old_view.nodes_by_id["A"]
+    assert old_view.nodes_by_id["A"]["name"] == "alpha"  # old view intact
+
+
+@async_test
+async def test_reload_replays_the_active_tail_over_the_base(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    _append(paths, [SemanticEffect.node_fields("A", ["name"], {"name": "alpha-2"})])
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "epoch_reloaded"
+    assert result.view.adopted_sequence == 2
+    assert result.records_applied == 2
+    assert result.view.nodes_by_id["C"]["name"] == "gamma"
+    assert result.view.nodes_by_id["A"]["name"] == "alpha-2"
+    assert result.to_epoch_id == manifest.epoch_id
+
+
+@async_test
+async def test_valid_orphan_above_head_is_adopted_during_reload(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    # A crash-after-record orphan: durable record, manifest head not advanced.
+    _write_raw_record(
+        paths, 2, [SemanticEffect.node_create(s02_node("D", name="delta"))],
+        epoch_id=manifest.epoch_id,
+    )
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    # The orphan was adopted into the head BEFORE materialization.
+    final_manifest = read_manifest(paths, required=True)
+    assert final_manifest.journal_head_seq == 2
+    assert result.view.adopted_sequence == 2
+    assert result.view.nodes_by_id["D"]["name"] == "delta"
+
+
+@async_test
+async def test_below_floor_residue_is_never_read(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    # Cut an epoch whose base incorporates seq 1; seq 1 becomes residue.
+    _cut_epoch(paths, tmp_path, BASE_NODES + [s02_node("C", name="gamma")], watermark=1)
+    # Corrupt the residue record: a reload must never read below the floor.
+    write_malformed(paths.journal_dir / journal_record_filename(1))
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "epoch_reloaded"
+    assert result.view.adopted_sequence == 1
+    assert result.view.nodes_by_id["C"]["name"] == "gamma"
+
+
+@async_test
+async def test_base_envelope_lineage_mismatch_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+    # Tamper the base file: rewrite it naming a DIFFERENT epoch.
+    write_snapshot_candidate(
+        manifest.base_snapshot_path,
+        {"nodes": BASE_NODES},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number,
+        epoch_id="0" * 31 + "1",
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+
+    with pytest.raises(CoherenceSchemaError):
+        await _adopt(paths, publisher, tmp_path)
+
+
+@async_test
+async def test_missing_base_file_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+    os.remove(manifest.base_snapshot_path)
+
+    with pytest.raises(CoherenceStateMissingError):
+        await _adopt(paths, publisher, tmp_path)
+    # Nothing published on failure.
+    assert publisher.capture().epoch_id == "0" * 32
+
+
+# ---------------------------------------------------------------------------
+# Seal item 5 — invalidated-basis restart under concurrent rotation
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_reload_restarts_when_basis_rotates_mid_flight(tmp_path, monkeypatch):
+    """Adopter captures epoch E; a concurrent refresh publishes E+1 and GC
+    removes E's base BEFORE E materializes: the adopter notices the advanced
+    manifest, restarts, and publishes E+1 — never a partial E view."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+
+    from workflowy_mcp.coherence import adoption as adoption_module
+
+    real_materialize = adoption_module._materialize_reload
+    fired = {"done": False}
+
+    def _rotate_basis_then_materialize(paths_arg, manifest_arg, **kwargs):
+        if not fired["done"]:
+            fired["done"] = True
+            # Concurrent epoch cut: publish E+1 with a different base...
+            _cut_epoch(
+                paths,
+                tmp_path,
+                BASE_NODES + [s02_node("X", name="xray")],
+                watermark=0,
+            )
+            # ...and GC removes the captured E base before E materializes.
+            os.remove(manifest.base_snapshot_path)
+        return real_materialize(paths_arg, manifest_arg, **kwargs)
+
+    monkeypatch.setattr(
+        adoption_module, "_materialize_reload", _rotate_basis_then_materialize
+    )
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "epoch_reloaded"
+    assert result.view.epoch_id == "f" * 32  # the NEW lineage won
+    assert result.view.nodes_by_id["X"]["name"] == "xray"
+    assert publisher.capture() is result.view
+
+
+@async_test
+async def test_reload_fails_loud_when_basis_vanishes_with_unchanged_manifest(tmp_path):
+    """Basis vanishes but the manifest stays at E: genuine corruption —
+    loud typed failure, and the last good populated view remains published."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    # A populated local view pinned to the CURRENT epoch...
+    last_good = CacheView.build(
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        adopted_sequence=0,
+        nodes_export={"nodes": [s02_node("OLD", name="older")]},
+        account_scope_id=ACCOUNT_A,
+    )
+    publisher = CacheViewPublisher(last_good)
+    # ...then the shared lineage advances to E+1 (making the local view a
+    # legitimate OLDER epoch) and E+1's base vanishes WITHOUT the manifest
+    # moving further: genuine corruption, never a rotation restart.
+    new_manifest = _cut_epoch(paths, tmp_path, BASE_NODES, watermark=0)
+    os.remove(new_manifest.base_snapshot_path)
+
+    with pytest.raises(CoherenceStateMissingError):
+        await _adopt(paths, publisher, tmp_path)
+    # The refusal publishes nothing; the prior view is fully intact.
+    assert publisher.capture() is last_good
+    assert publisher.capture().nodes_by_id["OLD"]["name"] == "older"
+
+
+# ---------------------------------------------------------------------------
+# Seal item 6 — reload/recovery diagnostics
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_epoch_reload_collects_replay_diagnostics(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+    # Active tail targeting a node absent from the base: a replay diagnostic.
+    _append(paths, [SemanticEffect.node_fields("ZZ-absent", ["name"], {"name": "ghost"})])
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=ACCOUNT_A))
+
+    result = await _adopt(paths, publisher, tmp_path)
+
+    assert result.disposition == "epoch_reloaded"
+    assert result.view.adopted_sequence == 1
+    kinds = {d["kind"] for d in result.diagnostics}
+    assert "absent_target" in kinds

@@ -1,0 +1,1314 @@
+#!/usr/bin/env python3
+"""
+CARTO Worker - Detached background process for governed Cartographer jobs.
+
+This runs independently of the MCP server and survives MCP restarts.
+Progress is tracked via the CARTO job JSON (status/progress fields).
+
+Supports two governed modes:
+  1. CARTO_REFRESH mode: Cartographer F12 refresh (file/folder) from a CARTO job JSON
+  2. MARKDOWN_GENERATE mode: F12+3 detached Markdown pipeline from a CARTO job JSON
+
+Usage:
+    python weave_worker.py --mode carto_refresh --carto-job-file <path>
+    python weave_worker.py --mode markdown_generate --carto-job-file <path>
+
+(Historical module filename retained: this is the governed CARTO worker.)
+"""
+
+import argparse
+import asyncio
+import atexit
+import json
+import os
+import sys
+import threading
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+# NOTE: the shared guarded merge-write helper
+# (workflowy_mcp.config.merge_write_carto_job_status) is imported LAZILY inside
+# main(), AFTER src/ is added to sys.path — this worker is launched as a bare
+# script path (python .../weave_worker.py), so the workflowy_mcp package is not
+# importable at module-load time. A module-global slot is populated there and
+# used by all CARTO job-JSON writes below. See main()'s config import block.
+_merge_write_carto_job_status = None  # populated lazily in main()
+
+
+# WORKER BOUNDARY:
+# This file is the detached governed CARTO worker for the installable
+# Cartographer/F12 experience (CARTO_REFRESH + MARKDOWN_GENERATE job runners).
+# The retired detached WEAVE lab execution paths were removed in S06.
+# @beacon[
+#   id=wkv1@file-boundary,
+#   role=governed detached carto worker (CARTO_REFRESH + MARKDOWN_GENERATE job runners),
+#   slice_labels=nexus-portability,nexus-split-boundary,
+#   kind=span,
+#   show_span=false,
+# ]
+# @beacon[
+#   id=worker@log_worker,
+#   role=log_worker,
+#   slice_labels=ra-logging,
+#   kind=ast,
+# ]
+def log_worker(message: str, component: str = "WEAVE_WORKER") -> None:
+    """Log to stderr with timestamp."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    print(f"[{timestamp}] 🗡️ [{component}] {message}", file=sys.stderr, flush=True)
+
+
+# Memo cache for file_uuid -> repo-relative path (or basename), so the
+# per-tick progress callbacks below resolve a given file's display path at
+# most once per worker run. Keyed by Workflowy file-node UUID. A value of
+# None means "resolution failed / not resolvable" (cached so we don't retry
+# on every progress tick).
+_carto_relpath_memo: dict[str, str | None] = {}
+
+HEARTBEAT_INTERVAL_SECONDS = 1.0
+HEARTBEAT_JOIN_TIMEOUT_SECONDS = 0.25
+
+
+# @beacon[
+#   id=carto-worker@diagnostic-heartbeat,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-workflowy-cache,
+#   kind=ast,
+#   comment=Diagnostic-only detached CARTO heartbeat controller: writes immutable pid/job/claim identity once, advances only mtime on a daemon thread, and stops with a bounded non-wedging join. Never participates in liveness, admission, cancellation, reaping, killing, or claim release.,
+# ]
+class CartoHeartbeatController:
+    """Write-once, mtime-only diagnostic heartbeat for a detached CARTO worker."""
+
+    def __init__(
+        self,
+        heartbeat_path: Path,
+        *,
+        pid: int,
+        job_id: str,
+        claim_id: str,
+        atomic_writer: Callable[[Path, dict[str, Any]], Any],
+        interval_seconds: float = HEARTBEAT_INTERVAL_SECONDS,
+        join_timeout_seconds: float = HEARTBEAT_JOIN_TIMEOUT_SECONDS,
+        utime_fn: Callable[..., Any] = os.utime,
+        log_fn: Callable[[str, str], Any] = log_worker,
+        thread_factory: Callable[..., threading.Thread] = threading.Thread,
+    ) -> None:
+        self.path = Path(heartbeat_path)
+        self.identity = {"pid": int(pid), "job_id": str(job_id), "claim_id": str(claim_id)}
+        self._atomic_writer = atomic_writer
+        self._interval_seconds = max(0.001, float(interval_seconds))
+        self._join_timeout_seconds = max(0.0, float(join_timeout_seconds))
+        self._utime = utime_fn
+        self._log = log_fn
+        self._thread_factory = thread_factory
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _diagnostic(self, action: str, exc: BaseException) -> None:
+        self._log(
+            f"Diagnostic heartbeat {action} failed for {self.identity['job_id']}: {exc}",
+            "CARTO",
+        )
+
+    def _touch_once(self) -> bool:
+        try:
+            self._utime(self.path, None)
+            return True
+        except Exception as exc:  # noqa: BLE001 - diagnostic metadata is nonfatal
+            self._diagnostic("touch", exc)
+            return False
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self._interval_seconds):
+            self._touch_once()
+
+    def start(self) -> bool:
+        """Write immutable identity once, then start mtime-only daemon ticks."""
+
+        if self._thread is not None:
+            return self._thread.is_alive()
+        try:
+            self._atomic_writer(self.path, self.identity)
+        except Exception as exc:  # noqa: BLE001 - heartbeat cannot fail the job
+            self._diagnostic("initial write", exc)
+            return False
+        self._thread = self._thread_factory(
+            target=self._run,
+            name=f"carto-heartbeat-{self.identity['job_id']}",
+            daemon=True,
+        )
+        try:
+            self._thread.start()
+        except Exception as exc:  # noqa: BLE001 - heartbeat cannot fail the job
+            self._thread = None
+            self._diagnostic("thread start", exc)
+            return False
+        return True
+
+    def stop(self) -> None:
+        """Signal stop and join only for the fixed, small diagnostic bound."""
+
+        self._stop_event.set()
+        thread = self._thread
+        if thread is None or thread is threading.current_thread():
+            return
+        try:
+            thread.join(timeout=self._join_timeout_seconds)
+        except Exception as exc:  # noqa: BLE001 - shutdown cannot replace job outcome
+            self._diagnostic("shutdown", exc)
+
+
+def _start_carto_heartbeat_after_adoption(
+    mode: str,
+    carto_adoption: dict[str, Any] | None,
+    carto_boot_job: dict[str, Any] | None,
+    job_file: str | os.PathLike[str],
+    *,
+    jobs_root: str | os.PathLike[str] | None = None,
+) -> CartoHeartbeatController | None:
+    """Start diagnostics only for this process's successfully adopted claim."""
+
+    if mode not in ("carto_refresh", "markdown_generate") or not carto_adoption:
+        return None
+    claim = carto_adoption.get("claim") or {}
+    job = carto_boot_job or {}
+    job_id = str(job.get("id") or "")
+    claim_id = str(claim.get("claim_id") or "")
+    if (
+        not job_id
+        or not claim_id
+        or str(claim.get("job_id") or "") != job_id
+        or claim.get("pid") != os.getpid()
+        or str(job.get("claim_id") or claim_id) != claim_id
+    ):
+        log_worker(
+            "Diagnostic heartbeat not started: adopted claim/job identity is incomplete, "
+            "mismatched, or owned by another PID.",
+            "CARTO",
+        )
+        return None
+
+    from workflowy_mcp.carto_job_governance import atomic_write_json, governance_paths
+
+    paths = governance_paths(jobs_root)
+    if Path(job_file).resolve().parent != paths.jobs_root.resolve():
+        log_worker(
+            "Diagnostic heartbeat not started: job file is outside the authoritative jobs root.",
+            "CARTO",
+        )
+        return None
+    controller = CartoHeartbeatController(
+        paths.heartbeats_dir / f"{job_id}.json",
+        pid=os.getpid(),
+        job_id=job_id,
+        claim_id=claim_id,
+        atomic_writer=atomic_write_json,
+    )
+    controller.start()
+    return controller
+
+
+# @beacon[
+#   id=worker@resolve_carto_file_relpath_for_progress,
+#   role=ƒ _resolve_carto_file_relpath_for_progress(client, file_uuid),
+#   slice_labels=ra-carto-jobs,nexus-path-resolution-logic,
+#   kind=ast,
+#   comment=Server-side (worker) computation of the REPO-ROOT-RELATIVE path for a CARTO progress file_uuid, written into progress.current_file_relpath so the UUID widget status line can show a human path instead of a raw UUID (the browser DOM walk only works when that file node happens to be rendered; the worker always knows the path). Delegates the composition (resolve_cartographer_path_from_node + _portable_relpath + basename fallback) to the ONE shared helper resolve_cartographer_file_relpath in api_client_nexus (U1, MasterSpec §5.4); keeps its memo. Fully best-effort (never raises, never affects reconcile).,
+# ]
+def _resolve_carto_file_relpath_for_progress(client, file_uuid: str) -> str | None:
+    """Return a repo-root-relative display path for a CARTO progress file UUID.
+
+    Best-effort and memoized. Returns:
+      - the repo-relative path (forward-slash, Root: prefix omitted) for a
+        normally repo-mapped file under an absolute Root: ancestor, e.g.
+        ``src/workflowy_mcp/client/api_client_nexus.py``;
+      - the bare basename for a legacy absolute-``Path:`` file node that has no
+        Root: ancestor to be relative to;
+      - None when the path cannot be resolved (caller then falls back to the
+        node name / UUID on the client side).
+
+    This is the authoritative, DOM-independent source for the CARTO jobs
+    status line's ``file=...`` tail. The browser-side
+    ``resolveCartographerRelPathFromDom`` only works when the file node is
+    currently rendered in the Workflowy DOM (often NOT the case for the file
+    being reconciled mid-F12+1); the worker, by contrast, always has the
+    /nodes-export cache and the Path:/Root: resolver in hand.
+    """
+    if not file_uuid:
+        return None
+    if file_uuid in _carto_relpath_memo:
+        return _carto_relpath_memo[file_uuid]
+
+    result: str | None = None
+    try:
+        # The composition itself lives in the ONE shared helper (U1, MasterSpec
+        # §5.4): resolver + portable relpath + basename fallback. Imported
+        # lazily so a resolution failure can never break worker import/startup.
+        from workflowy_mcp.client.api_client_nexus import (
+            resolve_cartographer_file_relpath,
+        )
+
+        all_nodes = client._get_nodes_export_cache_nodes() or []
+        nodes_by_id = {
+            str(n.get("id")): n for n in all_nodes if isinstance(n, dict) and n.get("id")
+        }
+        rel, _root_abs = resolve_cartographer_file_relpath(
+            file_node_id=str(file_uuid),
+            nodes_by_id=nodes_by_id,
+        )
+        result = rel
+    except Exception as e:  # noqa: BLE001 - cosmetic status only; never fail the run
+        log_worker(
+            f"_resolve_carto_file_relpath_for_progress: could not resolve relpath for "
+            f"{file_uuid}: {e}",
+            "CARTO",
+        )
+        result = None
+
+    _carto_relpath_memo[file_uuid] = result
+    return result
+
+
+# @beacon[
+#   id=worker@main,
+#   role=main,
+#   slice_labels=nexus-core-v1,mci-lease-seams,
+#   kind=ast,
+# ]
+async def main():
+    """Main worker entry point."""
+
+    # Argument parsing, environment bootstrap, client initialization, and worker
+    # startup/cache preparation are shared detached-worker infrastructure for the
+    # governed CARTO job runners.
+    # @beacon[
+    #   id=wkv1@shared-bootstrap,
+    #   role=boundary split: shared detached worker bootstrap and environment setup,
+    #   slice_labels=nexus-portability,nexus-split-boundary,
+    #   kind=span,
+    #   show_span=false,
+    # ]
+
+    parser = argparse.ArgumentParser(description="Governed CARTO detached worker")
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=["carto_refresh", "markdown_generate"],
+        help=(
+            "CARTO_REFRESH (Cartographer F12 job JSON-based) or "
+            "MARKDOWN_GENERATE (F12+3 detached pipeline, also CARTO job JSON-based)"
+        ),
+    )
+    parser.add_argument(
+        "--carto-job-file",
+        required=True,
+        help="CARTO job JSON file (required for both governed modes)",
+    )
+
+    args = parser.parse_args()
+
+    mode = args.mode
+
+    log_worker(f"Starting CARTO worker in {mode.upper()} mode")
+
+    # Determine paths
+    script_dir = Path(__file__).parent.resolve()
+
+    # Worker is in src/workflowy_mcp/, so add src/ to path for package imports
+    src_dir = script_dir.parent
+    sys.path.insert(0, str(src_dir))
+
+    # Worker claim adoption is the FIRST CARTO action after argv + job JSON.
+    # It precedes client import/construction, cache bootstrap, and all mutation work.
+    carto_adoption = None
+    carto_boot_job = None
+    carto_heartbeat = None
+    if mode in ("carto_refresh", "markdown_generate"):
+        try:
+            with open(args.carto_job_file, encoding="utf-8") as handle:
+                carto_boot_job = json.load(handle)
+            from workflowy_mcp.carto_job_governance import (
+                adopt_carto_worker_claim,
+                cancellation_sentinel_path,
+                carto_cancel_requested,
+                finalize_cancelled_job_claim,
+            )
+
+            carto_adoption = adopt_carto_worker_claim(args.carto_job_file)
+            carto_boot_job = carto_adoption["job"]
+            log_worker(
+                f"Adopted governed claim {carto_adoption['claim'].get('claim_id')} "
+                f"for {carto_boot_job.get('id')} before client/bootstrap.",
+                "CARTO",
+            )
+        except BaseException as exc:
+            log_worker(
+                f"ERROR: governed claim adoption refused; zero mutation work: {exc}", "CARTO"
+            )
+            sys.exit(1)
+
+        # Post-adoption startup cancellation belongs to this worker.  Finalize
+        # before any client construction or cache/API bootstrap.  A legacy
+        # terminal-cancelled job is accepted as compatibility state; a
+        # cancelling state with a vanished sentinel deterministically fails.
+        if carto_cancel_requested(args.carto_job_file):
+            boot_status = str((carto_boot_job or {}).get("status") or "").lower()
+            sentinel_present = cancellation_sentinel_path(
+                str((carto_boot_job or {}).get("id") or Path(args.carto_job_file).stem),
+                Path(args.carto_job_file).parent,
+            ).exists()
+            finalize_cancelled_job_claim(
+                args.carto_job_file,
+                str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                allow_legacy_cancelled=(boot_status == "cancelled" and not sentinel_present),
+                diagnostic=lambda message: log_worker(message, "CARTO"),
+            )
+            log_worker("Startup cancellation finalized before client/bootstrap.", "CARTO")
+            sys.exit(0)
+
+        carto_heartbeat = _start_carto_heartbeat_after_adoption(
+            mode,
+            carto_adoption,
+            carto_boot_job,
+            args.carto_job_file,
+        )
+        if carto_heartbeat is not None:
+            # Covers every normal SystemExit/return path. The two governed mode
+            # finalizers also stop explicitly before claim release; stop is idempotent.
+            atexit.register(carto_heartbeat.stop)
+
+    # Import the client
+    try:
+        from workflowy_mcp.client.api_client import WorkFlowyClient
+
+        log_worker("Successfully imported WorkFlowyClient")
+    except Exception as e:
+        log_worker(f"Failed to import WorkFlowyClient: {e}")
+        import traceback
+
+        log_worker(traceback.format_exc())
+        sys.exit(1)
+
+    # Initialize client (loader precedence: explicit config path -> discovered file -> env/defaults)
+    try:
+        from workflowy_mcp.config import (
+            get_server_config,
+            get_server_config_meta,
+            is_carto_job_terminal,
+            merge_write_carto_job_status,
+        )
+
+        # Populate the module-global slot used by all CARTO job-JSON writes in
+        # this worker (guarded merge-write that keeps cancelled/failed sticky
+        # and writes atomically). Safe to import here: src/ is now on sys.path.
+        global _merge_write_carto_job_status
+        _merge_write_carto_job_status = merge_write_carto_job_status
+
+        server_config = get_server_config(reload=True)
+        config_meta = get_server_config_meta()
+        log_worker(
+            "Resolved worker configuration "
+            f"(source={config_meta.get('source')}, path={config_meta.get('config_path')})"
+        )
+    except Exception as e:
+        log_worker(f"ERROR: failed to load server configuration: {e}")
+        import traceback
+
+        log_worker(traceback.format_exc())
+        sys.exit(1)
+
+    api_config = server_config.get_api_config().model_copy(update={"timeout": 900})
+
+    client = WorkFlowyClient(
+        api_config,
+        write_governor_config=server_config.write_governor,
+        governance_config=server_config.governance,
+    )
+
+    # @beacon[
+    #   id=weave-worker@refresh_nodes_export_cache,
+    #   role=weave worker – refresh_nodes_export_cache,
+    #   slice_labels=ra-workflowy-cache,
+    #   kind=span,
+    #   comment=S02/S03-B launcher-selected lineage VALIDATION + the SINGLE current manifest-head adoption (pin_worker_operation_cache, audit amendment A3) in weave_worker main (Gate c); S03B Chain-3 (W2): explicit four-way account binding (adopted claim = admitted job = snapshot lineage = client/coherence paths) BEFORE the pin — a mismatch fails the bootstrap loudly with zero mutation work. S04 Remediation Chain 1 (item 1): execution-side coherence barrier recheck via the shared require_coherence_mutation_admission authority after adoption/validation/pin and BEFORE any mutation dispatch — refusal persists a typed coherence_barrier_active job failure and finalizes the adopted claim through the exact-token path with zero mutation dispatch.,
+    # ]
+    # Load the exact launcher-selected snapshot for governed CARTO workers.
+    # They never self-refresh /nodes-export; skip means an existing usable
+    # snapshot must already exist.
+    if mode in ("carto_refresh", "markdown_generate"):
+        try:
+            from workflowy_mcp.carto_job_governance import (
+                finalize_claim,
+                load_usable_nodes_export_snapshot,
+            )
+
+            snapshot_path = str((carto_boot_job or {}).get("snapshot_path") or "")
+            # S02 §13.3: verify the launcher-selected snapshot's manifest
+            # lineage against the job record BEFORE any cache population or
+            # mutation work.  A mismatch fails here, never mid-mutation.
+            expected_lineage = (carto_boot_job or {}).get("snapshot_lineage")
+            if not isinstance(expected_lineage, dict) or not expected_lineage:
+                raise RuntimeError(
+                    "governed job lacks manifest-linked snapshot lineage metadata"
+                )
+            # S03B Chain-3 (W2): explicit four-way account binding BEFORE
+            # current-head pinning and before any mutation/path/progress
+            # work.  The adopted CLAIM is the primary ownership authority;
+            # the admitted job's top-level account, the launcher-recorded
+            # snapshot lineage account, and the client/coherence-paths
+            # account derivation must ALL equal it exactly — no best-effort
+            # account selection, and the job field is never trusted over the
+            # claim.  A mismatch raises the distinct account-mismatch
+            # diagnostic into the existing failure path (job failed via the
+            # existing worker failure path, the exact adopted claim
+            # finalized through existing governance, the blocking claim
+            # preserved if finalization itself fails).
+            _claim_account = str(
+                (carto_adoption or {}).get("claim", {}).get("account_scope_id") or ""
+            )
+            _job_account = str((carto_boot_job or {}).get("account_scope_id") or "")
+            _lineage_account = str(expected_lineage.get("account_scope_id") or "")
+            _client_account = str(client._coherence_paths().account_root.name or "")
+            if not _claim_account or not (
+                _claim_account == _job_account == _lineage_account == _client_account
+            ):
+                raise RuntimeError(
+                    "governed worker account mismatch "
+                    "(claim/job/snapshot-lineage/client must be identical): "
+                    f"claim={_claim_account!r} job={_job_account!r} "
+                    f"snapshot_lineage={_lineage_account!r} client={_client_account!r}; "
+                    "zero mutation work"
+                )
+            expected_lineage = {
+                **expected_lineage,
+                "account_scope_id": str(
+                    (carto_boot_job or {}).get("account_scope_id")
+                    or expected_lineage.get("account_scope_id")
+                    or ""
+                ),
+            }
+            load_usable_nodes_export_snapshot(
+                snapshot_path, expected_lineage=expected_lineage
+            )
+            # S03-B Gate (c) (§10): the worker adopts the CURRENT coherence
+            # manifest — base + contiguous journal through the head observable
+            # after exact claim adoption — BEFORE any mutation/path/progress
+            # work.  The launcher-selected job-basis snapshot above remains
+            # job-premise VALIDATION (preparation lineage) only; it is never
+            # the worker's cache authority and never skips current-head
+            # adoption (§10.2).  S03-B audit amendment A3: the worker pin is
+            # the SINGLE adoption authority — pin_worker_operation_cache
+            # performs the ONE current-head adoption (via
+            # capture_operation_cache) and installs the worker's operation
+            # snapshot; there is deliberately NO separate direct head-adoption
+            # call (the adoption replaces the S03-A job-basis-only
+            # _publish_lineage_view publish).
+            try:
+                from workflowy_mcp.coherence.operation_cache import (
+                    pin_worker_operation_cache,
+                )
+
+                await pin_worker_operation_cache(
+                    client,
+                    f"worker:{mode}:{str((carto_boot_job or {}).get('id') or Path(args.carto_job_file).stem)}",
+                )
+            except BaseException as adopt_exc:
+                raise RuntimeError(
+                    f"governed worker manifest-head adoption failed; zero mutation work: {adopt_exc}"
+                ) from adopt_exc
+            log_worker(
+                f"Validated launcher-selected /nodes-export snapshot and adopted current manifest head: {snapshot_path}",
+                "CARTO",
+            )
+        except BaseException as exc:
+            log_worker(
+                f"ERROR: governed worker snapshot missing/malformed; zero mutation work: {exc}",
+                "CARTO",
+            )
+            try:
+                failed = dict(carto_boot_job or {})
+                failed["status"] = "failed"
+                failed["error"] = f"launcher-selected snapshot unavailable: {exc}"
+                failed["updated_at"] = datetime.utcnow().isoformat()
+                _merge_write_carto_job_status(args.carto_job_file, failed)
+                finalize_claim(
+                    str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                    Path(args.carto_job_file).parent,
+                )
+            except Exception as final_exc:
+                log_worker(f"ERROR: snapshot-failure finalization failed: {final_exc}", "CARTO")
+            await client.close()
+            sys.exit(1)
+
+        # S04 Remediation Chain 1 (work-order item 1): execution-side
+        # coherence barrier recheck.  The launch-side admission gate ran in
+        # the LAUNCHER process possibly minutes ago; a hard barrier raised
+        # by another process after this worker's launch/adoption must still
+        # stop THIS worker BEFORE any mutation dispatch.  One shared
+        # authority (require_coherence_mutation_admission over the ONE
+        # hard-stop predicate — never a second predicate), positioned after
+        # exact claim adoption + lineage validation + the worker pin and
+        # before the dispatch branches.
+        try:
+            from workflowy_mcp.coherence.admission import (
+                require_coherence_mutation_admission,
+            )
+            from workflowy_mcp.coherence.errors import CoherenceBarrierActiveError
+
+            await require_coherence_mutation_admission(
+                client._coherence_paths(),
+                operation=f"worker:weave_worker.main:{mode}",
+            )
+            log_worker(
+                "Coherence barrier recheck passed before mutation dispatch.", "CARTO"
+            )
+        except CoherenceBarrierActiveError as barrier_exc:
+            log_worker(
+                "ERROR: coherence barrier active at execution-side recheck; "
+                f"zero mutation dispatch: {barrier_exc}",
+                "CARTO",
+            )
+            try:
+                failed = dict(carto_boot_job or {})
+                failed["status"] = "failed"
+                failed["error"] = f"coherence_barrier_active: {barrier_exc}"
+                failed["error_kind"] = "coherence_barrier_active"
+                # S04 Remediation Chain 5 (work-order item 1): persist the
+                # standard refusal_extra() payload alongside the typed code
+                # so system.job.status exposes the recovery contract for
+                # this execution-side refusal too.
+                failed["error_extra"] = barrier_exc.refusal_extra()
+                failed["updated_at"] = datetime.utcnow().isoformat()
+                _merge_write_carto_job_status(args.carto_job_file, failed)
+                finalize_claim(
+                    str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                    Path(args.carto_job_file).parent,
+                )
+            except Exception as final_exc:
+                # Cleanup-required doctrine: a failed finalization leaves the
+                # claim deliberately blocking for exact-token async retry —
+                # the failure is logged loudly, never silently discarded.
+                log_worker(
+                    f"ERROR: barrier-refusal claim finalization failed: {final_exc}",
+                    "CARTO",
+                )
+            await client.close()
+            sys.exit(1)
+        except BaseException as gate_exc:
+            # Unexpected gate-infrastructure failure (never the typed
+            # refusal): fail the job and finalize the adopted claim through
+            # the same exact-token path rather than stranding it.
+            log_worker(
+                f"ERROR: coherence admission gate error; zero mutation work: {gate_exc}",
+                "CARTO",
+            )
+            try:
+                failed = dict(carto_boot_job or {})
+                failed["status"] = "failed"
+                failed["error"] = f"coherence admission gate error: {gate_exc}"
+                failed["updated_at"] = datetime.utcnow().isoformat()
+                _merge_write_carto_job_status(args.carto_job_file, failed)
+                finalize_claim(
+                    str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                    Path(args.carto_job_file).parent,
+                )
+            except Exception as final_exc:
+                log_worker(
+                    f"ERROR: gate-error claim finalization failed: {final_exc}", "CARTO"
+                )
+            await client.close()
+            sys.exit(1)
+    # @beacon-close[
+    #   id=weave-worker@refresh_nodes_export_cache,
+    # ]
+
+    # @beacon-close[
+    #   id=wkv1@shared-bootstrap,
+    # ]
+    # CORE V1 KEEPER:
+    # This branch is the detached Cartographer/F12 worker path and belongs in the
+    # installable core surface.
+    # @beacon[
+    #   id=wkv1@carto-refresh-core,
+    #   role=core keeper: detached cartographer refresh job runner,
+    #   slice_labels=nexus-portability,nexus-core-v1,
+    #   kind=span,
+    #   show_span=false,
+    # ]
+    # @beacon[
+    #   id=weave-worker@carto-refresh-job,
+    #   role=weave worker – CARTO_REFRESH job runner,
+    #   slice_labels=ra-reconcile,nexus-core-v1,ra-carto-jobs,ra-bulk-visible-apply,ra-logging,
+    #   kind=span,
+    #   show_span=false,
+    #   comment=Detached worker dispatch for CARTO_REFRESH jobs (FILE mode → refresh_file_node_beacons; FOLDER mode → refresh_folder_cartographer_sync). Reads job JSON, runs Cartographer reconcile, writes status back. RELEVANT TO F12+3 TIMEOUT: this entire branch runs OUT-OF-PROCESS via subprocess detach, so foreground MCP server is not directly waiting on it — BUT the foreground bulk-apply runner DOES await per-file refresh_file_node_beacons in-process (see _run_carto_bulk_visible_apply_job). HYPOTHESIS (unverified): if the foreground in-process refresh hangs while a separate detached CARTO_REFRESH worker is also active, deadlock-like symptoms could result. Closures _carto_should_cancel{,_file} and _carto_progress{,_for_file} live inside this branch and are individually beaconed.,
+    # ]
+    carto_cancel_observed = False
+
+    # CARTO_REFRESH mode: run Cartographer refresh via CARTO job JSON and exit
+    if mode == "carto_refresh":
+        job_path = Path(args.carto_job_file)
+
+        if not job_path.exists():
+            log_worker(f"ERROR: CARTO job file not found: {job_path}")
+            await client.close()
+            sys.exit(1)
+
+        # Load job JSON
+        try:
+            with open(job_path, encoding="utf-8") as jf:
+                job = json.load(jf)
+        except Exception as e:
+            log_worker(f"ERROR: Failed to read CARTO job file: {e}")
+            await client.close()
+            sys.exit(1)
+
+        # Derive a per-job directory and expose it via environment so that
+        # refresh_file_node_beacons can route per-file JSON/journal/debug logs
+        # into a job-specific folder under cartographer_jobs/.
+        try:
+            jid = job.get("id") or job_path.stem
+
+            # Prefer a sortable timestamp prefix based on created_at if present.
+            job_dir_name = str(jid)
+            created_str = job.get("created_at")
+            if isinstance(created_str, str) and created_str:
+                try:
+                    # created_at is ISO 8601; convert to YYYYMMDD-HHMMSS for folder naming.
+                    dt = datetime.fromisoformat(created_str)
+                    prefix = dt.strftime("%Y%m%d-%H%M%S")
+                    job_dir_name = f"{prefix}_{jid}"
+                except Exception:  # noqa: BLE001
+                    # Fall back to bare job id if parsing fails.
+                    pass
+
+            job_dir = job_path.parent / job_dir_name
+            job_dir.mkdir(parents=True, exist_ok=True)
+            os.environ["CARTO_JOB_DIR"] = str(job_dir)
+        except Exception as e:  # noqa: BLE001
+            log_worker(
+                f"CARTO_REFRESH: failed to initialize CARTO_JOB_DIR for job {job.get('id') or job_path.stem}: {e}",
+                "CARTO",
+            )
+
+        # Cancellation may arrive after the immediate post-adoption check but
+        # before this branch.  It still finalizes before mutation work.
+        if carto_cancel_requested(job_path):
+            finalize_cancelled_job_claim(
+                job_path,
+                str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                allow_legacy_cancelled=(str(job.get("status") or "").lower() == "cancelled"),
+                diagnostic=lambda message: log_worker(message, "CARTO"),
+            )
+            log_worker(
+                f"CARTO_REFRESH job {job.get('id') or job_path.stem} cancelled before refresh.",
+                "CARTO",
+            )
+            await client.close()
+            sys.exit(0)
+
+        # Update job status to running
+        now_iso = datetime.utcnow().isoformat()
+        job["status"] = "running"
+        job["updated_at"] = now_iso
+        job["pid"] = os.getpid()
+
+        progress = job.get("progress") or {}
+        job["progress"] = progress
+        progress.setdefault("current_phase", "refresh")
+        # Initialize optional counters used by the UUID widget for richer status text.
+        progress.setdefault("nodes_created", 0)
+        progress.setdefault("nodes_updated", 0)
+        progress.setdefault("nodes_moved", 0)
+        progress.setdefault("nodes_deleted", 0)
+
+        # Expose job file to downstream Cartographer refresh helpers so they can
+        # report fine-grained apply-phase progress (best-effort).
+        os.environ["CARTO_JOB_FILE"] = str(job_path)
+
+        result_summary = job.get("result_summary") or {}
+        job["result_summary"] = result_summary
+        result_summary.setdefault("errors", [])
+
+        # Guarded merge-write (keeps a concurrently-written cancel sticky).
+        if not _merge_write_carto_job_status(job_path, job):
+            log_worker("ERROR: Failed to write CARTO job file (running status).")
+
+        root_uuid = job.get("root_uuid")
+        carto_mode = job.get("mode")
+
+        # U5 fail-closed override (spec [ap:HFYAG2] §6): an explicit per-run
+        # force rides in the job JSON (beacon.map.refresh force=True or the
+        # F12+1 popup's override row → WS payload → extra_job_fields).  The
+        # key is absent for ordinary runs and for job files written before
+        # this unit — bool(None) is False, so absence means normal guarded
+        # behavior.  Nothing ever defaults it to True.
+        force = bool(job.get("force"))
+        if force:
+            log_worker(
+                "CARTO_REFRESH: explicit force=True in job payload — fail-closed "
+                "delete-threshold guards are overridden for THIS run only.",
+                "CARTO",
+            )
+
+        exit_code = 0
+
+        try:
+            if not root_uuid or carto_mode not in ("file", "folder"):
+                raise ValueError("Invalid CARTO_REFRESH job payload (root_uuid/mode)")
+
+            if carto_mode == "file":
+                log_worker(f"CARTO_REFRESH: refreshing FILE node {root_uuid}")
+
+                # @beacon[
+                #   id=weave-worker@carto-refresh-cancel-file,
+                #   role=weave worker – CARTO_REFRESH should_cancel (file mode),
+                #   slice_labels=ra-carto-jobs,
+                #   kind=ast,
+                # ]
+                def _carto_should_cancel_file() -> bool:
+                    """Return True if the CARTO_REFRESH job JSON is marked cancelled.
+
+                    This mirrors the folder-mode _carto_should_cancel but is
+                    scoped to file-mode jobs that may route into folder
+                    Cartographer sync when Path/Root points to a directory.
+                    """
+                    nonlocal carto_cancel_observed
+                    requested = carto_cancel_requested(job_path)
+                    carto_cancel_observed = carto_cancel_observed or requested
+                    return requested
+
+                # @beacon[
+                #   id=weave-worker@carto-refresh-progress-file,
+                #   role=weave worker  CARTO_REFRESH progress (file mode),
+                #   slice_labels=ra-carto-jobs,
+                #   kind=ast,
+                # ]
+                def _carto_progress_for_file(file_uuid: str, completed: int, total: int) -> None:
+                    """Best-effort progress writer for CARTO_REFRESH file jobs that
+                    actually run a folder-level Cartographer sync via
+                    refresh_file_node_beacons. Mirrors the folder-mode
+                    _carto_progress behavior."""
+                    try:
+                        with open(job_path, encoding="utf-8") as jf:
+                            fresh = json.load(jf)
+                    except Exception as e:  # noqa: BLE001
+                        log_worker(
+                            f"CARTO_REFRESH: failed to re-read job JSON for progress update (file mode): {e}",
+                        )
+                        return
+
+                    progress_local = fresh.get("progress") or {}
+                    fresh["progress"] = progress_local
+                    if total > 0:
+                        progress_local["total_files"] = total
+                    progress_local["completed_files"] = max(0, int(completed))
+                    if file_uuid:
+                        progress_local["current_file"] = file_uuid
+                        # Also record a human-readable repo-relative path for
+                        # the UUID-widget status line (DOM-independent; see
+                        # _resolve_carto_file_relpath_for_progress). Best-effort
+                        # and memoized; None when unresolvable (client then
+                        # falls back to the node name / UUID).
+                        _relp = _resolve_carto_file_relpath_for_progress(client, file_uuid)
+                        if _relp:
+                            progress_local["current_file_relpath"] = _relp
+
+                    fresh["updated_at"] = datetime.utcnow().isoformat()
+                    # Guarded merge-write: if a cancel landed on disk between the
+                    # re-read above and now, the helper keeps status='cancelled'
+                    # sticky while still recording this progress payload.
+                    if not _merge_write_carto_job_status(job_path, fresh):
+                        log_worker(
+                            "CARTO_REFRESH: failed to write job JSON for progress update (file mode).",
+                        )
+
+                    # Instrumentation: log file-mode progress for debugging
+                    try:
+                        log_worker(
+                            f"CARTO_REFRESH file-mode progress: completed={completed} total={total} file_uuid={file_uuid!r}",
+                            "CARTO",
+                        )
+                    except Exception:
+                        # Logging must never break progress updates
+                        pass
+
+                # F12+4 temporary-file regime: the job may carry an explicit
+                # source_path_override (a throwaway .md whose content should be
+                # split into a Workflowy subtree under root_uuid, which itself
+                # has NO Path: header) plus delete_temp_file_after so we remove
+                # that .md once the reconcile completes. Both keys are absent
+                # for ordinary F12+1 refreshes.
+                _source_path_override = job.get("source_path_override") or None
+                _delete_temp_file_after = bool(job.get("delete_temp_file_after"))
+                if _source_path_override:
+                    log_worker(
+                        "CARTO_REFRESH (file): source_path_override="
+                        f"{_source_path_override!r} delete_after={_delete_temp_file_after}",
+                        "CARTO",
+                    )
+
+                client.set_operation_cancel_callback(_carto_should_cancel_file)
+
+                result = await client.refresh_file_node_beacons(
+                    file_node_id=root_uuid,
+                    dry_run=False,
+                    cancel_callback=_carto_should_cancel_file,
+                    progress_callback=_carto_progress_for_file,
+                    source_path_override=_source_path_override,
+                    carto_claim_id=str(job.get("claim_id") or ""),
+                    force=force,
+                )
+                files_refreshed = 1
+
+                # Delete the throwaway .md now that the subtree has been built
+                # from it. Only in the temporary regime, only when the reconcile
+                # itself reported success, and only for a path that still looks
+                # like the override we were handed (defensive). Deletion failure
+                # is logged but never fails the job — a leftover temp .md is a
+                # cosmetic nuisance, not a correctness problem.
+                if _delete_temp_file_after and _source_path_override:
+                    reconcile_ok = (
+                        isinstance(result, dict) and result.get("success")
+                    ) or result is None
+                    if reconcile_ok:
+                        try:
+                            if os.path.isfile(_source_path_override):
+                                os.remove(_source_path_override)
+                                log_worker(
+                                    "CARTO_REFRESH (file): deleted temporary F12+4 "
+                                    f".md {_source_path_override!r}",
+                                    "CARTO",
+                                )
+                            else:
+                                log_worker(
+                                    "CARTO_REFRESH (file): temp .md already gone, "
+                                    f"nothing to delete: {_source_path_override!r}",
+                                    "CARTO",
+                                )
+                        except Exception as _del_e:  # noqa: BLE001
+                            log_worker(
+                                "CARTO_REFRESH (file): FAILED to delete temporary "
+                                f".md {_source_path_override!r}: {_del_e}",
+                                "CARTO",
+                            )
+                    else:
+                        log_worker(
+                            "CARTO_REFRESH (file): reconcile not successful; "
+                            f"LEAVING temp .md in place: {_source_path_override!r}",
+                            "CARTO",
+                        )
+            else:
+                log_worker(f"CARTO_REFRESH: refreshing FOLDER subtree {root_uuid}")
+
+                # @beacon[
+                #   id=weave-worker@carto-refresh-cancel,
+                #   role=weave worker – CARTO_REFRESH should_cancel,
+                #   slice_labels=ra-carto-jobs,
+                #   kind=ast,
+                # ]
+                def _carto_should_cancel() -> bool:
+                    """Return True if the CARTO_REFRESH job JSON is marked cancelled.
+
+                    This is a best-effort check invoked between per-file refreshes
+                    inside refresh_folder_cartographer_sync. Errors while reading the
+                    job JSON are logged but do not stop the job.
+                    """
+                    nonlocal carto_cancel_observed
+                    requested = carto_cancel_requested(job_path)
+                    carto_cancel_observed = carto_cancel_observed or requested
+                    return requested
+
+                # @beacon[
+                #   id=weave-worker@carto-refresh-progress,
+                #   role=weave worker – CARTO_REFRESH progress,
+                #   slice_labels=ra-carto-jobs,
+                #   kind=ast,
+                # ]
+                def _carto_progress(file_uuid: str, completed: int, total: int) -> None:
+                    """Best-effort progress writer for CARTO_REFRESH folder jobs.
+
+                    Updates the CARTO job JSON's progress.{total_files,completed_files,current_file}.
+                    Errors are logged but never raised.
+                    """
+                    try:
+                        with open(job_path, encoding="utf-8") as jf:
+                            fresh = json.load(jf)
+                    except Exception as e:  # noqa: BLE001
+                        log_worker(
+                            f"CARTO_REFRESH: failed to re-read job JSON for progress update: {e}",
+                        )
+                        return
+
+                    progress_local = fresh.get("progress") or {}
+                    fresh["progress"] = progress_local
+                    if total > 0:
+                        progress_local["total_files"] = total
+                    progress_local["completed_files"] = max(0, int(completed))
+                    if file_uuid:
+                        progress_local["current_file"] = file_uuid
+                        # Also record a human-readable repo-relative path for
+                        # the UUID-widget status line (DOM-independent; see
+                        # _resolve_carto_file_relpath_for_progress). Best-effort
+                        # and memoized; None when unresolvable (client then
+                        # falls back to the node name / UUID).
+                        _relp = _resolve_carto_file_relpath_for_progress(client, file_uuid)
+                        if _relp:
+                            progress_local["current_file_relpath"] = _relp
+
+                    fresh["updated_at"] = datetime.utcnow().isoformat()
+                    # Guarded merge-write: if a cancel landed on disk between the
+                    # re-read above and now, the helper keeps status='cancelled'
+                    # sticky while still recording this progress payload.
+                    if not _merge_write_carto_job_status(job_path, fresh):
+                        log_worker(
+                            "CARTO_REFRESH: failed to write job JSON for progress update.",
+                        )
+
+                client.set_operation_cancel_callback(_carto_should_cancel)
+                result = await client.refresh_folder_cartographer_sync(
+                    folder_node_id=root_uuid,
+                    cancel_callback=_carto_should_cancel,
+                    progress_callback=_carto_progress,
+                    carto_claim_id=str(job.get("claim_id") or ""),
+                    force=force,
+                )
+                if isinstance(result, dict):
+                    files_refreshed = result.get("refreshed_file_nodes", 0)
+                else:
+                    files_refreshed = 0
+
+            # Finalization progress merge (Dan, 2026).
+            #
+            # STATE-OWNERSHIP FIX: this worker's in-memory ``job['progress']``
+            # is a STALE startup snapshot — it was initialized with zero
+            # ``nodes_created/updated/moved/deleted`` counters before the run
+            # began. Meanwhile the LIVE counters are written DIRECTLY TO DISK
+            # during the run by a different code path (the apply-phase
+            # ``_carto_flush_progress`` inside refresh_file_node_beacons, plus
+            # the ``_carto_progress``/``_carto_progress_for_file`` file-count
+            # callbacks here). The previous finalization re-read ONLY
+            # ``total_files``/``completed_files`` from disk and then wrote the
+            # stale in-memory ``progress`` object back — CLOBBERING the live
+            # on-disk ``nodes_*`` counters with the startup zeros. Invisible
+            # for completed jobs (hidden in the widget) but it produced stale /
+            # zeroed counters on the failed / warning / persistent jobs that
+            # actually STAY visible.
+            #
+            # FIX: treat the freshest ON-DISK ``progress`` as the base truth.
+            #  - nodes_* counters: ON-DISK ALWAYS WINS outright (the apply phase
+            #    is their sole authoritative writer; the in-memory copy is just
+            #    stale zeros). No max(), no in-memory vote.
+            #  - total_files / completed_files: narrow max() of ON-DISK vs the
+            #    RESULT-DERIVED finalization numbers only (NOT the stale
+            #    in-memory snapshot), so a last-tick lag in the callbacks can't
+            #    make the final count regress.
+            #  - completed_files is NEVER forced up to total_files: doing so
+            #    would cosmetically convert a partial / cancelled run into a
+            #    "100% complete" bar. We only ever max() it against the genuine
+            #    files_refreshed count.
+            #  - current_phase / current_file are preserved from disk;
+            #    current_phase is set to "completed" only on the success path.
+            cancelled_flag = False
+            total_from_result = 0
+            if isinstance(result, dict):
+                total_from_result = (
+                    result.get("total_existing_files") or result.get("refreshed_file_nodes") or 0
+                )
+
+            # Read the FULL freshest on-disk progress as late as possible to
+            # minimize the race window against the last progress callback.
+            latest_progress: dict = {}
+            try:
+                with open(job_path, encoding="utf-8") as jf:
+                    fresh = json.load(jf)
+                latest_progress = dict(fresh.get("progress") or {})
+                cancelled_flag = carto_cancel_requested(job_path)
+                carto_cancel_observed = carto_cancel_observed or cancelled_flag
+            except Exception:  # noqa: BLE001
+                pass
+
+            # Base the final progress on the freshest on-disk snapshot (which
+            # carries the live nodes_* counters), NOT on the stale in-memory one.
+            final_progress = dict(latest_progress)
+
+            # nodes_* counters: on-disk wins; only backfill missing keys with 0.
+            for _nk in ("nodes_created", "nodes_updated", "nodes_moved", "nodes_deleted"):
+                final_progress.setdefault(_nk, 0)
+
+            on_disk_total = int(final_progress.get("total_files") or 0)
+            on_disk_completed = int(final_progress.get("completed_files") or 0)
+
+            # total_files: narrow max() of on-disk vs result-derived only.
+            final_progress["total_files"] = max(
+                on_disk_total,
+                int(total_from_result or 0),
+                int(files_refreshed or 0),
+                1 if carto_mode == "file" else 0,
+            )
+
+            # completed_files: max() against the genuine files_refreshed count
+            # ONLY — never floored to total_files, so a cancelled/partial run is
+            # never cosmetically shown as fully complete.
+            final_progress["completed_files"] = max(
+                on_disk_completed,
+                int(files_refreshed or 0),
+            )
+
+            job["progress"] = final_progress
+
+            job["result_summary"]["files_refreshed"] = files_refreshed
+            job["result_summary"]["raw_result"] = result
+
+            # WARNING HARVEST (Dan, 2026): collect any non-fatal per-file/folder
+            # warnings (e.g. intra-file duplicate beacon ids surfaced by
+            # refresh_file_node_beacons / refresh_folder_cartographer_sync) so
+            # the CARTO job is marked completed_with_warnings and the UUID
+            # widget shows a persistent yellow warning bar (GC-exempt) until
+            # the user clears it. We ACCUMULATE onto whatever warnings the job
+            # JSON already carries (never overwrite) so a warning from an
+            # earlier phase/write can never be dropped by this finalize write.
+            _result_warnings: list = []
+            if isinstance(result, dict):
+                _rw = result.get("warnings")
+                if isinstance(_rw, list) and _rw:
+                    _result_warnings.extend(_rw)
+            if _result_warnings:
+                _existing_warnings = job.get("warnings")
+                if not isinstance(_existing_warnings, list):
+                    _existing_warnings = []
+                # Cap the accumulated list defensively so a pathological run
+                # cannot bloat the job JSON unboundedly.
+                _merged_warnings = (_existing_warnings + _result_warnings)[:200]
+                job["warnings"] = _merged_warnings
+                job["warning_count"] = len(_merged_warnings)
+                job["result_summary"]["warnings"] = _merged_warnings
+                job["result_summary"]["warning_count"] = len(_merged_warnings)
+                for _w in _result_warnings:
+                    try:
+                        _wtxt = _w.get("message") if isinstance(_w, dict) else str(_w)
+                    except Exception:  # noqa: BLE001
+                        _wtxt = str(_w)
+                    log_worker(f"WARNING: {_wtxt}", "CARTO")
+
+            _has_warnings = bool(job.get("warning_count"))
+
+            # Preserve an explicit "cancelled" status if the job JSON was
+            # marked as such by an external actor (e.g. WebSocket
+            # carto_cancel_job or mcp_cancel_job). Otherwise treat the job
+            # as completed -- or completed_with_warnings when non-fatal
+            # warnings were collected (tri-state precedence:
+            # cancelled > completed_with_warnings > completed).
+            if cancelled_flag:
+                # The token-verified helper writes terminal cancelled only after
+                # mutation work has stopped and re-verifies the sentinel.
+                job["status"] = "cancelling"
+            elif _has_warnings:
+                final_progress["current_phase"] = "completed"
+                job["status"] = "completed_with_warnings"
+            else:
+                final_progress["current_phase"] = "completed"
+                job["status"] = "completed"
+
+            # Terminal jobs should not keep reporting a live "file=..." tail.
+            # current_file/current_file_relpath are progress fields meaning
+            # "the file being processed right now". If preserved on
+            # completed_with_warnings/failed/cancelled, the widget can falsely
+            # imply that the final warning/error belongs to the last processed
+            # file. Per-warning file paths now live on each warning entry.
+            final_progress["current_file"] = None
+            final_progress.pop("current_file_relpath", None)
+        except Exception as e:
+            exit_code = 1
+            log_worker(f"CARTO_REFRESH failed with error: {e}")
+            import traceback
+
+            log_worker(traceback.format_exc())
+            job["status"] = "failed"
+            job["error"] = str(e)
+            job["result_summary"].setdefault("errors", []).append(str(e))
+        finally:
+            if carto_heartbeat is not None:
+                carto_heartbeat.stop()
+            try:
+                if is_carto_job_terminal(job.get("status")):
+                    _p = job.get("progress") or {}
+                    if isinstance(_p, dict):
+                        _p["current_file"] = None
+                        _p.pop("current_file_relpath", None)
+                        job["progress"] = _p
+            except Exception:
+                pass
+            job["updated_at"] = datetime.utcnow().isoformat()
+            # Guarded merge-write: this is the worker's FINAL status write and
+            # the most important one to guard. If the server wrote
+            # status='cancelled' while this job was finishing, the helper keeps
+            # that cancel sticky instead of overwriting it with 'completed'
+            # (the worker's own cancelled_flag check already handles the case
+            # where it observed the cancel itself; this guards the race where
+            # it did not).
+            if carto_cancel_observed:
+                finalize_cancelled_job_claim(
+                    job_path,
+                    str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                    diagnostic=lambda message: log_worker(message, "CARTO"),
+                )
+            else:
+                if not _merge_write_carto_job_status(job_path, job):
+                    log_worker("ERROR: Failed to write CARTO job file (final status).")
+                try:
+                    finalize_claim(
+                        str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                        job_path.parent,
+                    )
+                except Exception as final_exc:
+                    log_worker(
+                        f"ERROR: CARTO_REFRESH claim finalization failed: {final_exc}", "CARTO"
+                    )
+            await client.close()
+            sys.exit(exit_code)
+    # @beacon-close[
+    #   id=weave-worker@carto-refresh-job,
+    # ]
+    # @beacon-close[
+    #   id=wkv1@carto-refresh-core,
+    # ]
+
+    # @beacon[
+    #   id=weave-worker@markdown-generate-job,
+    #   role=• 🔱 weave worker MARKDOWN_GENERATE job runner (F12+3 detached pipeline),
+    #   slice_labels=ra-reconcile,nexus-core-v1,ra-carto-jobs,ra-bulk-visible-apply,ra-logging,nexus-md-header-path,carto-rev-markdown-full,
+    #   kind=span,
+    #   show_span=false,
+    #   comment=Detached worker dispatch for MARKDOWN_GENERATE jobs (F12+3). Reads CARTO job JSON for root_uuid, runs the 8-phase markdown generate pipeline (bulk-apply tags + write Markdown to disk + reapply beacons + post-flight refresh) via markdown_generate_pipeline.run_markdown_generate_pipeline(). Writes status/progress back to job JSON. Survives MCP server restart.,
+    # ]
+    # MARKDOWN_GENERATE mode: run F12+3 8-phase pipeline via CARTO job JSON and exit
+    if mode == "markdown_generate":
+        job_path = Path(args.carto_job_file)
+        if not job_path.exists():
+            log_worker(f"ERROR: MARKDOWN_GENERATE job file not found: {job_path}")
+            await client.close()
+            sys.exit(1)
+
+        # Load job JSON
+        try:
+            with open(job_path, encoding="utf-8") as jf:
+                job = json.load(jf)
+        except Exception as e:
+            log_worker(f"ERROR: Failed to read MARKDOWN_GENERATE job file: {e}")
+            await client.close()
+            sys.exit(1)
+
+        if carto_cancel_requested(job_path):
+            finalize_cancelled_job_claim(
+                job_path,
+                str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                allow_legacy_cancelled=(str(job.get("status") or "").lower() == "cancelled"),
+                diagnostic=lambda message: log_worker(message, "CARTO"),
+            )
+            log_worker(
+                f"MARKDOWN_GENERATE job {job.get('id') or job_path.stem} cancelled before pipeline.",
+                "CARTO",
+            )
+            await client.close()
+            sys.exit(0)
+
+        root_uuid = job.get("root_uuid")
+        if not root_uuid:
+            log_worker("ERROR: MARKDOWN_GENERATE job has no root_uuid")
+            await client.close()
+            sys.exit(1)
+
+        # Update job status to running
+        now_iso = datetime.utcnow().isoformat()
+        job["status"] = "running"
+        job["updated_at"] = now_iso
+        job["pid"] = os.getpid()
+        # Guarded merge-write (keeps a concurrently-written cancel sticky).
+        if not _merge_write_carto_job_status(job_path, job):
+            log_worker("ERROR: Failed to write MARKDOWN_GENERATE job file (running status).")
+
+        # Expose job file to downstream helpers (mirrors carto_refresh pattern).
+        os.environ["CARTO_JOB_FILE"] = str(job_path)
+
+        log_worker(f"MARKDOWN_GENERATE: starting F12+3 pipeline for root_uuid={root_uuid}")
+
+        exit_code = 0
+        continuation_live = False
+        try:
+            from workflowy_mcp.markdown_generate_pipeline import run_markdown_generate_pipeline
+
+            client.set_operation_cancel_callback(lambda: carto_cancel_requested(job_path))
+            result = await run_markdown_generate_pipeline(
+                client=client,
+                root_uuid=root_uuid,
+                job_file=str(job_path),
+            )
+            carto_cancel_observed = bool(result.get("cancelled"))
+            continuation_live = bool(result.get("continuation_live"))
+            if not result.get("success"):
+                exit_code = 1
+                log_worker(f"MARKDOWN_GENERATE: pipeline reported failure: {result.get('error')}")
+            else:
+                log_worker(
+                    f"MARKDOWN_GENERATE: pipeline completed successfully "
+                    f"(file_path={result.get('file_path')}, "
+                    f"ast_beacons={result.get('ast_beacons_reapplied', 0)})"
+                )
+        except Exception as e:
+            exit_code = 1
+            log_worker(f"MARKDOWN_GENERATE failed with error: {e}")
+            import traceback
+
+            log_worker(traceback.format_exc())
+            # Update job JSON with the failure (the pipeline itself may not
+            # have had a chance to do this if the import or initial setup blew up).
+            try:
+                with open(job_path, encoding="utf-8") as jf:
+                    fresh_job = json.load(jf)
+                fresh_job["status"] = "failed"
+                fresh_job["error"] = str(e)
+                fresh_job["updated_at"] = datetime.utcnow().isoformat()
+                # Guarded merge-write: if the user cancelled while the pipeline
+                # was failing, 'cancelled' beats 'failed' and stays sticky.
+                if not _merge_write_carto_job_status(job_path, fresh_job):
+                    log_worker("ERROR: Failed to write MARKDOWN_GENERATE failure status.")
+            except Exception as inner_e:
+                log_worker(f"ERROR: Failed to write MARKDOWN_GENERATE failure status: {inner_e}")
+        finally:
+            if carto_heartbeat is not None:
+                carto_heartbeat.stop()
+            try:
+                if carto_cancel_observed:
+                    finalize_cancelled_job_claim(
+                        job_path,
+                        str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                        diagnostic=lambda message: log_worker(message, "CARTO"),
+                    )
+                else:
+                    finalize_claim(
+                        str((carto_adoption or {}).get("claim", {}).get("claim_id") or ""),
+                        job_path.parent,
+                        write_tombstone=not continuation_live,
+                    )
+            except Exception as final_exc:
+                log_worker(
+                    f"ERROR: MARKDOWN_GENERATE claim finalization failed: {final_exc}", "CARTO"
+                )
+            await client.close()
+            sys.exit(exit_code)
+    # @beacon-close[
+    #   id=weave-worker@markdown-generate-job,
+    # ]
+
+
+# @beacon-close[
+#   id=wkv1@file-boundary,
+# ]
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log_worker("Worker interrupted by user")
+        sys.exit(130)

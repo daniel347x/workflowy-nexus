@@ -1,0 +1,10 @@
+        def _add(body: Any) -> None:
+            nonlocal ordinal
+            if not isinstance(body, list) or not body:
+                return
+            first_stmt = body[0]
+            first_lineno = getattr(first_stmt, "lineno", None)
+            if not isinstance(first_lineno, int):
+                first_lineno = 10**9
+            candidates.append((first_lineno, ordinal, body))
+            ordinal += 1

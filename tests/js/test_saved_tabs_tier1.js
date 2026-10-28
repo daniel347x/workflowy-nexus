@@ -1,0 +1,713 @@
+// ============================================================================
+// test_saved_tabs_tier1.js — Saved Tabs (Tier-1) file + Anchor-Dock routes.
+//
+// Covers the PURE kernels and the static wiring locks of the Tier-1 routes
+// (glimpse-cache-client.js, "Saved Tabs TIER-1" subsection + the surgical
+// extensions of the Tier-0 popup/dialog/widget handlers):
+//   • savedTabsExportFilename — the timestamped file-export name format
+//     (the sliceGroupsExportFilename idiom).
+//   • savedTabsReadLastDock / savedTabsWriteLastDock — the last-used-dock
+//     localStorage round-trip (injected storage; tolerant of corrupt data).
+//   • savedTabsStripNameDecoration — leading [ap:CORE] bracket + emoji-run
+//     stripping (NEVER leading digits — a timestamp name must survive).
+//   • savedTabsPickRecentDockRuns — dock-scan identification (name-prefix
+//     route), DIRECT-children-only, created-date recency (preferred over
+//     modified), ~10 newest-first cap.
+//   • savedTabsExtractPayloadFromMarkdown — payload recovery from the
+//     COMPOSED markdown of a dock-run AP (the E3 tolerant grammar: first
+//     ```json fence verbatim, ELSE the first bare JSON value the ONE
+//     existing parseSavedTabsImport accepts — strict, then the ST-007
+//     NBSP→space retry; null when nothing parseable exists).
+//   • ONE-SERIALIZER property — the file route and the dock route carry the
+//     EXACT bytes buildSavedTabsExportJson produces (COMPACT single-line
+//     since R4; fixture round-trip through the canonical note format +
+//     content locks on the wiring).
+//   • LEGACY PRETTY dock-run regression (R4, [ap:K6IJS0] §3) — the two
+//     existing pretty runs in dock 0d53381d (their exact note bytes are
+//     embedded) must still extract + parse via parseSavedTabsImport now
+//     that the serializer emits compact JSON.
+//   • Static locks — the dock routes are READ-ONLY through the existing
+//     cache-render wire (requestSliceModalRender + makeRawRootRenderSpec,
+//     never applySliceGroupIntoDock / displaySliceInDock), the picker rides
+//     requestAnchorListForWidget (no parallel inventory), the file route
+//     feeds the SAME frozen listing path (listBtn.click()), no dock-save
+//     mutation side channel exists (3d is cut pending Dan's ruling), and
+//     the last-used dock lives in localStorage — NOT the extension settings.
+//
+// RUN:   node tests/js/test_saved_tabs_tier1.js
+// EXIT:  0 = all pass, 1 = at least one failure. Zero dependencies.
+//
+// Uses the repo's extraction idiom (see tests/js/README.md): functions are
+// extracted VERBATIM from the real client file bytes, so a rename or
+// signature change fails LOUDLY here. Against the pre-Tier-1 client this
+// harness fails at extraction ("function not found") — the structural
+// mutation-sensitivity guarantee of the idiom (stash-verified; see RESULT).
+// ============================================================================
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const CLIENT_FILE = path.join(__dirname, '..', '..',
+  'workflowy-glimpse-cache', 'glimpse-cache-client.js');
+const src = fs.readFileSync(CLIENT_FILE, 'utf8');
+
+function extractFunction(name) {
+  // Anchor on the REAL definition (newline + the IIFE's 2-space indent), not
+  // the `role=function NAME(` line inside its preceding @beacon comment.
+  let idx = src.indexOf(`\n  function ${name}(`);
+  if (idx >= 0) idx += 1; // skip the newline
+  else idx = src.indexOf(`function ${name}(`);
+  if (idx < 0) throw new Error(`function not found in client file: ${name}`);
+  const start = src.indexOf('{', idx);
+  let depth = 0;
+  for (let i = start; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(idx, i + 1);
+    }
+  }
+  throw new Error(`unbalanced braces extracting: ${name}`);
+}
+
+function extractAsyncFunction(name) {
+  let idx = src.indexOf(`\n  async function ${name}(`);
+  if (idx >= 0) idx += 1;
+  else idx = src.indexOf(`async function ${name}(`);
+  if (idx < 0) throw new Error(`async function not found in client file: ${name}`);
+  const start = src.indexOf('{', idx);
+  let depth = 0;
+  for (let i = start; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(idx, i + 1);
+    }
+  }
+  throw new Error(`unbalanced braces extracting: ${name}`);
+}
+
+function extractConstLine(name) {
+  const marker = `\n  const ${name} =`;
+  const idx = src.indexOf(marker);
+  if (idx < 0) throw new Error(`const not found in client file: ${name}`);
+  const end = src.indexOf('\n', idx + 1);
+  return src.slice(idx + 1, end);
+}
+
+// The Tier-1 kernels are PURE (storage injected; no DOM, no module state),
+// so a plain concatenated eval is enough — plus the Tier-0 serializer chain
+// and the tolerant parser for the one-serializer round-trip property and the
+// legacy-pretty dock-run regression.
+const body = [
+  extractConstLine('SAVED_TABS_DOCK_RUN_PREFIX'),
+  extractConstLine('SAVED_TABS_RECENT_RUN_LIMIT'),
+  extractConstLine('SAVED_TABS_LAST_DOCK_KEY'),
+  extractFunction('savedTabsReadLastDock'),
+  extractFunction('savedTabsWriteLastDock'),
+  extractFunction('savedTabsExportFilename'),
+  extractFunction('savedTabsStripNameDecoration'),
+  extractFunction('savedTabsPickRecentDockRuns'),
+  extractFunction('savedTabsBareJsonCandidates'),
+  extractFunction('savedTabsExtractPayloadFromMarkdown'),
+  extractFunction('savedTabsClassifyRow'),
+  extractFunction('buildSavedTabsExportPayload'),
+  extractFunction('buildSavedTabsExportJson'),
+  extractFunction('parseSavedTabsImport'),
+].join('\n');
+
+const api = new Function(`
+  ${body}
+  return {
+    SAVED_TABS_DOCK_RUN_PREFIX,
+    SAVED_TABS_RECENT_RUN_LIMIT,
+    SAVED_TABS_LAST_DOCK_KEY,
+    savedTabsReadLastDock,
+    savedTabsWriteLastDock,
+    savedTabsExportFilename,
+    savedTabsStripNameDecoration,
+    savedTabsPickRecentDockRuns,
+    savedTabsBareJsonCandidates,
+    savedTabsExtractPayloadFromMarkdown,
+    savedTabsClassifyRow,
+    buildSavedTabsExportPayload,
+    buildSavedTabsExportJson,
+    parseSavedTabsImport,
+  };
+`)();
+
+let failures = 0;
+function check(label, cond) {
+  if (cond) { console.log('ok   ' + label); }
+  else { failures++; console.log('FAIL ' + label); }
+}
+
+// ---------------------------------------------------------------------------
+// FIXTURES — two of the 10 real harvested tab specs ([ap:O5V39E]); the full
+// byte-diff suite over all 10 lives in test_saved_tabs_export_import.js.
+// #10 = grp-<uuid-with-dashes> flavor; #1 = bare-32-hex flavor.
+// ---------------------------------------------------------------------------
+const FIXTURE_GRP_DASHED = '{"kind":"slice","root_uuid":"d7d88e40-c06f-42c2-ac36-c91812a88873","group_id":"grp-210a3249-589c-4f20-8312-847ea1315169","group_name":"Work|Conversational|CONVRISK SOURCE CODE ALL BEACONS[1000]","lightning":null,"match_scope":"name","descend_policy":"all","sort_by":"none","sort_direction":"asc","since":null,"headings_only":false,"as_markdown":true,"content_format":"markdown","tree_mode":"render_tree","focus":{"mode":"row","uuid":"d7d88e40-c06f-42c2-ac36-c91812a88873","ancestor_path":[],"occurrence":0}}';
+const FIXTURE_BARE_HEX = '{"kind":"slice","root_uuid":"adee3c89-5cf4-4c77-8887-a7c08b28f5cf","group_id":"47967a42c31241589a64e321668a1691","group_name":"Nexus|Meta-Meta Session · OpenCode Launch Engineering[-1000]","lightning":null,"match_scope":"name","descend_policy":"all","sort_by":"none","sort_direction":"asc","since":null,"headings_only":false,"as_markdown":true,"content_format":"markdown","tree_mode":"render_tree","focus":{"mode":"row","uuid":"adee3c89-5cf4-4c77-8887-a7c08b28f5cf","ancestor_path":[],"occurrence":0}}';
+
+// A collected SW row in the exact shape collectSavedTabsSpecs assembles.
+function collectedRow(endpointId, alias, title, url, specJson) {
+  return {
+    endpoint_id: endpointId,
+    tab_id: 1,
+    alias: alias,
+    title: title,
+    url: url,
+    responded: true,
+    result: {
+      ok: true,
+      modal_payload_kind: 'cache_render_spec',
+      render_spec: JSON.parse(specJson),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 1 · CONSTANTS (the identification + storage contracts)
+// ---------------------------------------------------------------------------
+check('const: dock-run name prefix', api.SAVED_TABS_DOCK_RUN_PREFIX === 'Saved Tabs Export');
+check('const: recent-run limit is 10', api.SAVED_TABS_RECENT_RUN_LIMIT === 10);
+check('const: localStorage key', api.SAVED_TABS_LAST_DOCK_KEY === 'glimpse_saved_tabs_last_dock');
+
+// ---------------------------------------------------------------------------
+// 2 · savedTabsExportFilename — timestamped format (sliceGroups idiom)
+// ---------------------------------------------------------------------------
+{
+  const name = api.savedTabsExportFilename();
+  check('filename: glimpse-saved-tabs-YYYYMMDD-HHMMSS.json',
+    /^glimpse-saved-tabs-\d{8}-\d{6}\.json$/.test(name));
+  check('filename: distinct from the slice-groups name shape',
+    !name.startsWith('glimpse-slice-groups-'));
+}
+
+// ---------------------------------------------------------------------------
+// 3 · savedTabsStripNameDecoration — [ap:] bracket + emoji run, either order
+// ---------------------------------------------------------------------------
+{
+  const strip = api.savedTabsStripNameDecoration;
+  check('strip: plain prefix name unchanged',
+    strip('Saved Tabs Export — 2026-09-14 00:15 — 14 tabs')
+      === 'Saved Tabs Export — 2026-09-14 00:15 — 14 tabs');
+  check('strip: leading emoji run removed',
+    strip('🗂️ Saved Tabs Export — x') === 'Saved Tabs Export — x');
+  check('strip: [ap:CORE] bracket then emoji removed',
+    strip('[ap:MQW7BO] 🗂️ Saved Tabs Export — x') === 'Saved Tabs Export — x');
+  check('strip: emoji BEFORE the bracket also removed (fixed-point loop)',
+    strip('🗂️ [ap:MQW7BO] Saved Tabs Export — x') === 'Saved Tabs Export — x');
+  check('strip: VS16 + multi-codepoint emoji removed',
+    strip('⚖️👨‍💻 Saved Tabs Export — x') === 'Saved Tabs Export — x');
+  check('strip: leading digits NEVER eaten (timestamp-named AP)',
+    strip('2026-09-14 00:08–00:25 EDT — 13 tabs examined')
+      === '2026-09-14 00:08–00:25 EDT — 13 tabs examined');
+  check('strip: surrounding whitespace trimmed', strip('   Saved Tabs Export  ') === 'Saved Tabs Export');
+  check('strip: empty / null / undefined safe', strip('') === '' && strip(null) === '' && strip(undefined) === '');
+  check('strip: interior emoji preserved (only the LEADING run goes)',
+    strip('Saved Tabs 🗂️ Export') === 'Saved Tabs 🗂️ Export');
+}
+
+// ---------------------------------------------------------------------------
+// 4 · savedTabsPickRecentDockRuns — identification + recency + cap
+// ---------------------------------------------------------------------------
+{
+  const pick = api.savedTabsPickRecentDockRuns;
+  const row = (uuid, depth, name, created, modified) =>
+    ({ uuid, depth, name, created, modified, ancestor_path: [], occurrence: 0 });
+
+  const rows = [
+    row('dock-uuid', 0, 'Saved Tabs Export — the dock itself', 9000, 9000),
+    row('a', 1, '🗂️ Saved Tabs Export — 2026-09-14 00:15 — 14 tabs', 1000, 1500),
+    row('b', 1, '[ap:XXXXXX] Saved Tabs Export — 2026-09-15 02:33 — 3 tabs', 3000, 3000),
+    row('c', 1, 'Some other AP', 9999, 9999),
+    row('d', 2, 'Saved Tabs Export — grandchild', 8888, 8888),
+    row('e', 1, 'saved tabs export — lowercase', 7777, 7777),
+    row('f', 1, 'Saved Tab Export — typo name (no match)', 6666, 6666),
+    row('k', 1, 'Saved Tabs Export — 2026-09-16 — Dan appended text after the prefix', 2500, 2500),
+    null,
+    { depth: 1, name: 'Saved Tabs Export — no uuid', created: 5555 },
+    row('g', 1, 'Saved Tabs Export — undated', null, null),
+    row('h', 1, 'Saved Tabs Export — modified-only', null, 2000),
+  ];
+
+  const picked = pick(rows);
+  const ids = picked.map((m) => m.uuid);
+  check('pick: dock row (depth 0) excluded', ids.indexOf('dock-uuid') === -1);
+  check('pick: grandchildren (depth 2) excluded', ids.indexOf('d') === -1);
+  check('pick: non-matching names excluded', ids.indexOf('c') === -1);
+  check('pick: case-sensitive prefix (lowercase excluded)', ids.indexOf('e') === -1);
+  check('pick: near-miss name excluded (prefix is a literal startsWith)', ids.indexOf('f') === -1);
+  check('pick: text AFTER the prefix is allowed (Dan appends notes)', ids.indexOf('k') !== -1);
+  check('pick: rows without a uuid skipped', !picked.some((m) => !m.uuid));
+  check('pick: garbage rows skipped', picked.every((m) => m && typeof m.uuid === 'string'));
+  check('pick: created-desc recency — newest first', ids[0] === 'b' && ids[1] === 'k');
+  check('pick: modified fallback sorts by modified when created absent',
+    ids.indexOf('h') < ids.indexOf('a'));
+  check('pick: undated rows sort LAST', ids[ids.length - 1] === 'g');
+  check('pick: exact newest-first order is [b, k, h, a, g]',
+    ids.join(',') === 'b,k,h,a,g');
+  check('pick: output keeps the RAW name for display',
+    picked.find((m) => m.uuid === 'a').name === '🗂️ Saved Tabs Export — 2026-09-14 00:15 — 14 tabs');
+  check('pick: created/modified carried through',
+    picked.find((m) => m.uuid === 'a').created === 1000
+      && picked.find((m) => m.uuid === 'a').modified === 1500);
+
+  // Cap: default 10, explicit limit honored.
+  const many = [];
+  for (let i = 0; i < 12; i++) {
+    many.push(row('m' + i, 1, 'Saved Tabs Export — run ' + i, i * 100, i * 100));
+  }
+  check('pick: default cap is 10 newest-first', (() => {
+    const p = pick(many);
+    return p.length === 10 && p[0].uuid === 'm11' && p[9].uuid === 'm2';
+  })());
+  check('pick: explicit limit honored', pick(many, 3).length === 3 && pick(many, 3)[0].uuid === 'm11');
+  check('pick: empty / non-array input → empty list',
+    pick([]).length === 0 && pick(null).length === 0 && pick(undefined).length === 0);
+  check('pick: no matching children → empty list (the actionable-message path)',
+    pick([row('z', 1, 'Harvest — 13 tabs examined', 10, 10)]).length === 0);
+
+  // Stable tie-break: equal timestamps keep document order.
+  const ties = pick([
+    row('t1', 1, 'Saved Tabs Export — one', 500, 500),
+    row('t2', 1, 'Saved Tabs Export — two', 500, 500),
+  ]);
+  check('pick: equal timestamps keep document order (stable sort)',
+    ties[0].uuid === 't1' && ties[1].uuid === 't2');
+}
+
+// ---------------------------------------------------------------------------
+// 5 · savedTabsExtractPayloadFromMarkdown — the ```json fence recovery
+//    (the E3 bare rescue lives in 5b; fence-first order is pinned here)
+// ---------------------------------------------------------------------------
+{
+  const extract = api.savedTabsExtractPayloadFromMarkdown;
+  const payload = '[\n  {\n    "alias": "A",\n    "spec": {"kind": "raw_root"}\n  }\n]';
+  const composed = '# 🗂️ Saved Tabs Export — 2026-09-15 02:33 — 3 tabs\n\n'
+    + 'Saved tabs export — 3 tabs — from the Workflowy GLIMPSE widget.\n\n'
+    + '```json\n' + payload + '\n```\n';
+  check('extract: canonical composed markdown → payload bytes verbatim',
+    extract(composed) === payload);
+  check('extract: tilde fence supported', extract('~~~json\n' + payload + '\n~~~') === payload);
+  check('extract: 4-backtick fence with an inner 3-backtick line',
+    extract('````json\nA\n```\nB\n````') === 'A\n```\nB');
+  check('extract: shorter closing run does NOT close (unterminated → null)',
+    extract('````json\nA\n```') === null);
+  check('extract: no fence → null', extract('# title\n\nplain note text\n') === null);
+  check('extract: unterminated fence → the E3 bare rescue recovers the bare array inside',
+    extract('```json\n[1,2,3]') === '[1,2,3]');
+  check('extract: empty / non-string → null',
+    extract('') === null && extract(null) === null && extract(undefined) === null && extract(42) === null);
+  check('extract: FIRST json block wins',
+    extract('```json\nfirst\n```\n\n```json\nsecond\n```') === 'first');
+  check('extract: non-json info strings ignored',
+    extract('```json5\nnope\n```\n```json\nyes\n```') === 'yes');
+  check('extract: up-to-3-space fence indent recognized',
+    extract('   ```json\nx\n   ```') === 'x');
+  check('extract: 4-space-indented fence NOT recognized (CommonMark-ish)',
+    extract('    ```json\nx\n    ```') === null);
+  check('extract: trailing spaces on the info line tolerated',
+    extract('```json  \nx\n```') === 'x');
+  check('extract: payload with blank lines and quotes survives byte-exact',
+    extract('```json\n{\n\n  "a": "b\\nc"\n}\n```') === '{\n\n  "a": "b\\nc"\n}');
+}
+
+// ---------------------------------------------------------------------------
+// 5b · E3 — the dock reader accepts the BARE JSON too ([ap:DW0GV8] §3):
+// fenced block if present, ELSE the note's bare payload routed through the
+// ONE existing parseSavedTabsImport (strict, then the ST-007 NBSP retry);
+// nothing parseable → null (the caller's loud message fires unchanged).
+// ---------------------------------------------------------------------------
+{
+  const extract = api.savedTabsExtractPayloadFromMarkdown;
+
+  // Dan's click-through case: a hand-made run whose note is the bare
+  // one-line COMPACT array, no fence at all.
+  const compact = api.buildSavedTabsExportJson(
+    [collectedRow('ep-1', 'A', 'WFY - A', 'https://workflowy.com/#/a', FIXTURE_GRP_DASHED)],
+    ['ep-1']);
+  const bareComposed = '# Saved Tabs Export — 2026-09-23 10:15 — 1 tab\n\n' + compact + '\n';
+  check('E3: bare one-line array (NO fence — Dan\'s hand-made run) → the payload bytes verbatim',
+    extract(bareComposed) === compact);
+  check('E3: the rescued bare array re-parses to a valid entry',
+    api.parseSavedTabsImport(extract(bareComposed)).entries[0].valid === true);
+
+  // A bare PRETTY multi-line array (plain-space indents) survives verbatim.
+  const prettyBare = '[\n  {\n    "alias": "P",\n    "spec": {"kind": "raw_root", "root_uuid": "p"}\n  }\n]';
+  check('E3: bare PRETTY multi-line array (plain spaces) → verbatim + valid',
+    extract('# Run\n\n' + prettyBare + '\n') === prettyBare
+      && api.parseSavedTabsImport(prettyBare).entries[0].valid === true);
+
+  // The single-entry {spec} wrapper form (the paste import's grammar).
+  const single = '{"alias":"Solo","title":"WFY - Solo","url":"https://workflowy.com/","spec":{"kind":"raw_root","root_uuid":"f9882ac6-9883-4295-a304-391db426172a"}}';
+  check('E3: bare single-entry {spec} wrapper → verbatim + parses to 1 valid entry',
+    extract('# Run\n\n' + single + '\n') === single
+      && api.parseSavedTabsImport(single).entries.length === 1
+      && api.parseSavedTabsImport(single).entries[0].alias === 'Solo');
+
+  // A bare render_spec blob (the ⚡ focus button's single-tab shape).
+  const blob = '{"kind":"raw_root","root_uuid":"f9882ac6-9883-4295-a304-391db426172a"}';
+  check('E3: bare render_spec blob → wrapped as one anonymous entry',
+    extract('# Run\n\n' + blob + '\n') === blob
+      && api.parseSavedTabsImport(blob).entries[0].spec.kind === 'raw_root');
+
+  // ST-007: a pretty payload whose leading indents the Workflowy note
+  // editor mangled to U+00A0 — strict parse fails, the ONE NBSP→space
+  // retry fires, and the REPAIRED text is what comes back (so the listing
+  // path's own parse succeeds byte-cleanly).
+  const NB = '\u00A0';
+  const prettyNbsp = '[\n' + NB + NB + '{\n' + NB + NB + NB + NB
+    + '"alias": "N",\n' + NB + NB + NB + NB
+    + '"spec": {"kind": "raw_root", "root_uuid": "abc"}\n' + NB + NB + '}\n]';
+  const nbspExtracted = extract('# Run\n\n' + prettyNbsp + '\n');
+  check('E3: NBSP-mangled bare payload → the REPAIRED text (ST-007 retry)',
+    nbspExtracted === prettyNbsp.replace(/\u00A0/g, ' '));
+  check('E3: the repaired text re-parses to a valid entry',
+    nbspExtracted !== null && api.parseSavedTabsImport(nbspExtracted).entries[0].valid === true);
+
+  // Grammar order: a fenced block WINS over a bare array elsewhere in the
+  // note (the fence scan runs first and is never parse-gated).
+  check('E3: fenced block WINS over a bare array elsewhere (grammar order)',
+    extract('# t\n\n[{"alias":"bare","spec":{"kind":"raw_root","root_uuid":"x"}}]\n\n```json\nfenced-bytes\n```')
+      === 'fenced-bytes');
+
+  // Candidate order: the FIRST parseable bare value wins — prose brackets
+  // ([ap:…]-style) are tried, rejected by the parser, and skipped.
+  check('E3: first PARSEABLE bare candidate wins (prose brackets skipped)',
+    extract('# t\n\nsee [ap:X] then [{"alias":"ok","spec":{"kind":"raw_root","root_uuid":"r"}}]\n')
+      === '[{"alias":"ok","spec":{"kind":"raw_root","root_uuid":"r"}}]');
+
+  // The scan is string-aware: brackets inside JSON strings never unbalance.
+  check('E3: brackets inside JSON strings do not break the scan',
+    extract('# t\n\n[{"alias":"a [b] {c}","spec":{"kind":"raw_root","root_uuid":"r"}}]\n')
+      === '[{"alias":"a [b] {c}","spec":{"kind":"raw_root","root_uuid":"r"}}]');
+
+  // Nothing parseable → null → the caller's loud message (unchanged).
+  check('E3: prose with only [ap:…] brackets → null (unparseable → loud)',
+    extract('# title\n\nsee [ap:R5CQID] and [ap:DW0GV8] for the ruling\n') === null);
+  check('E3: NBSP garbage that stays unparseable → null',
+    extract('# t\n\n[' + NB + 'not json' + NB + ']\n') === null);
+  check('E3: a candidate past the 24-candidate bound is never tried → null',
+    extract('# t\n\n' + '[x]'.repeat(25) + ' [{"alias":"q","spec":{"kind":"raw_root","root_uuid":"r"}}]\n') === null);
+
+  // The adapter helper itself: document order, balanced, top-level only.
+  check('E3: savedTabsBareJsonCandidates — document order, skips unbalanced openers',
+    JSON.stringify(api.savedTabsBareJsonCandidates('a [1,{ "x": "]" }] b { "k": [2] } c [unbalanced'))
+      === JSON.stringify(['[1,{ "x": "]" }]', '{ "k": [2] }']));
+}
+
+// ---------------------------------------------------------------------------
+// 6 · ONE-SERIALIZER round-trip: clipboard bytes == file bytes == dock bytes
+// ---------------------------------------------------------------------------
+{
+  const rows = [
+    collectedRow('ep-1', 'CONVRISK BEACON SLICE', 'WFY - CONVRISK BEACON SLICE',
+      'https://workflowy.com/#?q=%23convrisk%20-%23convrisk--deprecated', FIXTURE_GRP_DASHED),
+    collectedRow('ep-2', 'META META', 'WFY - META META',
+      'https://workflowy.com/#/ad9b881285e2?q=%23meta-meta%20-%23meta-meta--deprecated', FIXTURE_BARE_HEX),
+  ];
+  const clipboardBytes = api.buildSavedTabsExportJson(rows, ['ep-1', 'ep-2']);
+  // The FILE route downloads exactly this string (content lock below pins the
+  // wiring); the DOCK route stores it inside the canonical note format:
+  const note = 'Saved tabs export — 2 tabs — 2026-09-15 02:33 — from the Workflowy GLIMPSE widget.\n\n'
+    + '```json\n' + clipboardBytes + '\n```';
+  const composed = '# Saved Tabs Export — 2026-09-15 02:33 — 2 tabs\n\n' + note + '\n';
+  const recovered = api.savedTabsExtractPayloadFromMarkdown(composed);
+  check('round-trip: dock-run note → extracted bytes == serializer bytes',
+    recovered === clipboardBytes);
+  check('round-trip: serializer bytes are COMPACT — no newline (R4 paste-safety: a multi-line dock payload is exactly what the UI editor NBSP-mangles)',
+    clipboardBytes.indexOf('\n') === -1 && clipboardBytes.indexOf('\r') === -1);
+  check('round-trip: extracted bytes re-parse to the same entries',
+    JSON.stringify(JSON.parse(recovered)) === JSON.stringify(JSON.parse(clipboardBytes)));
+  // U02 ([ap:DLGU66]): the page url (here a zoom+search deep-link) is no
+  // longer exported — every medium's bytes carry {alias,title,spec} only.
+  check('U02: the serializer bytes carry NO page url (rows had a zoom+search url)',
+    clipboardBytes.indexOf('"url"') === -1 && clipboardBytes.indexOf('ad9b881285e2?q=') === -1
+      && JSON.parse(clipboardBytes).every((e) => JSON.stringify(Object.keys(e)) === '["alias","title","spec"]'));
+  check('round-trip: both group_id flavors survive verbatim (compact byte form)',
+    recovered.indexOf('"group_id":"grp-210a3249-589c-4f20-8312-847ea1315169"') !== -1
+      && recovered.indexOf('"group_id":"47967a42c31241589a64e321668a1691"') !== -1);
+  // The specs inside the COMPACT payload re-compact to the EXACT fixture
+  // bytes (the R2 byte-verbatim property, re-proven through the dock-note
+  // round trip).
+  const reparsed = JSON.parse(recovered);
+  check('round-trip: spec fixture bytes embedded exactly (grp-dashed)',
+    JSON.stringify(reparsed[0].spec) === FIXTURE_GRP_DASHED);
+  check('round-trip: spec fixture bytes embedded exactly (bare-hex)',
+    JSON.stringify(reparsed[1].spec) === FIXTURE_BARE_HEX);
+}
+
+// ---------------------------------------------------------------------------
+// 6b · LEGACY PRETTY dock-run regression (R4 · contract [ap:K6IJS0] §3).
+// The two existing dock runs in dock 0d53381d — d93b2672 ("Saved Tabs
+// Export - Monday, September 14, 2026 7:09 PM"; Dan's live-test paste,
+// NBSP-repaired per Ledger ST-007) and f801f520 ("Saved Tabs Export —
+// 2026-09-14 23:25 — 2 tabs (conductor repro — Dan's manual-entry note
+// shape)") — carry IDENTICAL pretty-printed (pre-R4 serializer) payload
+// bytes: 2 entries, Load GLIMPSE slice + SCRATCH raw_root. Their exact note
+// is embedded below. They MUST keep loading now that the serializer emits
+// compact JSON: name-prefix identification → extraction → tolerant parse.
+// ---------------------------------------------------------------------------
+{
+  const PRETTY_RUN_PAYLOAD = [
+    '[',
+    '  {',
+    '    "alias": "Load GLIMPSE",',
+    '    "title": "WFY - Load GLIMPSE",',
+    '    "url": "https://workflowy.com/#?q=%23nexus--overview%20-%23nexus--overview--deprecated%20OR%20%23nexus--skills%20-%23nexus--skills--deprecated",',
+    '    "spec": {',
+    '      "kind": "slice",',
+    '      "root_uuid": "b49affa1-3930-95e3-b2fe-ad9b881285e2",',
+    '      "group_id": "grp-2577886f-b303-4cf1-a53e-87088b40112b",',
+    '      "group_name": "Load GLIMPSE|Load GLIMPSE - SIMPLE[-10]",',
+    '      "lightning": null,',
+    '      "match_scope": "name",',
+    '      "descend_policy": "all",',
+    '      "sort_by": "none",',
+    '      "sort_direction": "asc",',
+    '      "since": null,',
+    '      "headings_only": false,',
+    '      "as_markdown": true,',
+    '      "content_format": "markdown",',
+    '      "tree_mode": "render_tree",',
+    '      "focus": {',
+    '        "mode": "row",',
+    '        "uuid": "b49affa1-3930-95e3-b2fe-ad9b881285e2",',
+    '        "ancestor_path": [],',
+    '        "occurrence": 0',
+    '      }',
+    '    }',
+    '  },',
+    '  {',
+    '    "alias": "SCRATCH",',
+    '    "title": "WFY - SCRATCH",',
+    '    "url": "https://workflowy.com/",',
+    '    "spec": {',
+    '      "kind": "raw_root",',
+    '      "root_uuid": "f9882ac6-9883-4295-a304-391db426172a",',
+    '      "group_id": null,',
+    '      "group_name": null,',
+    '      "lightning": null,',
+    '      "match_scope": "name_and_note",',
+    '      "descend_policy": "all",',
+    '      "sort_by": "none",',
+    '      "sort_direction": "asc",',
+    '      "since": null,',
+    '      "headings_only": false,',
+    '      "as_markdown": true,',
+    '      "content_format": "markdown",',
+    '      "tree_mode": "render_tree",',
+    '      "focus": {',
+    '        "mode": "row",',
+    '        "uuid": "f9882ac6-9883-4295-a304-391db426172a",',
+    '        "ancestor_path": [],',
+    '        "occurrence": 0',
+    '      }',
+    '    }',
+    '  }',
+    ']',
+  ].join('\n');
+  const PRETTY_RUN_NOTE = '```json\n' + PRETTY_RUN_PAYLOAD + '\n```';
+  // Both live runs are fence-only notes (no message line — Dan's
+  // manual-entry shape); the composed-markdown simulation matches the §6
+  // round-trip shape (name heading + the note verbatim + trailing newline).
+  const composed = '# Saved Tabs Export - Monday, September 14, 2026 7:09 PM\n\n'
+    + PRETTY_RUN_NOTE + '\n';
+
+  const extracted = api.savedTabsExtractPayloadFromMarkdown(composed);
+  check('legacy pretty dock run: extraction recovers the fenced payload bytes verbatim',
+    extracted === PRETTY_RUN_PAYLOAD);
+
+  const parsed = api.parseSavedTabsImport(extracted);
+  check('legacy pretty dock run: parses to 2 valid entries',
+    parsed.entries.length === 2
+      && parsed.entries[0].valid === true && parsed.entries[1].valid === true);
+  check('legacy pretty dock run: slice entry keeps alias + group_id + group_name',
+    parsed.entries[0].alias === 'Load GLIMPSE'
+      && parsed.entries[0].spec.group_id === 'grp-2577886f-b303-4cf1-a53e-87088b40112b'
+      && parsed.entries[0].spec.group_name === 'Load GLIMPSE|Load GLIMPSE - SIMPLE[-10]');
+  check('legacy pretty dock run: raw_root entry keeps kind + root_uuid + url',
+    parsed.entries[1].spec.kind === 'raw_root'
+      && parsed.entries[1].spec.root_uuid === 'f9882ac6-9883-4295-a304-391db426172a'
+      && parsed.entries[1].url === 'https://workflowy.com/');
+  // The fixture IS the pre-R4 serializer's output shape — pretty-printing
+  // the re-parsed canonical entries reproduces it byte-for-byte (so the
+  // regression pins JSON.stringify(payload, null, 2), not arbitrary
+  // whitespace).
+  check('legacy pretty dock run: fixture == the old serializer form of its own re-parse',
+    JSON.stringify(parsed.entries.map((e) => ({
+      alias: e.alias, title: e.title, url: e.url, spec: e.spec,
+    })), null, 2) === PRETTY_RUN_PAYLOAD);
+  // Name-prefix identification still picks up BOTH live run names.
+  const liveNames = api.savedTabsPickRecentDockRuns([
+    { uuid: 'd93b2672-c314-414d-92e9-92eeeba8cb5f', depth: 1, name: 'Saved Tabs Export - Monday, September 14, 2026 7:09 PM', created: 1000, modified: 1000, ancestor_path: [], occurrence: 0 },
+    { uuid: 'f801f520-8110-42f8-868c-e3a63ccea304', depth: 1, name: 'Saved Tabs Export — 2026-09-14 23:25 — 2 tabs (conductor repro — Dan\'s manual-entry note shape)', created: 2000, modified: 2000, ancestor_path: [], occurrence: 0 },
+  ]);
+  check('legacy pretty dock runs: both live names are prefix-identified (newest first)',
+    liveNames.length === 2
+      && liveNames[0].uuid === 'f801f520-8110-42f8-868c-e3a63ccea304'
+      && liveNames[1].uuid === 'd93b2672-c314-414d-92e9-92eeeba8cb5f');
+}
+
+// ---------------------------------------------------------------------------
+// 7 · Last-used-dock localStorage round-trip (injected storage)
+// ---------------------------------------------------------------------------
+{
+  const makeStorage = () => {
+    const store = {};
+    return {
+      store,
+      getItem: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+    };
+  };
+  const st = makeStorage();
+  check('dock storage: read on empty → null', api.savedTabsReadLastDock(st) === null);
+  check('dock storage: write returns true', api.savedTabsWriteLastDock(st, {
+    uuid: '0d53381d-7ba1-4c9f-ab74-cf04a2c258d0', name: 'Workflowy Saved Tabs',
+  }) === true);
+  const got = api.savedTabsReadLastDock(st);
+  check('dock storage: round-trip uuid', got && got.uuid === '0d53381d-7ba1-4c9f-ab74-cf04a2c258d0');
+  check('dock storage: round-trip name', got && got.name === 'Workflowy Saved Tabs');
+  check('dock storage: saved_at stamped ISO-8601',
+    got && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(got.saved_at));
+  check('dock storage: stored under the ONE key',
+    Object.keys(st.store).length === 1 && st.store[api.SAVED_TABS_LAST_DOCK_KEY] !== undefined);
+  check('dock storage: rewrite overwrites (single dock remembered)', (() => {
+    api.savedTabsWriteLastDock(st, { uuid: 'aaaaaaaa-0000-0000-0000-000000000000', name: 'Other' });
+    const g2 = api.savedTabsReadLastDock(st);
+    return g2.uuid === 'aaaaaaaa-0000-0000-0000-000000000000' && Object.keys(st.store).length === 1;
+  })());
+  check('dock storage: write without uuid refused (false, nothing stored)', (() => {
+    const st2 = makeStorage();
+    return api.savedTabsWriteLastDock(st2, { name: 'x' }) === false
+      && api.savedTabsWriteLastDock(st2, null) === false
+      && Object.keys(st2.store).length === 0;
+  })());
+  check('dock storage: corrupt JSON → null (tolerant)', (() => {
+    const st3 = makeStorage();
+    st3.setItem(api.SAVED_TABS_LAST_DOCK_KEY, '{corrupt');
+    return api.savedTabsReadLastDock(st3) === null;
+  })());
+  check('dock storage: record without uuid → null', (() => {
+    const st4 = makeStorage();
+    st4.setItem(api.SAVED_TABS_LAST_DOCK_KEY, JSON.stringify({ name: 'x' }));
+    return api.savedTabsReadLastDock(st4) === null;
+  })());
+  check('dock storage: missing name tolerated (empty string)', (() => {
+    const st5 = makeStorage();
+    api.savedTabsWriteLastDock(st5, { uuid: 'bb' });
+    const g5 = api.savedTabsReadLastDock(st5);
+    return g5 && g5.uuid === 'bb' && g5.name === '';
+  })());
+}
+
+// ---------------------------------------------------------------------------
+// 8 · STATIC WIRING LOCKS (the repo's python-static-test idiom, in JS)
+// ---------------------------------------------------------------------------
+function blockBetween(startMarker, endMarker, label) {
+  const s = src.indexOf(startMarker);
+  if (s < 0) throw new Error(`start marker not found for ${label}: ${startMarker}`);
+  const e = src.indexOf(endMarker, s);
+  if (e < 0) throw new Error(`end marker not found for ${label}: ${endMarker}`);
+  return src.slice(s, e);
+}
+
+{
+  const tier1 = blockBetween('── Saved Tabs TIER-1', '── END SAVED TABS', 'tier1 block');
+  const popup = extractFunction('showSavedTabsExportPopup');
+  const dialog = extractFunction('openSavedTabsImportDialog');
+  const picker = extractAsyncFunction('openSavedTabsDockPicker');
+  const pickerPopup = extractFunction('showSavedTabsDockPickerPopup');
+  const fileImport = extractFunction('openSavedTabsFileImport');
+  const scan = extractAsyncFunction('requestSavedTabsRecentDockRuns');
+  const fetchRun = extractAsyncFunction('requestSavedTabsDockRunPayload');
+  // "The Rail" (ui-bakeoff/fable): the Tabs drawer's Import button hands the
+  // Shift state to the client's api (buildGlimpseUiApi.savedTabsImport), which
+  // picks the file route; both halves are locked together below.
+  const widgetBtns = blockBetween('savedTabsImport: (shift) => {', 'savedTabsPickDock:', 'widget buttons (api)')
+    + fs.readFileSync(path.join(path.dirname(CLIENT_FILE), 'glimpse-ui-drawers.js'), 'utf8')
+      .split('\n').filter((l) => l.includes("btn('Import'")).join('\n');
+
+  // ONE serializer everywhere — no second assembly path was introduced.
+  // (Anchored on the real 2-space-indented definition / the `return` site so
+  // the @beacon comment lines — which quote both shapes — don't double-count.)
+  check('lock: exactly one buildSavedTabsExportJson definition',
+    (src.match(/\n {2}function buildSavedTabsExportJson\(/g) || []).length === 1);
+  check('lock: exactly one payload stringify site (the serializer itself, COMPACT — no pretty argument)',
+    (src.match(/return JSON\.stringify\(buildSavedTabsExportPayload\(rows, selectedIds\)\);/g) || []).length === 1);
+  check('lock: Tier-1 block builds NO payload JSON of its own',
+    !/JSON\.stringify\([^)]*alias/.test(tier1));
+
+  // FILE EXPORT route: popup shift-branch downloads the SAME built bytes.
+  check('lock: export popup file route = downloadTextFile of the built json',
+    popup.includes('const fname = savedTabsExportFilename();')
+      && popup.includes('downloadTextFile(json, fname);'));
+  check('lock: export popup shift branch rides evt.shiftKey', popup.includes('evt.shiftKey'));
+  check('lock: export popup builds json ONCE before the clipboard/file fork',
+    popup.indexOf('buildSavedTabsExportJson(list, Array.from(selected))')
+      < popup.indexOf('evt.shiftKey'));
+
+  // FILE IMPORT route: picker feeds the dialog; dialog feeds the frozen parse.
+  check('lock: file import uses the transient input[type=file] + FileReader idiom',
+    fileImport.includes("inp.type = 'file'") && fileImport.includes('reader.readAsText(file)'));
+  check('lock: file import prefills the SAME dialog (autoList through listBtn)',
+    fileImport.includes('openSavedTabsImportDialog({') && fileImport.includes('autoList: true'));
+  check('lock: dialog prefill runs the FROZEN listing handler (listBtn.click)',
+    dialog.includes('if (dlgOpts.autoList) listBtn.click();'));
+  check('lock: dialog From-file button reuses openSavedTabsFileImport (no second picker)',
+    dialog.includes('openSavedTabsFileImport({') && dialog.includes('listBtn.click();'));
+  check('lock: widget Import Shift+click = file route',
+    widgetBtns.includes('savedTabsImport(!!(ev && ev.shiftKey))') && widgetBtns.includes('if (shift) openSavedTabsFileImport();'));
+
+  // DOCK PICKER: the Anchors-button machinery, no parallel inventory.
+  check('lock: picker rides requestAnchorListForWidget (list_anchors_for_widget)',
+    picker.includes('requestAnchorListForWidget({') && picker.includes('treeView: true'));
+  check('lock: picker remembers via savedTabsWriteLastDock (localStorage only)',
+    pickerPopup.includes('savedTabsWriteLastDock(localStorage,'));
+  check('lock: picker adds NO new wire action', !picker.includes("action: '"));
+
+  // RECENT-FROM-DOCK scan: READ-ONLY through the existing cache-render wire.
+  check('lock: scan uses requestSliceModalRender + makeRawRootRenderSpec',
+    scan.includes('requestSliceModalRender(') && scan.includes('makeRawRootRenderSpec(dock.uuid'));
+  check('lock: scan is headings-only (cheap projection)', scan.includes('headings_only: true'));
+  check('lock: scan picks via the pure kernel', scan.includes('savedTabsPickRecentDockRuns(res.rows'));
+  check('lock: scan/fetch are READ-ONLY — never paint (no apply/display funnel calls)',
+    !scan.includes('applySliceGroupIntoDock') && !scan.includes('displaySliceInDock')
+      && !fetchRun.includes('applySliceGroupIntoDock') && !fetchRun.includes('displaySliceInDock'));
+  check('lock: run payload extraction via savedTabsExtractPayloadFromMarkdown',
+    fetchRun.includes('savedTabsExtractPayloadFromMarkdown(res.markdown)'));
+  // E3 ([ap:DW0GV8] §3): the dock route's tolerant grammar rides the ONE
+  // existing parser — a second/parallel grammar is the named anti-pattern.
+  check('lock: the dock extractor routes through parseSavedTabsImport (NO second/parallel parser)',
+    extractFunction('savedTabsExtractPayloadFromMarkdown').includes('parseSavedTabsImport('));
+  check('lock: exactly one savedTabsBareJsonCandidates definition (the ONE bare-scan adapter)',
+    (src.match(/\n {2}function savedTabsBareJsonCandidates\(/g) || []).length === 1);
+  check('lock: the dock-route loud message survives and names BOTH accepted forms',
+    fetchRun.includes('no parseable saved-tabs payload')
+      && fetchRun.includes('or the bare JSON array')
+      && fetchRun.includes('nothing was applied.'));
+  check('lock: dialog dock route hands the payload to the frozen listing path',
+    dialog.includes('requestSavedTabsRecentDockRuns()') && dialog.includes('ta.value = got.text;'));
+
+  // 3d CUT: no mutation side channel of any kind exists for a dock save.
+  check('lock: NO dock-save wire action / capture side channel in the client',
+    !src.includes('capture_saved_tabs') && !src.includes('save_saved_tabs')
+      && !tier1.includes('api.workflowy.com'));
+  check('lock: Tier-1 block touches NO extension-settings machinery',
+    !tier1.includes('extensionSettings') && !tier1.includes('set_expand_groups')
+      && !tier1.includes('persistMdPreviewSetting'));
+  check('lock: last-used dock key is the ONLY new storage key',
+    (src.match(/glimpse_saved_tabs_last_dock/g) || []).length >= 1
+      && !tier1.includes("localStorage.setItem('") && !tier1.includes('sessionStorage'));
+}
+
+// ---------------------------------------------------------------------------
+console.log(failures === 0
+  ? '\nALL PASS (saved-tabs tier-1 harness)'
+  : `\n${failures} FAILURE(S)`);
+process.exit(failures === 0 ? 0 : 1);

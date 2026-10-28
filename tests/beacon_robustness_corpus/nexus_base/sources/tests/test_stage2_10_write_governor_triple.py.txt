@@ -1,0 +1,200 @@
+"""Stage2-10 (Locked Work Order §6.10) — REAL account-governor
+three-process test (T3-10).
+
+Three REAL OS processes contending on one account's durable
+``.governance/<account>/`` write-governance artifacts:
+
+  - TICKET HOLDER   — acquires a paced write ticket, parks, then rechecks
+                      after the WFB trip: the STALE pre-trip reservation
+                      must be refused (the recheck suppression rule);
+  - TRIPPER / HALF-OPEN CLAIMANT — trips the WFB breaker, waits out the
+                      cooldown (state-derived poll on the durable breaker
+                      file, never a probability sleep), then acquires the
+                      ONE half-open recovery probe;
+  - RETRY-AFTER DEFERRER — is blocked by the live probe (EXACTLY ONE
+                      probe exists at a time), then max-merges a +5.0 s
+                      Retry-After defer into next_slot_at.
+
+Proven end-to-end:
+  1. the stale ticket's ``recheck_before_send`` raises
+     ``AccountWriteBlockedError`` after the trip (an unintended Workflowy
+     write can never ride a pre-trip reservation past the breaker);
+  2. the live probe blocks a second acquisition — exactly one half-open
+     probe exists;
+  3. the probe's own ``rate_limited`` defer (+2.0 s) NEVER shortens the
+     standing +5.0 s defer — max-merge is monotonic.
+
+SENSITIVITY (would-it-fail): ``STAGE2_NEUTRALIZE_RECHECK=1`` no-ops the
+holder's recheck — the stale ticket then "passes" and the refusal
+assertion fails.  Never set in the shipped test.
+
+Every actor logs its real PID; the parent asserts pairwise distinctness.
+"""
+
+from __future__ import annotations
+
+import os
+
+from stage2_harness import (
+    REPO,
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+    touch,
+)
+
+_ACCOUNT = "a" * 32
+
+_COMMON = (
+    "import asyncio, json, os, sys, time\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch, wait_for_file\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp.carto_write_governor import (\n"
+    "    CartoWriteGovernor,\n"
+    "    WriteGovernorSettings,\n"
+    ")\n"
+    "from workflowy_mcp.models.errors import AccountWriteBlockedError\n"
+    "root = Path(sys.argv[1])\n"
+    "JOBS = str(root / 'cartographer_jobs')\n"
+    f"ACCOUNT = {_ACCOUNT!r}\n"
+    "SETTINGS = WriteGovernorSettings(breaker_initial_cooldown_seconds=0.2)\n"
+    "GOV = CartoWriteGovernor(account_scope_id=ACCOUNT, jobs_root=JOBS, settings=SETTINGS)\n"
+    "async def no_sleep(delay, operation=None):\n"
+    "    return None\n"
+)
+
+_TICKET_HOLDER = (
+    _COMMON
+    + """
+touch(root / "pid_holder", str(os.getpid()))
+ticket = asyncio.run(GOV.acquire_write_slot("create", sleep_fn=no_sleep))
+touch(root / "ticket_held")
+assert wait_for_file(root / "trip_done", timeout=120)
+
+recheck_refused = False
+if os.environ.get("STAGE2_NEUTRALIZE_RECHECK"):
+    # SENSITIVITY-ONLY (never set in the shipped test): the recheck is a
+    # no-op — the stale pre-trip reservation rides through, and the
+    # refusal assertion below fails.
+    pass
+else:
+    try:
+        asyncio.run(GOV.recheck_before_send(ticket))
+    except AccountWriteBlockedError:
+        recheck_refused = True
+write_result(root / "holder_result.json", {
+    "recheck_refused": recheck_refused,
+    "slot_at": ticket.slot_at,
+    "probe_claim_id": ticket.probe_claim_id,
+})
+"""
+)
+
+_TRIPPER = (
+    _COMMON
+    + """
+touch(root / "pid_tripper", str(os.getpid()))
+assert wait_for_file(root / "ticket_held", timeout=120)
+asyncio.run(GOV.trip_wfb(reason="WFB(3) simulated account write block"))
+touch(root / "trip_done")
+
+# Wait out the cooldown — a STATE-DERIVED poll on the durable breaker
+# file, never a probability sleep.
+breaker_path = GOV.paths.breaker_state
+while True:
+    state = json.loads(breaker_path.read_text(encoding="utf-8"))
+    if float(state["blocked_until"]) <= time.time():
+        break
+    time.sleep(0.02)
+
+probe_ticket = asyncio.run(GOV.acquire_write_slot("probe", sleep_fn=no_sleep))
+assert probe_ticket.probe_claim_id is not None
+state = json.loads(breaker_path.read_text(encoding="utf-8"))
+assert state["state"] == "half_open"
+assert state["probe_claim_id"] == probe_ticket.probe_claim_id
+touch(root / "probe_live")
+
+assert wait_for_file(root / "deferrer_done", timeout=120)
+transition = asyncio.run(GOV.record_probe_result(
+    probe_ticket.probe_claim_id,
+    "rate_limited",
+    retry_after_seconds=2.0,
+    reason="probe saw 429",
+))
+write_result(root / "tripper_result.json", {
+    "applied": transition.applied,
+    "breaker_state": transition.breaker["state"],
+    "next_slot_at": transition.next_slot_at,
+    "probe_claim_id": probe_ticket.probe_claim_id,
+})
+touch(root / "probe_closed")
+"""
+)
+
+_DEFERRER = (
+    _COMMON
+    + """
+touch(root / "pid_deferrer", str(os.getpid()))
+assert wait_for_file(root / "probe_live", timeout=120)
+
+# EXACTLY ONE PROBE: a second acquisition while the probe lease is live
+# must be blocked.
+blocked = False
+try:
+    asyncio.run(GOV.acquire_write_slot("another", sleep_fn=no_sleep))
+except AccountWriteBlockedError:
+    blocked = True
+
+merged = asyncio.run(GOV.defer_global_writes_until(5.0, operation="429 defer"))
+write_result(root / "deferrer_result.json", {
+    "blocked_while_probe_live": blocked,
+    "merged_next_slot_at": merged,
+})
+touch(root / "deferrer_done")
+"""
+)
+
+
+# @beacon[
+#   id=auto-beacon@test_stale_ticket_recheck_refuses_one_probe_and_max_merge_never_shortens-lqfc,
+#   role=test_stale_ticket_recheck_refuses_one_probe_and_max_merge_never_shortens,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_stale_ticket_recheck_refuses_one_probe_and_max_merge_never_shortens(tmp_path):
+    """The stale ticket's recheck refuses; exactly one half-open probe
+    exists; max-merge never shortens the standing Retry-After defer."""
+    root = tmp_path / "share"
+    (root / "cartographer_jobs").mkdir(parents=True)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    holder = launch_actor(_TICKET_HOLDER, str(root), str(REPO))
+    tripper = launch_actor(_TRIPPER, str(root), str(REPO))
+    deferrer = launch_actor(_DEFERRER, str(root), str(REPO))
+    try:
+        holder_result = read_result(root / "holder_result.json", timeout=180)
+        tripper_result = read_result(root / "tripper_result.json", timeout=180)
+        deferrer_result = read_result(root / "deferrer_result.json", timeout=180)
+
+        # 1. The stale pre-trip reservation is suppressed at recheck.
+        assert holder_result["recheck_refused"] is True
+        assert holder_result["probe_claim_id"] is None
+
+        # 2. Exactly one probe: the live probe blocked the second acquire.
+        assert deferrer_result["blocked_while_probe_live"] is True
+
+        # 3. The probe's rate_limited defer (+2.0 s) closed the breaker but
+        # NEVER shortened the standing +5.0 s defer — max-merge monotonic.
+        assert tripper_result["applied"] is True
+        assert tripper_result["breaker_state"] == "closed"
+        assert tripper_result["next_slot_at"] == deferrer_result["merged_next_slot_at"]
+
+        pids = collect_distinct_pids(root, ["parent", "holder", "tripper", "deferrer"])
+        assert len(set(pids.values())) == 4
+    finally:
+        finish_actor(holder, label="ticket holder")
+        finish_actor(tripper, label="tripper / half-open claimant")
+        finish_actor(deferrer, label="retry-after deferrer")

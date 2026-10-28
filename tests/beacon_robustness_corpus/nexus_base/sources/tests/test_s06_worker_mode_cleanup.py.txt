@@ -1,0 +1,176 @@
+"""S06 Gate A — dead WEAVE worker-mode cleanup.
+
+Verifies weave_worker.py supports ONLY the governed CARTO modes
+(carto_refresh / markdown_generate), that retired enchanted/direct modes and
+their arguments fail at argparse before ANY side effect, that the launcher
+plumbing no longer emits retired arguments, and that the active governed
+lifecycle (claim adoption -> startup cancel -> heartbeat -> client bootstrap
+-> dispatch -> finalization) is intact.
+
+Fences here are exact-identifier fences (S06 §12/H5): they target retired
+identifiers and dispatch modes, never broad English words.
+"""
+
+from __future__ import annotations
+
+import ast
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+WORKER = REPO / "src" / "workflowy_mcp" / "weave_worker.py"
+GOVERNANCE = REPO / "src" / "workflowy_mcp" / "carto_job_governance.py"
+SERVER = REPO / "src" / "workflowy_mcp" / "server.py"
+PIPELINE = REPO / "src" / "workflowy_mcp" / "markdown_generate_pipeline.py"
+
+GOVERNED_MODES = {"carto_refresh", "markdown_generate"}
+
+# Exact retired worker-surface identifiers (S06 §12 + H5 expanded denylist,
+# worker scope). Quoted forms so prose comments cannot false-positive.
+RETIRED_WORKER_TOKENS = [
+    '"enchanted"',
+    '"direct"',
+    "--nexus-tag",
+    "--json-file",
+    "--parent-id",
+    "--import-policy",
+    "--dry-run",
+    ".weave.pid",
+    "pid_file",
+    "NEXUS_RUNS_BASE",
+    "nexus_weave_enchanted",
+    "bulk_import_from_file",
+    "wkv1@detached-weave-lab",
+    "nexus_runs_base",
+]
+
+
+def _run_worker(*argv: str, cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(WORKER), *argv],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        timeout=60,
+    )
+
+
+def test_parser_accepts_governed_modes(tmp_path: Path) -> None:
+    """argparse admits carto_refresh / markdown_generate (failure must come
+    AFTER parsing — at governed claim adoption, never at argparse)."""
+    for mode in sorted(GOVERNED_MODES):
+        proc = _run_worker(
+            "--mode", mode, "--carto-job-file", str(tmp_path / "missing.json"),
+            cwd=tmp_path,
+        )
+        assert proc.returncode != 2, (
+            f"{mode}: argparse rejected a governed mode: {proc.stderr}"
+        )
+        assert "invalid choice" not in proc.stderr
+        # Reaches governed claim adoption (the FIRST CARTO action) and refuses
+        # there — never client construction, never mutation work.
+        assert proc.returncode == 1
+        assert "governed claim adoption refused" in proc.stderr
+
+
+def test_parser_rejects_retired_modes_before_side_effects(tmp_path: Path) -> None:
+    """An injected enchanted/direct argv fails at argparse — before client
+    construction, file creation, claim adoption, or network I/O (§4.4)."""
+    for retired in ("enchanted", "direct"):
+        proc = _run_worker(
+            "--mode", retired, "--carto-job-file", str(tmp_path / "x.json"),
+            cwd=tmp_path,
+        )
+        assert proc.returncode == 2, (
+            f"{retired}: expected argparse exit 2, got {proc.returncode}: {proc.stderr}"
+        )
+        assert "invalid choice" in proc.stderr
+        assert "Successfully imported WorkFlowyClient" not in proc.stderr
+        assert "governed claim adoption refused" not in proc.stderr
+        # Zero filesystem side effects in the working directory.
+        assert list(tmp_path.iterdir()) == []
+
+
+def test_parser_rejects_retired_arguments(tmp_path: Path) -> None:
+    """The retired mode-specific arguments no longer exist (§4.1)."""
+    for flag in ("--nexus-tag", "--json-file", "--parent-id", "--import-policy", "--dry-run"):
+        proc = _run_worker(
+            "--mode", "carto_refresh", "--carto-job-file", str(tmp_path / "x.json"),
+            flag, "x",
+            cwd=tmp_path,
+        )
+        assert proc.returncode == 2, f"{flag}: expected argparse exit 2, got {proc.returncode}"
+        assert "unrecognized arguments" in proc.stderr
+
+
+def test_carto_job_file_is_required(tmp_path: Path) -> None:
+    proc = _run_worker("--mode", "carto_refresh", cwd=tmp_path)
+    assert proc.returncode == 2
+    assert "--carto-job-file" in proc.stderr
+
+
+def test_worker_source_has_no_retired_vocabulary() -> None:
+    source = WORKER.read_text(encoding="utf-8")
+    for token in RETIRED_WORKER_TOKENS:
+        assert token not in source, f"retired token {token!r} still present in weave_worker.py"
+    # Surviving governed modes are BOTH present (§12 fence).
+    assert '"carto_refresh"' in source
+    assert '"markdown_generate"' in source
+
+
+def test_launch_command_inventory_contains_only_governed_modes() -> None:
+    """Every production worker launch command uses a governed mode and emits
+    no retired argument (§4.4 permanent launcher acceptance)."""
+    modes_seen: set[str] = set()
+    for path in (GOVERNANCE, SERVER, PIPELINE):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.keyword) or node.arg != "worker_mode":
+                continue
+            assert isinstance(node.value, ast.Constant), (
+                f"{path.name}: worker_mode is not a literal (dynamic modes need audit)"
+            )
+            modes_seen.add(str(node.value.value))
+    assert modes_seen <= GOVERNED_MODES, f"dead launch modes present: {modes_seen}"
+    assert modes_seen == GOVERNED_MODES, f"a governed mode lost its launcher: {modes_seen}"
+
+    governance_source = GOVERNANCE.read_text(encoding="utf-8")
+    assert '"--dry-run"' not in governance_source
+    assert '"--nexus-tag"' not in governance_source
+    assert '"--json-file"' not in governance_source
+
+
+def test_server_launch_env_has_no_nexus_runs_base_producer() -> None:
+    source = SERVER.read_text(encoding="utf-8")
+    assert 'setdefault("NEXUS_RUNS_BASE"' not in source
+    assert "get_nexus_runs_base_dir" not in source
+
+
+def test_active_governed_lifecycle_preserved() -> None:
+    """The S02/S03-B Gate-(c) lifecycle survives the cleanup (adoption first,
+    the SINGLE current manifest-head adoption via the worker pin before
+    dispatch, claim finalization at exit)."""
+    source = WORKER.read_text(encoding="utf-8")
+    adoption = source.index("adopt_carto_worker_claim(args.carto_job_file)")
+    startup_cancel = source.index("Startup cancellation finalized before client/bootstrap")
+    heartbeat = source.index("carto_heartbeat = _start_carto_heartbeat_after_adoption(")
+    client_import = source.index("from workflowy_mcp.client.api_client import WorkFlowyClient")
+    # S03-B Gate (c): job-basis lineage VALIDATION is retained, then the worker
+    # pins its operation snapshot — the pin performs the SINGLE current
+    # manifest-head adoption (audit amendment A3: no separate direct
+    # _adopt_coherence_head call) — before any mutation work.  The S03-A
+    # job-basis-only _publish_lineage_view publish is RETIRED.
+    validation = source.index("load_usable_nodes_export_snapshot(")
+    worker_pin = source.index("pin_worker_operation_cache(")
+    assert adoption < startup_cancel < heartbeat < client_import < validation < worker_pin
+    assert "client._adopt_coherence_head(" not in source
+    assert "client._publish_lineage_view(" not in source
+    assert source.count("carto_heartbeat.stop()") >= 2
+    assert "finalize_claim(" in source
+    assert "finalize_cancelled_job_claim(" in source
+    assert "refresh_file_node_beacons(" in source
+    assert "refresh_folder_cartographer_sync(" in source
+    assert "run_markdown_generate_pipeline(" in source
+    # The retired self-refresh bootstrap is gone (phase_c fence invariant).
+    assert "Refreshing /nodes-export cache for WEAVE worker" not in source

@@ -1,0 +1,5840 @@
+{
+ "note": "All rows are derived from the frozen base sources (sources/*.txt) and the frozen base records (records.json) at a345dc7; the CF-09 finder and the parsers are the base code imported from the verified base root.",
+ "base_commit": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+ "python_blocks_with_opener_in_string": [
+  {
+   "file": "nexus_map_codebase.py",
+   "line": 3980,
+   "end_line": 3987,
+   "id": "example@1234",
+   "kind_raw": "ast|span",
+   "outcome": "skipped_unknown_kind",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "parse_python_beacon_blocks",
+    "lineno": 3973
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "line": 8700,
+   "end_line": 8705,
+   "id": "segment@001",
+   "kind_raw": "span,                # optional, defaults to span",
+   "outcome": "skipped_unknown_kind",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "parse_sh_beacon_blocks",
+    "lineno": 8693
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "line": 8887,
+   "end_line": 8892,
+   "id": "segment@001",
+   "kind_raw": "span,                # optional, defaults to span",
+   "outcome": "skipped_unknown_kind",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "parse_yaml_beacon_blocks",
+    "lineno": 8880
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 45,
+   "end_line": 50,
+   "id": "demo@LIMIT",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 61,
+   "end_line": 66,
+   "id": "demo@Registry.register",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 73,
+   "end_line": 78,
+   "id": "demo@Store",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 82,
+   "end_line": 87,
+   "id": "demolition@Store.drop",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 96,
+   "end_line": 101,
+   "id": "demo@serve",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 106,
+   "end_line": 111,
+   "id": "demo@serve.handle",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 119,
+   "end_line": 124,
+   "id": "demo@fetch",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 130,
+   "end_line": 137,
+   "id": "demo@limits",
+   "kind_raw": "span",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": true,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 146,
+   "end_line": 153,
+   "id": "demo@quiet",
+   "kind_raw": "span",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": true,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 165,
+   "end_line": 170,
+   "id": "demo@deep",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 236,
+   "end_line": 243,
+   "id": "demo@build",
+   "kind_raw": "span",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": true,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "line": 251,
+   "end_line": 258,
+   "id": "demo@service",
+   "kind_raw": "span",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": true,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_carto_dry_run_byte_purity.py",
+   "line": 16,
+   "end_line": 21,
+   "id": "second",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "line": 33,
+   "end_line": 39,
+   "id": "rvw3@doc-example",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "line": 57,
+   "end_line": 63,
+   "id": "rvw3@beacon-example",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "line": 365,
+   "end_line": 371,
+   "id": "rvw4@leading-ast",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "line": 378,
+   "end_line": 384,
+   "id": "rvw4@leading-md",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "line": 392,
+   "end_line": 398,
+   "id": "rvw4@leading-beacon",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "line": 426,
+   "end_line": 432,
+   "id": "rvw4@leading-md-ctx",
+   "kind_raw": "ast",
+   "outcome": "kept",
+   "line_text": "# @beacon[",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   },
+   "agent_kit_build_mapped_span": false,
+   "in_records_manifest_as": "tests/test_agent_kit_build.py:130/146/236/251"
+  }
+ ],
+ "python_string_tokens_with_opener": [
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 57,
+   "end_line": 57,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 498,
+   "end_line": 498,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_strip_beacon_meta_blocks_from_context",
+    "lineno": 472
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 526,
+   "end_line": 526,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_python_beacon_blocks",
+    "lineno": 514
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 869,
+   "end_line": 869,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_python_beacon_context",
+    "lineno": 809
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 2202,
+   "end_line": 2202,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_sql_beacon_blocks",
+    "lineno": 2191
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 2362,
+   "end_line": 2362,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_js_beacon_blocks",
+    "lineno": 2339
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 2506,
+   "end_line": 2506,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_sh_beacon_blocks",
+    "lineno": 2495
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 2654,
+   "end_line": 2654,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_yaml_beacon_blocks",
+    "lineno": 2643
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 2877,
+   "end_line": 2877,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_sql_beacon_context",
+    "lineno": 2791
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 3052,
+   "end_line": 3052,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_sh_beacon_context",
+    "lineno": 2994
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 3273,
+   "end_line": 3273,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_yaml_beacon_context",
+    "lineno": 3215
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 3991,
+   "end_line": 3991,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block_for_language",
+    "lineno": 3951
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 3996,
+   "end_line": 3996,
+   "kind": "string",
+   "snippet": "\"/* @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block_for_language",
+    "lineno": 3951
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 4073,
+   "end_line": 4073,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_find_beacon_close_block_extent",
+    "lineno": 4009
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 4093,
+   "end_line": 4093,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_find_beacon_close_block_extent",
+    "lineno": 4009
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 4232,
+   "end_line": 4232,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_mapped_note",
+    "lineno": 4191
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 4255,
+   "end_line": 4255,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_mapped_note",
+    "lineno": 4191
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/_engine.py",
+   "start_line": 4287,
+   "end_line": 4287,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_mapped_note",
+    "lineno": 4191
+   }
+  },
+  {
+   "file": "agent-kit/.claude/skills/code-map/scripts/code_map.py",
+   "start_line": 69,
+   "end_line": 69,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "beacon_mutation_contract.py",
+   "start_line": 132,
+   "end_line": 132,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "beacon_mutation_contract.py",
+   "start_line": 153,
+   "end_line": 185,
+   "kind": "string",
+   "snippet": "\"\"\"Validate and normalize a caller-supplied beacon comment (THE ONE validator).\\n\\n    The on-disk beacon grammars write t",
+   "enclosing_symbol": {
+    "name": "validate_beacon_comment_text",
+    "lineno": 152
+   }
+  },
+  {
+   "file": "beacon_mutation_contract.py",
+   "start_line": 272,
+   "end_line": 293,
+   "kind": "string",
+   "snippet": "\"\"\"Parse a beacon block's inner lines into ``{key: value}``.\\n\\n    ``texts`` are the block's inner lines with the languag",
+   "enclosing_symbol": {
+    "name": "parse_beacon_field_lines",
+    "lineno": 271
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 753,
+   "end_line": 781,
+   "kind": "string",
+   "snippet": "\"\"\"Return (top, bottom) of the Python comment block around a beacon.\\n\\n    Walks contiguous '#' comment lines (regardless",
+   "enclosing_symbol": {
+    "name": "_python_comment_block_span",
+    "lineno": 749
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 856,
+   "end_line": 883,
+   "kind": "string",
+   "snippet": "\"\"\"Return (top, bottom) of the JS/TS comment block around a beacon.\\n\\n    Module-level twin of ``_python_comment_block_sp",
+   "enclosing_symbol": {
+    "name": "_comment_block_span_js",
+    "lineno": 853
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 959,
+   "end_line": 971,
+   "kind": "string",
+   "snippet": "\"\"\"Return (start_line, end_line, lines, core_start, core_end) for a beacon.\\n\\n    • The **core region** `[core_start, cor",
+   "enclosing_symbol": {
+    "name": "_python_snippet_for_beacon",
+    "lineno": 954
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 1120,
+   "end_line": 1133,
+   "kind": "string",
+   "snippet": "\"\"\"Open/close span for JS/TS beacons with a matching id.\\n\\n    This mirrors the Markdown helper: we use the beacon list t",
+   "enclosing_symbol": {
+    "name": "_js_ts_find_closing_beacon_span",
+    "lineno": 1115
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 1433,
+   "end_line": 1441,
+   "kind": "string",
+   "snippet": "\"\"\"Closing-delimiter span for Markdown beacons with matching id.\\n\\n    Similar semantics as the Python helper but adapted",
+   "enclosing_symbol": {
+    "name": "_markdown_find_closing_beacon_span",
+    "lineno": 1428
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 1569,
+   "end_line": 1569,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_markdown_comment_block_span",
+    "lineno": 1535
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 1586,
+   "end_line": 1586,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_markdown_comment_block_span",
+    "lineno": 1535
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 2825,
+   "end_line": 2825,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_find_beacon_comment_line",
+    "lineno": 2821
+   }
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "start_line": 2983,
+   "end_line": 2997,
+   "kind": "string",
+   "snippet": "\"\"\"Return (start_line, end_line, lines, core_start, core_end, beacon_line, metadata).\\n\\n    - `start_line` / `end_line` i",
+   "enclosing_symbol": {
+    "name": "get_snippet_data",
+    "lineno": 2976
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 429,
+   "end_line": 429,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "tokens_to_nexus_tree",
+    "lineno": 342
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 703,
+   "end_line": 703,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "arbitrary_hash_markdown_lines_to_nexus_tree",
+    "lineno": 664
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 848,
+   "end_line": 873,
+   "kind": "string",
+   "snippet": "\"\"\"Parse @beacon[...] HTML comment blocks from Markdown source.\\n\\n    Expected form (we control this schema):\\n\\n        <!",
+   "enclosing_symbol": {
+    "name": "parse_markdown_beacon_blocks",
+    "lineno": 845
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 922,
+   "end_line": 922,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_is_structural_beacon_open",
+    "lineno": 911
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 1027,
+   "end_line": 1027,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_markdown_beacon_blocks",
+    "lineno": 845
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 1230,
+   "end_line": 1253,
+   "kind": "string",
+   "snippet": "\"\"\"Extract nearby HTML comment lines (non-beacon) around a Markdown beacon.\\n\\n    We look above and below the beacon's co",
+   "enclosing_symbol": {
+    "name": "_extract_markdown_beacon_context",
+    "lineno": 1225
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 1266,
+   "end_line": 1266,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_markdown_beacon_context",
+    "lineno": 1225
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 1282,
+   "end_line": 1282,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_markdown_beacon_context",
+    "lineno": 1225
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 1383,
+   "end_line": 1383,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "apply_markdown_beacons",
+    "lineno": 1308
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 3863,
+   "end_line": 3879,
+   "kind": "string",
+   "snippet": "\"\"\"Remove literal @beacon[...] / @beacon-close[...] metadata blocks from context.\\n\\n    Delimiter-block based and languag",
+   "enclosing_symbol": {
+    "name": "_strip_beacon_meta_blocks_from_context",
+    "lineno": 3862
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 3925,
+   "end_line": 3925,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_strip_beacon_meta_blocks_from_context",
+    "lineno": 3862
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 3976,
+   "end_line": 3998,
+   "kind": "string",
+   "snippet": "\"\"\"Parse @beacon[...] comment blocks from Python source lines.\\n\\n    Expected form (we control this schema):\\n\\n        # @",
+   "enclosing_symbol": {
+    "name": "parse_python_beacon_blocks",
+    "lineno": 3973
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 4008,
+   "end_line": 4008,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_python_beacon_blocks",
+    "lineno": 3973
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 4293,
+   "end_line": 4320,
+   "kind": "string",
+   "snippet": "\"\"\"Markdown variant of normalize_duplicate_ast_beacons_in_file.\\n\\n    Mirrors the Python/JS-TS implementations but operat",
+   "enclosing_symbol": {
+    "name": "_normalize_duplicate_ast_beacons_markdown",
+    "lineno": 4292
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 4528,
+   "end_line": 4528,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_parse_blocks",
+    "lineno": 4520
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 4737,
+   "end_line": 4737,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_looks_like_js_beacon_opener",
+    "lineno": 4735
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 4989,
+   "end_line": 5008,
+   "kind": "string",
+   "snippet": "\"\"\"Apply Python @beacon[...] metadata to an existing AST outline tree.\\n\\n    - AST beacons (kind=ast): decorate existing ",
+   "enclosing_symbol": {
+    "name": "apply_python_beacons",
+    "lineno": 4982
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 5237,
+   "end_line": 5237,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_python_beacon_context",
+    "lineno": 5153
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 6004,
+   "end_line": 6018,
+   "kind": "string",
+   "snippet": "\"\"\"Parse a single Python file into a NEXUS outline tree + beacon decorations.\\n\\n    Steps (V1 Beacon-aware):\\n    1. Parse",
+   "enclosing_symbol": {
+    "name": "parse_file_outline",
+    "lineno": 6003
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 6053,
+   "end_line": 6080,
+   "kind": "string",
+   "snippet": "\"\"\"Build a per-line comment mask + cleaned-text array for JS/TS source.\\n\\n    Returns ``(comment_mask, cleaned)`` where `",
+   "enclosing_symbol": {
+    "name": "_build_js_comment_mask",
+    "lineno": 6052
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 6136,
+   "end_line": 6176,
+   "kind": "string",
+   "snippet": "\"\"\"Extract contiguous JS/TS comments around a JS/TS AST node line.\\n\\n    Walks upward from ``start_line - 1`` collecting ",
+   "enclosing_symbol": {
+    "name": "_extract_js_ast_comment_context",
+    "lineno": 6129
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8275,
+   "end_line": 8293,
+   "kind": "string",
+   "snippet": "\"\"\"Parse @beacon[...] comment blocks from SQL source lines.\\n\\n    Syntax (mirrors Python/Markdown beacons):\\n\\n        -- @",
+   "enclosing_symbol": {
+    "name": "parse_sql_beacon_blocks",
+    "lineno": 8272
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8302,
+   "end_line": 8302,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_sql_beacon_blocks",
+    "lineno": 8272
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8471,
+   "end_line": 8500,
+   "kind": "string",
+   "snippet": "\"\"\"Parse @beacon[...] comment blocks from JS/TS source lines.\\n\\n    Supported forms (we control this schema):\\n\\n        //",
+   "enclosing_symbol": {
+    "name": "parse_js_beacon_blocks",
+    "lineno": 8468
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8529,
+   "end_line": 8529,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_js_beacon_blocks",
+    "lineno": 8468
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8696,
+   "end_line": 8712,
+   "kind": "string",
+   "snippet": "\"\"\"Parse @beacon[...] blocks from shell scripts using '#'-style comments.\\n\\n    Syntax mirrors the Python beacon form but",
+   "enclosing_symbol": {
+    "name": "parse_sh_beacon_blocks",
+    "lineno": 8693
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8721,
+   "end_line": 8721,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_sh_beacon_blocks",
+    "lineno": 8693
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8883,
+   "end_line": 8899,
+   "kind": "string",
+   "snippet": "\"\"\"Parse @beacon[...] blocks from YAML/Helm using '#'-style comments.\\n\\n    Syntax mirrors the Python beacon form but is ",
+   "enclosing_symbol": {
+    "name": "parse_yaml_beacon_blocks",
+    "lineno": 8880
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 8908,
+   "end_line": 8908,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_yaml_beacon_blocks",
+    "lineno": 8880
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9065,
+   "end_line": 9078,
+   "kind": "string",
+   "snippet": "\"\"\"Extract nearby SQL comments (non-beacon) around a SQL beacon.\\n    This populates the \"CONTEXT COMMENTS (SQL)\" section",
+   "enclosing_symbol": {
+    "name": "_extract_sql_beacon_context",
+    "lineno": 9060
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9181,
+   "end_line": 9181,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_sql_beacon_context",
+    "lineno": 9060
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9334,
+   "end_line": 9342,
+   "kind": "string",
+   "snippet": "\"\"\"Extract nearby shell comments (non-beacon) around a shell @beacon block.\\n    This populates the \"CONTEXT COMMENTS (SH",
+   "enclosing_symbol": {
+    "name": "_extract_sh_beacon_context",
+    "lineno": 9329
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9417,
+   "end_line": 9417,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_sh_beacon_context",
+    "lineno": 9329
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9477,
+   "end_line": 9484,
+   "kind": "string",
+   "snippet": "\"\"\"Prepend warning nodes when duplicate beacon IDs appear in a single file.\\n    This is a UX guardrail. Duplicate beacon",
+   "enclosing_symbol": {
+    "name": "_prepend_duplicate_beacon_id_warning_nodes",
+    "lineno": 9471
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9643,
+   "end_line": 9649,
+   "kind": "string",
+   "snippet": "\"\"\"Extract nearby YAML comments (non-beacon) around a YAML @beacon block.\\n    Mirrors _extract_sh_beacon_context semanti",
+   "enclosing_symbol": {
+    "name": "_extract_yaml_beacon_context",
+    "lineno": 9638
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9717,
+   "end_line": 9717,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_yaml_beacon_context",
+    "lineno": 9638
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 9960,
+   "end_line": 9971,
+   "kind": "string",
+   "snippet": "\"\"\"Extract nearby JS/TS comments (non-beacon) around a JS/TS beacon.\\n\\n        Includes:\\n        - Lines that are part of",
+   "enclosing_symbol": {
+    "name": "_extract_js_beacon_context",
+    "lineno": 9959
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 10481,
+   "end_line": 10495,
+   "kind": "string",
+   "snippet": "\"\"\"Normalize legacy beacon key alias `comments=` -> `comment=` inside real beacon metadata blocks only.\\n\\n    This hygien",
+   "enclosing_symbol": {
+    "name": "normalize_beacon_comment_field_aliases_in_file",
+    "lineno": 10480
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 10617,
+   "end_line": 10617,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "normalize_beacon_comment_field_aliases_in_file",
+    "lineno": 10480
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 10623,
+   "end_line": 10623,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "normalize_beacon_comment_field_aliases_in_file",
+    "lineno": 10480
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 10629,
+   "end_line": 10629,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "normalize_beacon_comment_field_aliases_in_file",
+    "lineno": 10480
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 10633,
+   "end_line": 10633,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "normalize_beacon_comment_field_aliases_in_file",
+    "lineno": 10480
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 10641,
+   "end_line": 10641,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "normalize_beacon_comment_field_aliases_in_file",
+    "lineno": 10480
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 10646,
+   "end_line": 10646,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "normalize_beacon_comment_field_aliases_in_file",
+    "lineno": 10480
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 11157,
+   "end_line": 11157,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block_for_language",
+    "lineno": 11112
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 11162,
+   "end_line": 11162,
+   "kind": "string",
+   "snippet": "\"/* @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block_for_language",
+    "lineno": 11112
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 11255,
+   "end_line": 11255,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_find_beacon_close_block_extent",
+    "lineno": 11182
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 11277,
+   "end_line": 11277,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_find_beacon_close_block_extent",
+    "lineno": 11182
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 11566,
+   "end_line": 11593,
+   "kind": "string",
+   "snippet": "\"\"\"Update/create/delete Python @beacon[...] blocks for a single node.\\n\\n    This helper performs on-disk edits ONLY. It d",
+   "enclosing_symbol": {
+    "name": "update_beacon_from_node_python",
+    "lineno": 11558
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 11694,
+   "end_line": 11694,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block",
+    "lineno": 11685
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12091,
+   "end_line": 12095,
+   "kind": "string",
+   "snippet": "\"\"\"Update/create/delete JS/TS @beacon[...] blocks for a single node.\\n\\n    Mirrors the Python helper but uses JS/TS beaco",
+   "enclosing_symbol": {
+    "name": "update_beacon_from_node_js_ts",
+    "lineno": 12083
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12185,
+   "end_line": 12185,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block",
+    "lineno": 12176
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12559,
+   "end_line": 12561,
+   "kind": "string",
+   "snippet": "\"\"\"Return the 0-based ``(start_idx, end_idx)`` extent of the ``@beacon[``\\n    block whose PARSED id equals ``bid``, or `",
+   "enclosing_symbol": {
+    "name": "_find_vue_beacon_block_by_exact_id",
+    "lineno": 12558
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12570,
+   "end_line": 12570,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_find_vue_beacon_block_by_exact_id",
+    "lineno": 12558
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12606,
+   "end_line": 12617,
+   "kind": "string",
+   "snippet": "\"\"\"Update/create/delete Vue (.vue) @beacon[...] blocks for a single node.\\n\\n    MVP behavior:\\n    - Script blocks: suppor",
+   "enclosing_symbol": {
+    "name": "update_beacon_from_node_vue",
+    "lineno": 12598
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12754,
+   "end_line": 12754,
+   "kind": "string",
+   "snippet": "\"\"\"Update first matching @beacon[ id=...] block in [window_lo,window_hi] (1-based inclusive).\"\"\"",
+   "enclosing_symbol": {
+    "name": "_update_block_in_window",
+    "lineno": 12742
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12760,
+   "end_line": 12760,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_update_block_in_window",
+    "lineno": 12742
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12787,
+   "end_line": 12787,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_update_block_in_window",
+    "lineno": 12742
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12804,
+   "end_line": 12804,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_update_block_in_window",
+    "lineno": 12742
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 12821,
+   "end_line": 12821,
+   "kind": "string",
+   "snippet": "\"/* @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_update_block_in_window",
+    "lineno": 12742
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 13047,
+   "end_line": 13047,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "update_beacon_from_node_vue",
+    "lineno": 12598
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 13114,
+   "end_line": 13114,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "update_beacon_from_node_vue",
+    "lineno": 12598
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 13302,
+   "end_line": 13302,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block",
+    "lineno": 13289
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 13899,
+   "end_line": 13905,
+   "kind": "string",
+   "snippet": "\"\"\"Update an existing SQL span beacon's metadata for a single node.\\n\\n    Currently supports updating role/slice_labels/c",
+   "enclosing_symbol": {
+    "name": "update_beacon_from_node_sql",
+    "lineno": 13891
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 14067,
+   "end_line": 14067,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block",
+    "lineno": 14058
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 14291,
+   "end_line": 14291,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block",
+    "lineno": 14282
+   }
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "start_line": 14513,
+   "end_line": 14513,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_build_beacon_block",
+    "lineno": 14504
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "start_line": 1156,
+   "end_line": 1156,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_symres_extract_beacon_fields",
+    "lineno": 1153
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "start_line": 5582,
+   "end_line": 5589,
+   "kind": "string",
+   "snippet": "\"\"\"Return the BEACON block ``id:`` value from a Workflowy node note, or None.\\n\\n    Mirrors ``nexus_map_codebase._extract",
+   "enclosing_symbol": {
+    "name": "_extract_beacon_id_from_note_local",
+    "lineno": 5581
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "start_line": 5592,
+   "end_line": 5592,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_extract_beacon_id_from_note_local",
+    "lineno": 5581
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "start_line": 6198,
+   "end_line": 6198,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_cartographer_note_for_preview",
+    "lineno": 6117
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "start_line": 6236,
+   "end_line": 6236,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_cartographer_note_for_preview",
+    "lineno": 6117
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "start_line": 6282,
+   "end_line": 6282,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "parse_cartographer_note_for_preview",
+    "lineno": 6117
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "start_line": 14539,
+   "end_line": 14539,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "get_code_snippet_for_resolved_node",
+    "lineno": 14456
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/managed_metadata.py",
+   "start_line": 1,
+   "end_line": 58,
+   "kind": "string",
+   "snippet": "\"\"\"THE ONE managed-metadata inventory for Workflowy notes and names.\\n\\nDan's to-do [ap:BNNUZ4]: one place owns the list o",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/managed_metadata.py",
+   "start_line": 322,
+   "end_line": 322,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/markdown_generate_pipeline.py",
+   "start_line": 225,
+   "end_line": 275,
+   "kind": "string",
+   "snippet": "\"\"\"Rewrite intra-file duplicate beacon ids so the file is F12+1-idempotent.\\n\\n    WHY THIS EXISTS\\n    ---------------\\n   ",
+   "enclosing_symbol": {
+    "name": "_disambiguate_duplicate_beacon_ids_in_file",
+    "lineno": 224
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "start_line": 2846,
+   "end_line": 2860,
+   "kind": "string",
+   "snippet": "\"\"\"Attempt AST-beacon auto-creation for an AST node with trailing #tags.\\n\\n    Conditions for activation:\\n    - Node's no",
+   "enclosing_symbol": {
+    "name": "_maybe_create_ast_beacon_from_tags",
+    "lineno": 2841
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "start_line": 3084,
+   "end_line": 3084,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_maybe_create_ast_beacon_from_tags",
+    "lineno": 2841
+   }
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "start_line": 3086,
+   "end_line": 3086,
+   "kind": "string",
+   "snippet": "\"_maybe_create_ast_beacon_from_tags: skipping – existing @beacon[ found near insertion point\"",
+   "enclosing_symbol": {
+    "name": "_maybe_create_ast_beacon_from_tags",
+    "lineno": 2841
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 22,
+   "end_line": 22,
+   "kind": "string",
+   "snippet": "b\"# @beacon[\\n#   id=fx@bad,\\n#   kind=ast,\\n# ]\\ndef bad():\\n    return '\\xff\\xfe'\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 33,
+   "end_line": 33,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 43,
+   "end_line": 43,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 52,
+   "end_line": 52,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 59,
+   "end_line": 59,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 69,
+   "end_line": 69,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 81,
+   "end_line": 81,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 92,
+   "end_line": 92,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 102,
+   "end_line": 102,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 113,
+   "end_line": 113,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 123,
+   "end_line": 123,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 133,
+   "end_line": 133,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 146,
+   "end_line": 146,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 156,
+   "end_line": 156,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 167,
+   "end_line": 167,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 180,
+   "end_line": 180,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 186,
+   "end_line": 186,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 198,
+   "end_line": 198,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 204,
+   "end_line": 204,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 220,
+   "end_line": 220,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 230,
+   "end_line": 230,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 239,
+   "end_line": 239,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 248,
+   "end_line": 248,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 259,
+   "end_line": 259,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 275,
+   "end_line": 275,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 294,
+   "end_line": 294,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 306,
+   "end_line": 306,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 316,
+   "end_line": 316,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 326,
+   "end_line": 326,
+   "kind": "string",
+   "snippet": "\"/* @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 337,
+   "end_line": 337,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 350,
+   "end_line": 350,
+   "kind": "string",
+   "snippet": "\"    # @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 365,
+   "end_line": 365,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 375,
+   "end_line": 375,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 385,
+   "end_line": 385,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 394,
+   "end_line": 394,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 413,
+   "end_line": 413,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 424,
+   "end_line": 424,
+   "kind": "string",
+   "snippet": "\"    # @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 431,
+   "end_line": 431,
+   "kind": "string",
+   "snippet": "\"        # @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 444,
+   "end_line": 444,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 451,
+   "end_line": 451,
+   "kind": "string",
+   "snippet": "\"  // @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 465,
+   "end_line": 465,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 475,
+   "end_line": 475,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 491,
+   "end_line": 491,
+   "kind": "string",
+   "snippet": "\"    @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 508,
+   "end_line": 508,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 521,
+   "end_line": 521,
+   "kind": "string",
+   "snippet": "\"/* @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 537,
+   "end_line": 537,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 549,
+   "end_line": 549,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 568,
+   "end_line": 568,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 582,
+   "end_line": 582,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 594,
+   "end_line": 594,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 617,
+   "end_line": 617,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 626,
+   "end_line": 626,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 635,
+   "end_line": 635,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 649,
+   "end_line": 649,
+   "kind": "string",
+   "snippet": "\"  @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 676,
+   "end_line": 676,
+   "kind": "string",
+   "snippet": "\"    @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 690,
+   "end_line": 690,
+   "kind": "string",
+   "snippet": "\"    @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 702,
+   "end_line": 702,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 711,
+   "end_line": 711,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 723,
+   "end_line": 723,
+   "kind": "string",
+   "snippet": "\"/* @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 744,
+   "end_line": 744,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_hash_comment_diag",
+    "lineno": 733
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 751,
+   "end_line": 751,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_hash_comment_diag",
+    "lineno": 733
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 755,
+   "end_line": 755,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_hash_comment_diag",
+    "lineno": 733
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 762,
+   "end_line": 762,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_hash_comment_diag",
+    "lineno": 733
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 772,
+   "end_line": 772,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_hash_comment_diag",
+    "lineno": 733
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 780,
+   "end_line": 780,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_hash_comment_diag",
+    "lineno": 733
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 805,
+   "end_line": 805,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 812,
+   "end_line": 812,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 816,
+   "end_line": 816,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 823,
+   "end_line": 823,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 833,
+   "end_line": 833,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 841,
+   "end_line": 841,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 850,
+   "end_line": 850,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 859,
+   "end_line": 859,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 863,
+   "end_line": 863,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 872,
+   "end_line": 872,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 882,
+   "end_line": 882,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 890,
+   "end_line": 890,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 904,
+   "end_line": 904,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 913,
+   "end_line": 913,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 919,
+   "end_line": 919,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 925,
+   "end_line": 925,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 934,
+   "end_line": 934,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 953,
+   "end_line": 953,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 965,
+   "end_line": 965,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 980,
+   "end_line": 980,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 992,
+   "end_line": 992,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 1005,
+   "end_line": 1005,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 1017,
+   "end_line": 1017,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 1028,
+   "end_line": 1028,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 1041,
+   "end_line": 1041,
+   "kind": "string",
+   "snippet": "\"    # @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 1053,
+   "end_line": 1053,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/beacon_check_fixtures.py",
+   "start_line": 1072,
+   "end_line": 1072,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/n01_reference.py",
+   "start_line": 39,
+   "end_line": 39,
+   "kind": "string",
+   "snippet": "'\"\"\"Semantic effect schema and pure reducers (S01 §8).\\n\\nA closed tagged union of five effect types with explicit per-e",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/n01_reference.py",
+   "start_line": 42,
+   "end_line": 42,
+   "kind": "string",
+   "snippet": "'\"\"\"S03-CR-02 transition-COW sparse effects — per-field authority, ONE merge authority.\\n\\nThe 4fb06a1 transition overla",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "start_line": 42,
+   "end_line": 173,
+   "kind": "string",
+   "snippet": "'''\"\"\"Core of the demo package.\"\"\"\\n\\n\\n# @beacon[\\n#   id=demo@LIMIT,\\n#   slice_labels=demo,\\n#   kind=ast,\\n#   comment=Larg",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "start_line": 175,
+   "end_line": 215,
+   "kind": "string",
+   "snippet": "'''/**\\n * Greets people.\\n */\\n// @beacon[\\n//   id=web@Greeter,\\n//   slice_labels=web,\\n//   kind=ast,\\n//   comment=The gre",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "start_line": 217,
+   "end_line": 232,
+   "kind": "string",
+   "snippet": "'''-- Customer records.\\n-- @beacon[\\n--   id=demo@customers,\\n--   role=customers,\\n--   slice_labels=demo,\\n--   kind=span,",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "start_line": 234,
+   "end_line": 248,
+   "kind": "string",
+   "snippet": "'''#!/bin/sh\\n# Build everything.\\n# @beacon[\\n#   id=demo@build,\\n#   role=build,\\n#   slice_labels=demo,\\n#   kind=span,\\n#  ",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "start_line": 250,
+   "end_line": 264,
+   "kind": "string",
+   "snippet": "'''# Service settings.\\n# @beacon[\\n#   id=demo@service,\\n#   role=service,\\n#   slice_labels=demo,\\n#   kind=span,\\n#   show_",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "start_line": 578,
+   "end_line": 578,
+   "kind": "string",
+   "snippet": "\"\\n\\n# @beacon[\\n#   id=agent-kit@zz_synth_root,\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "start_line": 841,
+   "end_line": 841,
+   "kind": "string",
+   "snippet": "\"\\n\\n# @beacon[\\n#   id=agent-kit@\"",
+   "enclosing_symbol": {
+    "name": "_vendor_block",
+    "lineno": 839
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_commands.py",
+   "start_line": 107,
+   "end_line": 107,
+   "kind": "string",
+   "snippet": "\"<!-- @beacon[\\n   id=demo@guide,\\n   slice_labels=demo,\\n   kind=ast,\\n\"",
+   "enclosing_symbol": {
+    "name": "discovery_repo",
+    "lineno": 102
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_commands.py",
+   "start_line": 370,
+   "end_line": 370,
+   "kind": "string",
+   "snippet": "\" 89 | # @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_read_block_id_span",
+    "lineno": 365
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_commands.py",
+   "start_line": 581,
+   "end_line": 581,
+   "kind": "string",
+   "snippet": "b\"# @beacon[\\n#   id=bad@1,\\n# ]\\n\\xff\\xfe\\n\"",
+   "enclosing_symbol": {
+    "name": "test_check_f2_one_report_each",
+    "lineno": 579
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 93,
+   "end_line": 93,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 110,
+   "end_line": 110,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 116,
+   "end_line": 116,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 129,
+   "end_line": 129,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 160,
+   "end_line": 160,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "crlf_bytes",
+    "lineno": 158
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 333,
+   "end_line": 333,
+   "kind": "string",
+   "snippet": "\"bad @beacon[ text\"",
+   "enclosing_symbol": {
+    "name": "test_tag_unsafe_comment_exit_2",
+    "lineno": 332
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 427,
+   "end_line": 427,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_crlf_file_stays_crlf_through_a_full_cycle",
+    "lineno": 400
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 485,
+   "end_line": 485,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=o@1,\\n#   slice_labels=o,\\n#   kind=ast,\\n#   comment=Orphan,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_agent_kit_tag.py",
+   "start_line": 491,
+   "end_line": 491,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=d@g,\\n#   slice_labels=d,\\n#   kind=ast,\\n#   comment=The real one,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_beacon_atomic_writer.py",
+   "start_line": 123,
+   "end_line": 123,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_python_case2_creates_above_target_not_top_of_file",
+    "lineno": 112
+   }
+  },
+  {
+   "file": "tests/test_beacon_atomic_writer.py",
+   "start_line": 154,
+   "end_line": 154,
+   "kind": "string",
+   "snippet": "\"@beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "test_md_update_invokes_atomic_writer_exactly_once",
+    "lineno": 148
+   }
+  },
+  {
+   "file": "tests/test_beacon_check_engine.py",
+   "start_line": 307,
+   "end_line": 307,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_engine_source_has_no_second_authority",
+    "lineno": 299
+   }
+  },
+  {
+   "file": "tests/test_beacon_check_engine.py",
+   "start_line": 308,
+   "end_line": 308,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_engine_source_has_no_second_authority",
+    "lineno": 299
+   }
+  },
+  {
+   "file": "tests/test_beacon_check_engine.py",
+   "start_line": 308,
+   "end_line": 308,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_engine_source_has_no_second_authority",
+    "lineno": 299
+   }
+  },
+  {
+   "file": "tests/test_beacon_check_engine.py",
+   "start_line": 339,
+   "end_line": 339,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=x@1,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_extension_outside_the_writers_table_is_skipped",
+    "lineno": 338
+   }
+  },
+  {
+   "file": "tests/test_beacon_multiline_fields.py",
+   "start_line": 171,
+   "end_line": 171,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_markdown_parser_wrapped_comment",
+    "lineno": 168
+   }
+  },
+  {
+   "file": "tests/test_beacon_multiline_fields.py",
+   "start_line": 224,
+   "end_line": 224,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "_iter_repo_blocks",
+    "lineno": 208
+   }
+  },
+  {
+   "file": "tests/test_beacon_multiline_roundtrip.py",
+   "start_line": 86,
+   "end_line": 86,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "_py_block",
+    "lineno": 84
+   }
+  },
+  {
+   "file": "tests/test_beacon_multiline_roundtrip.py",
+   "start_line": 102,
+   "end_line": 102,
+   "kind": "string",
+   "snippet": "\"// @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "_js_block",
+    "lineno": 100
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_commit_seam.py",
+   "start_line": 72,
+   "end_line": 72,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_commit_seam.py",
+   "start_line": 174,
+   "end_line": 174,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_py_planned_delete_removes_matching_beacon_close",
+    "lineno": 165
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_commit_seam.py",
+   "start_line": 189,
+   "end_line": 189,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_py_planned_create_with_comment",
+    "lineno": 179
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_commit_seam.py",
+   "start_line": 215,
+   "end_line": 215,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\\n--   id=q1,\\n--   role=q,\\n--   slice_labels=old,\\n--   kind=span,\\n-- ]\\nSELECT 1;\\n\"",
+   "enclosing_symbol": {
+    "name": "test_sql_planned_update",
+    "lineno": 212
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_commit_seam.py",
+   "start_line": 231,
+   "end_line": 231,
+   "kind": "string",
+   "snippet": "\"// @beacon[\\n//   id=j1,\\n//   role=foo,\\n//   slice_labels=old,\\n//   kind=ast,\\n// ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_js_planned_update",
+    "lineno": 228
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_commit_seam.py",
+   "start_line": 269,
+   "end_line": 269,
+   "kind": "string",
+   "snippet": "\"<!--\\n@beacon[\\n  id=mspan,\\n  slice_labels=old,\\n  kind=span,\\n]\\n-->\\n\"",
+   "enclosing_symbol": {
+    "name": "test_md_planned_delete_removes_close_block_wrapper",
+    "lineno": 263
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 82,
+   "end_line": 82,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 99,
+   "end_line": 99,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 113,
+   "end_line": 113,
+   "kind": "string",
+   "snippet": "\"@beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 125,
+   "end_line": 125,
+   "kind": "string",
+   "snippet": "\"@beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 221,
+   "end_line": 221,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=b-foo,\\n#   slice_labels=old,\\n#   kind=ast,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_plan_note_id_A_anchor_B_is_identity_conflict",
+    "lineno": 218
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 223,
+   "end_line": 223,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=a-bar,\\n#   slice_labels=old,\\n#   kind=ast,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_plan_note_id_A_anchor_B_is_identity_conflict",
+    "lineno": 218
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 241,
+   "end_line": 241,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=a-bar,\\n#   slice_labels=old,\\n#   kind=ast,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_plan_note_id_present_no_anchor_match_is_conflict_both_modes",
+    "lineno": 236
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 270,
+   "end_line": 270,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=a-bar,\\n#   slice_labels=old,\\n#   kind=ast,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_plan_carried_anchor_unresolved_fails_closed_both_modes",
+    "lineno": 264
+   }
+  },
+  {
+   "file": "tests/test_beacon_mutation_plan_seam.py",
+   "start_line": 289,
+   "end_line": 289,
+   "kind": "string",
+   "snippet": "\"<style>\\n/* @beacon[\\n   id=vstyle,\\n   slice_labels=old,\\n   kind=span,\\n] */\\n\"",
+   "enclosing_symbol": {
+    "name": "test_plan_vue_style_span_exact_id_gated_unsupported",
+    "lineno": 284
+   }
+  },
+  {
+   "file": "tests/test_beacon_nonblocking_and_suppression.py",
+   "start_line": 349,
+   "end_line": 349,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_batch_write_targets_only_the_unsuppressed_symbol",
+    "lineno": 338
+   }
+  },
+  {
+   "file": "tests/test_beacon_python_decorator_anchors.py",
+   "start_line": 23,
+   "end_line": 23,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_beacon_python_decorator_anchors.py",
+   "start_line": 121,
+   "end_line": 121,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_decorated_plan_then_commit_preserves_id_metadata_and_code",
+    "lineno": 108
+   }
+  },
+  {
+   "file": "tests/test_beacon_python_decorator_anchors.py",
+   "start_line": 142,
+   "end_line": 142,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_legacy_ast_only_writer_also_reuses_decorated_beacon",
+    "lineno": 133
+   }
+  },
+  {
+   "file": "tests/test_beacon_python_decorator_anchors.py",
+   "start_line": 251,
+   "end_line": 251,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_legacy_ast_only_delete_finds_beacon_through_forward_mapper",
+    "lineno": 242
+   }
+  },
+  {
+   "file": "tests/test_beacon_python_decorator_anchors.py",
+   "start_line": 369,
+   "end_line": 369,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_decorated_create_then_update_remains_supported",
+    "lineno": 352
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 32,
+   "end_line": 32,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\\n--   id=q1,\\n--   role=q,\\n--   slice_labels=old,\\n--   kind=span,\\n-- ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_sql_tag_vanish_delete_removes_close_block",
+    "lineno": 29
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 41,
+   "end_line": 41,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_sql_tag_vanish_delete_removes_close_block",
+    "lineno": 29
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 49,
+   "end_line": 49,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=s1,\\n#   slice_labels=old,\\n#   kind=span,\\n# ]\\necho hi\\n\"",
+   "enclosing_symbol": {
+    "name": "test_shell_tag_vanish_delete",
+    "lineno": 46
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 55,
+   "end_line": 55,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_shell_tag_vanish_delete",
+    "lineno": 46
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 61,
+   "end_line": 61,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=y1,\\n#   slice_labels=old,\\n#   kind=span,\\n# ]\\nkey: value\\n\"",
+   "enclosing_symbol": {
+    "name": "test_yaml_tag_vanish_delete",
+    "lineno": 58
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 67,
+   "end_line": 67,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_yaml_tag_vanish_delete",
+    "lineno": 58
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 73,
+   "end_line": 73,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=span-1,\\n#   slice_labels=old,\\n#   kind=span,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_py_legacy_tag_vanish_delete_removes_close_block",
+    "lineno": 70
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 82,
+   "end_line": 82,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_py_legacy_tag_vanish_delete_removes_close_block",
+    "lineno": 70
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 91,
+   "end_line": 91,
+   "kind": "string",
+   "snippet": "\"// @beacon[\\n//   id=v1,\\n//   role=foo,\\n//   slice_labels=old,\\n//   kind=ast,\\n// ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_vue_tag_vanish_delete_case1",
+    "lineno": 87
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 99,
+   "end_line": 99,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_vue_tag_vanish_delete_case1",
+    "lineno": 87
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 107,
+   "end_line": 107,
+   "kind": "string",
+   "snippet": "\"// @beacon[\\n//   id=foo2,\\n//   role=two,\\n//   slice_labels=two,\\n//   kind=ast,\\n// ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_vue_exact_id_no_prefix_collision",
+    "lineno": 103
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 109,
+   "end_line": 109,
+   "kind": "string",
+   "snippet": "\"// @beacon[\\n//   id=foo,\\n//   role=one,\\n//   slice_labels=one,\\n//   kind=ast,\\n// ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_vue_exact_id_no_prefix_collision",
+    "lineno": 103
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 129,
+   "end_line": 129,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=existing-1,\\n#   role=foo,\\n#   slice_labels=old,\\n#   kind=ast,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_py_case2_idempotency_guard_updates_instead_of_duplicating",
+    "lineno": 126
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 139,
+   "end_line": 139,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_py_case2_idempotency_guard_updates_instead_of_duplicating",
+    "lineno": 126
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 147,
+   "end_line": 147,
+   "kind": "string",
+   "snippet": "\"// @beacon[\\n//   id=existing-1,\\n//   role=foo,\\n//   slice_labels=old,\\n//   kind=ast,\\n// ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_js_case2_idempotency_guard_updates_instead_of_duplicating",
+    "lineno": 144
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 156,
+   "end_line": 156,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_js_case2_idempotency_guard_updates_instead_of_duplicating",
+    "lineno": 144
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 271,
+   "end_line": 271,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_final_label_delete_preserves_marker_mentions",
+    "lineno": 262
+   }
+  },
+  {
+   "file": "tests/test_beacon_writer_reconciliation.py",
+   "start_line": 276,
+   "end_line": 276,
+   "kind": "string",
+   "snippet": "\"<!--\\n@beacon[\\nid=span-1,\\nslice_labels=old,\\nkind=span,\\n]\\n-->\\n\"",
+   "enclosing_symbol": {
+    "name": "test_final_label_delete_preserves_marker_mentions",
+    "lineno": 262
+   }
+  },
+  {
+   "file": "tests/test_carto_dry_run_byte_purity.py",
+   "start_line": 10,
+   "end_line": 24,
+   "kind": "string",
+   "snippet": "b\"\"\"# @beacon[\\n#   id=first,\\n#   slice_labels=alpha,\\n#   kind=ast,\\n#   comments=legacy alias,\\n# ]\\n# @beacon[\\n#   id=seco",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_carto_dry_run_byte_purity.py",
+   "start_line": 194,
+   "end_line": 194,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_claimed_real_refresh_still_normalizes_both_hygiene_triggers",
+    "lineno": 156
+   }
+  },
+  {
+   "file": "tests/test_carto_virtual_group_guard.py",
+   "start_line": 80,
+   "end_line": 80,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "_py_source",
+    "lineno": 78
+   }
+  },
+  {
+   "file": "tests/test_headings_end_of_line_metadata.py",
+   "start_line": 103,
+   "end_line": 103,
+   "kind": "string",
+   "snippet": "\"@beacon[\\n  id=x\\n]\"",
+   "enclosing_symbol": {
+    "name": "test_is_managed_source_line_shapes",
+    "lineno": 99
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 471,
+   "end_line": 471,
+   "kind": "string",
+   "snippet": "\"x @beacon[ y\"",
+   "enclosing_symbol": {
+    "name": "test_validate_beacon_comment_text_rejects_delimiters_and_controls",
+    "lineno": 462
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1341,
+   "end_line": 1341,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_ensure_create_commits_real_disk_write",
+    "lineno": 1327
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1439,
+   "end_line": 1439,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=b1,\\n#   role=foo,\\n#   slice_labels=a,\\n#   kind=ast,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_preflight_noop_never_aborts",
+    "lineno": 1436
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1507,
+   "end_line": 1507,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=b1,\\n#   role=foo,\\n#   slice_labels=a,\\n#   kind=ast,\\n# ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_jit_noop_row_batch_continues",
+    "lineno": 1502
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1543,
+   "end_line": 1543,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\\n--   id=q1,\\n--   role=q,\\n--   slice_labels=a,\\n--   kind=span,\\n-- ]\\nSELECT 1;\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_disk_target_collision_aborts_complete_ledger",
+    "lineno": 1538
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1686,
+   "end_line": 1686,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\\n--   id=q1,\\n--   role=q,\\n--   slice_labels=old,\\n--   kind=span,\\n-- ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_final_label_sql_commits_real_delete",
+    "lineno": 1683
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1702,
+   "end_line": 1702,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_final_label_sql_commits_real_delete",
+    "lineno": 1683
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1709,
+   "end_line": 1709,
+   "kind": "string",
+   "snippet": "\"-- @beacon[\\n--   id=q1,\\n--   role=q,\\n--   slice_labels=old,other,\\n--   kind=span,\\n-- ]\\nSELECT 1;\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_partial_label_sql_updates",
+    "lineno": 1706
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1728,
+   "end_line": 1728,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=b1,\\n#   role=foo,\\n#   slice_labels=old,\\n#   kind=ast,\\n# ]\\ndef foo():\\n    return 1\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_final_label_python_commits_delete",
+    "lineno": 1725
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1741,
+   "end_line": 1741,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_final_label_python_commits_delete",
+    "lineno": 1725
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1762,
+   "end_line": 1762,
+   "kind": "string",
+   "snippet": "\"# @beacon[\\n#   id=b1,\\n#   role=foo,\\n#   slice_labels=old,\\n#   kind=ast,\\n# ]\\ndef foo():\\n    return 1\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_absent_label_on_existing_beacon_is_noop",
+    "lineno": 1759
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1793,
+   "end_line": 1793,
+   "kind": "string",
+   "snippet": "\"// @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_ensure_vue_script_ast_commits_create",
+    "lineno": 1780
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1802,
+   "end_line": 1802,
+   "kind": "string",
+   "snippet": "\"// @beacon[\\n//   id=v1,\\n//   role=foo,\\n//   slice_labels=old,\\n//   kind=ast,\\n// ]\\n\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_final_label_vue_commits_delete",
+    "lineno": 1798
+   }
+  },
+  {
+   "file": "tests/test_lightning_rod_mutation_modes.py",
+   "start_line": 1824,
+   "end_line": 1824,
+   "kind": "string",
+   "snippet": "\"@beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_pipeline_remove_final_label_vue_commits_delete",
+    "lineno": 1798
+   }
+  },
+  {
+   "file": "tests/test_render_symbols_tier.py",
+   "start_line": 43,
+   "end_line": 43,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_render_symbols_tier.py",
+   "start_line": 126,
+   "end_line": 126,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_context_tier_shows_comment_def_and_context_lines_without_trailer_when_complete",
+    "lineno": 121
+   }
+  },
+  {
+   "file": "tests/test_render_symbols_tier.py",
+   "start_line": 146,
+   "end_line": 146,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_context_tier_trailer_names_the_hidden_rest",
+    "lineno": 139
+   }
+  },
+  {
+   "file": "tests/test_render_symbols_tier.py",
+   "start_line": 162,
+   "end_line": 162,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_context_tier_tail_lines_land_after_the_trailer",
+    "lineno": 156
+   }
+  },
+  {
+   "file": "tests/test_render_symbols_tier.py",
+   "start_line": 180,
+   "end_line": 180,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_context_tier_def_line_defaults_to_first_non_comment_non_blank_line",
+    "lineno": 173
+   }
+  },
+  {
+   "file": "tests/test_render_symbols_tier.py",
+   "start_line": 304,
+   "end_line": 304,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_metadata_tier_swaps_member_notes_for_the_fenced_header",
+    "lineno": 297
+   }
+  },
+  {
+   "file": "tests/test_render_symbols_tier.py",
+   "start_line": 340,
+   "end_line": 340,
+   "kind": "string",
+   "snippet": "\"# @beacon[\"",
+   "enclosing_symbol": {
+    "name": "test_tier_read_failure_keeps_the_original_note_and_warns",
+    "lineno": 323
+   }
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "start_line": 32,
+   "end_line": 74,
+   "kind": "string",
+   "snippet": "'''\"\"\"Module docstring.\"\"\"\\n# @beacon[\\n#   id=rvw3@doc-example,\\n#   role=rvw3,\\n#   slice_labels=rvw3,\\n#   kind=ast,\\n#   c",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_repository_view_source_fidelity.py",
+   "start_line": 364,
+   "end_line": 438,
+   "kind": "string",
+   "snippet": "'''\"\"\"Module docstring.\"\"\"\\n# @beacon[\\n#   id=rvw4@leading-ast,\\n#   role=rvw4,\\n#   slice_labels=rvw4,\\n#   kind=ast,\\n#   c",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_repository_view_stripper_characterization.py",
+   "start_line": 100,
+   "end_line": 100,
+   "kind": "string",
+   "snippet": "\"@beacon[\\n\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  },
+  {
+   "file": "tests/test_s06_salvage_retirement.py",
+   "start_line": 25,
+   "end_line": 32,
+   "kind": "string",
+   "snippet": "b\"\"\"# @beacon[\\n#   id=first,\\n#   slice_labels=alpha,\\n#   kind=ast,\\n# ]\\ndef target():\\n    return 1\\n\"\"\"",
+   "enclosing_symbol": {
+    "name": "<module>",
+    "lineno": 0
+   }
+  }
+ ],
+ "js_openers_not_in_comment": [
+  {
+   "file": "tests/js/test_saved_tabs_drive_ui.js",
+   "line": 1548,
+   "end_line": null,
+   "id": null,
+   "kind_raw": null,
+   "outcome": "kept",
+   "line_text": "eqJson(countOcc(clientSrc, '@beacon['), 260,",
+   "context": [
+    "1545: && restoreFocusSrc.indexOf('renderDockedMultiSelection') >= 0",
+    "1546: && restoreFocusSrc.indexOf('updateDockRowMarkers') >= 0,",
+    "1547: 'the helper rides the EXISTING selection paint paths (no second selection mechanism)');",
+    "1548: eqJson(countOcc(clientSrc, '@beacon['), 260,",
+    "1549: 'E2 adds NO beacon blocks (the helper is one step from its beaconed callers — curate; update this count when a later uni",
+    "1550: }",
+    "1551: "
+   ]
+  }
+ ],
+ "span_pairing": [
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "bocsv1@file-core",
+   "comment_line": 66,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 3544,
+    "end_line": 3546
+   },
+   "search_from_idx": 72,
+   "delta": true
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "bocsv1@multilang-resolution-core",
+   "comment_line": 86,
+   "base_second_pass": {
+    "close_start_line": 2937,
+    "span_lineno_start": 93,
+    "span_lineno_end": 2936
+   },
+   "cf09_finder": {
+    "start_line": 2937,
+    "end_line": 2939
+   },
+   "search_from_idx": 92,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@_python_resolve_ast_node_heuristic",
+   "comment_line": 461,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 466,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@_python_resolve_ast_node_heuristic-TEST",
+   "comment_line": 500,
+   "base_second_pass": {
+    "close_start_line": 508,
+    "span_lineno_start": 506,
+    "span_lineno_end": 507
+   },
+   "cf09_finder": {
+    "start_line": 508,
+    "end_line": 510
+   },
+   "search_from_idx": 505,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@_js_ts_resolve_ast_node_heuristic",
+   "comment_line": 523,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 528,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@_python_snippet_for_beacon",
+   "comment_line": 937,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 942,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@_js_ts_find_ast_node_for_beacon",
+   "comment_line": 1218,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 1223,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@_js_ts_snippet_for_beacon",
+   "comment_line": 1273,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 1278,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@get_snippet_for_ast_qualname",
+   "comment_line": 2477,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 2482,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@get_snippet_for_ast_qualname_js_ts",
+   "comment_line": 2579,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 2584,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "bocsv1@public-snippet-api-core",
+   "comment_line": 2944,
+   "base_second_pass": {
+    "close_start_line": 3541,
+    "span_lineno_start": 2951,
+    "span_lineno_end": 3540
+   },
+   "cf09_finder": {
+    "start_line": 3541,
+    "end_line": 3543
+   },
+   "search_from_idx": 2950,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "carto-js-ts@get_snippet_data",
+   "comment_line": 2956,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 2961,
+   "delta": false
+  },
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "bocsv1@cli-wrapper-boundary",
+   "comment_line": 3067,
+   "base_second_pass": {
+    "close_start_line": 3135,
+    "span_lineno_start": 3074,
+    "span_lineno_end": 3134
+   },
+   "cf09_finder": {
+    "start_line": 3135,
+    "end_line": 3137
+   },
+   "search_from_idx": 3073,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "nmcv1@file-core",
+   "comment_line": 56,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 14639,
+    "end_line": 14641
+   },
+   "search_from_idx": 62,
+   "delta": true
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "nmcv1@portable-note-and-identity-core",
+   "comment_line": 67,
+   "base_second_pass": {
+    "close_start_line": 3942,
+    "span_lineno_start": 74,
+    "span_lineno_end": 3941
+   },
+   "cf09_finder": {
+    "start_line": 3942,
+    "end_line": 3944
+   },
+   "search_from_idx": 73,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "auto-beacon@TRIDENT-tridnt",
+   "comment_line": 113,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 118,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@parse_markdown_beacon_blocks",
+   "comment_line": 829,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 834,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@apply_markdown_beacons",
+   "comment_line": 1292,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 1297,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-virtual-groups@identity-and-grouping",
+   "comment_line": 2743,
+   "base_second_pass": {
+    "close_start_line": 3135,
+    "span_lineno_start": 2750,
+    "span_lineno_end": 3134
+   },
+   "cf09_finder": {
+    "start_line": 3135,
+    "end_line": 3137
+   },
+   "search_from_idx": 2749,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "nmcv1@parser-and-outline-core",
+   "comment_line": 3949,
+   "base_second_pass": {
+    "close_start_line": 7866,
+    "span_lineno_start": 3956,
+    "span_lineno_end": 7865
+   },
+   "cf09_finder": {
+    "start_line": 7866,
+    "end_line": 7868
+   },
+   "search_from_idx": 3955,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@parse_python_beacon_blocks",
+   "comment_line": 3956,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 3961,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@apply_python_beacons",
+   "comment_line": 4965,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 4970,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@parse_file_outline",
+   "comment_line": 5985,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 5990,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@parse_js_ts_outline",
+   "comment_line": 6034,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 6039,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "nmcv1@recursive-map-boundary",
+   "comment_line": 7873,
+   "base_second_pass": {
+    "close_start_line": 8251,
+    "span_lineno_start": 7880,
+    "span_lineno_end": 8250
+   },
+   "cf09_finder": {
+    "start_line": 8251,
+    "end_line": 8253
+   },
+   "search_from_idx": 7879,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "nmcv1@multilang-update-core",
+   "comment_line": 8258,
+   "base_second_pass": {
+    "close_start_line": 14636,
+    "span_lineno_start": 8265,
+    "span_lineno_end": 14635
+   },
+   "cf09_finder": {
+    "start_line": 14636,
+    "end_line": 14638
+   },
+   "search_from_idx": 8264,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@parse_js_beacon_blocks",
+   "comment_line": 8452,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 8457,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@parse_sh_beacon_blocks",
+   "comment_line": 8677,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 8682,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@parse_yaml_beacon_blocks",
+   "comment_line": 8867,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 8872,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@apply_sql_beacons",
+   "comment_line": 9216,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 9221,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@apply_sh_beacons",
+   "comment_line": 9456,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 9461,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@apply_yaml_beacon_context",
+   "comment_line": 9626,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 9631,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@apply_yaml_beacons",
+   "comment_line": 9752,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 9757,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@apply_js_beacons",
+   "comment_line": 9855,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 9860,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@split_name_and_tags",
+   "comment_line": 10347,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 10352,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@update_beacon_from_node_python",
+   "comment_line": 11535,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 11540,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@update_beacon_from_node_js_ts",
+   "comment_line": 12068,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 12073,
+   "delta": false
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "carto-js-ts@update_beacon_from_node_markdown",
+   "comment_line": 13150,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 13155,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/__init__.py",
+   "language": "python",
+   "id": "package-loading@init-reexports",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": 53,
+    "span_lineno_start": 9,
+    "span_lineno_end": 52
+   },
+   "cf09_finder": {
+    "start_line": 53,
+    "end_line": 55
+   },
+   "search_from_idx": 8,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/__main__.py",
+   "language": "python",
+   "id": "package-loading@main-module-bootstrap",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": 81,
+    "span_lineno_start": 9,
+    "span_lineno_end": 80
+   },
+   "cf09_finder": {
+    "start_line": 81,
+    "end_line": 83
+   },
+   "search_from_idx": 8,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/broker.py",
+   "language": "python",
+   "id": "broker@module-overview",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 8,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/broker_protocol.py",
+   "language": "python",
+   "id": "broker@protocol-constants",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 8,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_core.py",
+   "language": "python",
+   "id": "api-client-core@load_nodes_export_cache_from_disk",
+   "comment_line": 430,
+   "base_second_pass": {
+    "close_start_line": 446,
+    "span_lineno_start": 436,
+    "span_lineno_end": 445
+   },
+   "cf09_finder": {
+    "start_line": 446,
+    "end_line": 448
+   },
+   "search_from_idx": 435,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "ncv1@file-boundary",
+   "comment_line": 2138,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 18914,
+    "end_line": 18916
+   },
+   "search_from_idx": 2144,
+   "delta": true
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "ncv1@path-root-portability",
+   "comment_line": 2161,
+   "base_second_pass": {
+    "close_start_line": 5500,
+    "span_lineno_start": 2168,
+    "span_lineno_end": 5499
+   },
+   "cf09_finder": {
+    "start_line": 5500,
+    "end_line": 5502
+   },
+   "search_from_idx": 2167,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "auto-beacon@resolve_cartographer_path_from_node._segment_from_node_name-r8w7-inner",
+   "comment_line": 5000,
+   "base_second_pass": {
+    "close_start_line": 5016,
+    "span_lineno_start": 5006,
+    "span_lineno_end": 5015
+   },
+   "cf09_finder": {
+    "start_line": 5016,
+    "end_line": 5018
+   },
+   "search_from_idx": 5005,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "auto-beacon@resolve_cartographer_path_from_node._segment_from_node_name-r8w7-inner2",
+   "comment_line": 5022,
+   "base_second_pass": {
+    "close_start_line": 5039,
+    "span_lineno_start": 5028,
+    "span_lineno_end": 5038
+   },
+   "cf09_finder": {
+    "start_line": 5039,
+    "end_line": 5041
+   },
+   "search_from_idx": 5027,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "auto-beacon@COSMETIC_SUFFIX_FIRST_CODEPOINTS-s06a",
+   "comment_line": 5513,
+   "base_second_pass": {
+    "close_start_line": 5526,
+    "span_lineno_start": 5519,
+    "span_lineno_end": 5525
+   },
+   "cf09_finder": {
+    "start_line": 5526,
+    "end_line": 5528
+   },
+   "search_from_idx": 5518,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "ncv1@glimpse-snippet-surface",
+   "comment_line": 6649,
+   "base_second_pass": {
+    "close_start_line": 15761,
+    "span_lineno_start": 6656,
+    "span_lineno_end": 15760
+   },
+   "cf09_finder": {
+    "start_line": 15761,
+    "end_line": 15763
+   },
+   "search_from_idx": 6655,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "carto-js-ts@js_ts_ast_qualname_resolution",
+   "comment_line": 14783,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 14788,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "ncv1@f12-refresh-and-notes",
+   "comment_line": 15767,
+   "base_second_pass": {
+    "close_start_line": 18911,
+    "span_lineno_start": 15774,
+    "span_lineno_end": 18910
+   },
+   "cf09_finder": {
+    "start_line": 18911,
+    "end_line": 18913
+   },
+   "search_from_idx": 15773,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "carto-cancel@refresh_file_node_beacons.reconcile_tree_cancel_callback",
+   "comment_line": 16749,
+   "base_second_pass": {
+    "close_start_line": 16795,
+    "span_lineno_start": 16755,
+    "span_lineno_end": 16794
+   },
+   "cf09_finder": {
+    "start_line": 16795,
+    "end_line": 16797
+   },
+   "search_from_idx": 16754,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "carto-cancel@refresh_folder_cartographer_sync.per_file_cancel_check",
+   "comment_line": 18181,
+   "base_second_pass": {
+    "close_start_line": 18202,
+    "span_lineno_start": 18187,
+    "span_lineno_end": 18201
+   },
+   "cf09_finder": {
+    "start_line": 18202,
+    "end_line": 18204
+   },
+   "search_from_idx": 18186,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "carto-cancel@refresh_folder_cartographer_sync.os_walk_cancel_check",
+   "comment_line": 18415,
+   "base_second_pass": {
+    "close_start_line": 18435,
+    "span_lineno_start": 18421,
+    "span_lineno_end": 18434
+   },
+   "cf09_finder": {
+    "start_line": 18435,
+    "end_line": 18437
+   },
+   "search_from_idx": 18420,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "carto-cancel@refresh_folder_cartographer_sync.create_subtree_cancel_check",
+   "comment_line": 18659,
+   "base_second_pass": {
+    "close_start_line": 18679,
+    "span_lineno_start": 18665,
+    "span_lineno_end": 18678
+   },
+   "cf09_finder": {
+    "start_line": 18679,
+    "end_line": 18681
+   },
+   "search_from_idx": 18664,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "carto-cancel@refresh_folder_cartographer_sync.disk_create_cancel_check",
+   "comment_line": 18708,
+   "base_second_pass": {
+    "close_start_line": 18728,
+    "span_lineno_start": 18714,
+    "span_lineno_end": 18727
+   },
+   "cf09_finder": {
+    "start_line": 18728,
+    "end_line": 18730
+   },
+   "search_from_idx": 18713,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/workflowy_move_reconcile.py",
+   "language": "python",
+   "id": "carto-cancel@reconcile_tree.cancel_callback_invoke",
+   "comment_line": 184,
+   "base_second_pass": {
+    "close_start_line": 192,
+    "span_lineno_start": 190,
+    "span_lineno_end": 191
+   },
+   "cf09_finder": {
+    "start_line": 192,
+    "end_line": 194
+   },
+   "search_from_idx": 189,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/workflowy_move_reconcile.py",
+   "language": "python",
+   "id": "carto-cancel@reconcile_tree.create_loop_cancel_check",
+   "comment_line": 702,
+   "base_second_pass": {
+    "close_start_line": 710,
+    "span_lineno_start": 708,
+    "span_lineno_end": 709
+   },
+   "cf09_finder": {
+    "start_line": 710,
+    "end_line": 712
+   },
+   "search_from_idx": 707,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/client/workflowy_move_reconcile.py",
+   "language": "python",
+   "id": "carto-cancel@reconcile_tree.delete_loop_cancel_check",
+   "comment_line": 1311,
+   "base_second_pass": {
+    "close_start_line": 1319,
+    "span_lineno_start": 1317,
+    "span_lineno_end": 1318
+   },
+   "cf09_finder": {
+    "start_line": 1319,
+    "end_line": 1321
+   },
+   "search_from_idx": 1316,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/config.py",
+   "language": "python",
+   "id": "config-bootstrap@dotenv-gated-load",
+   "comment_line": 15,
+   "base_second_pass": {
+    "close_start_line": 33,
+    "span_lineno_start": 23,
+    "span_lineno_end": 32
+   },
+   "cf09_finder": {
+    "start_line": 33,
+    "end_line": 35
+   },
+   "search_from_idx": 22,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/config.py",
+   "language": "python",
+   "id": "carto-jobstatus@terminal-vocabulary",
+   "comment_line": 165,
+   "base_second_pass": {
+    "close_start_line": 255,
+    "span_lineno_start": 172,
+    "span_lineno_end": 254
+   },
+   "cf09_finder": {
+    "start_line": 255,
+    "end_line": 257
+   },
+   "search_from_idx": 171,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/daemon.py",
+   "language": "python",
+   "id": "daemon@module",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": 297,
+    "span_lineno_start": 9,
+    "span_lineno_end": 296
+   },
+   "cf09_finder": {
+    "start_line": 297,
+    "end_line": 299
+   },
+   "search_from_idx": 8,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "server@_jobs-registry",
+   "comment_line": 454,
+   "base_second_pass": {
+    "close_start_line": 467,
+    "span_lineno_start": 462,
+    "span_lineno_end": 466
+   },
+   "cf09_finder": {
+    "start_line": 467,
+    "end_line": 469
+   },
+   "search_from_idx": 461,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "svcv1@file-boundary",
+   "comment_line": 552,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 45559,
+    "end_line": 45561
+   },
+   "search_from_idx": 558,
+   "delta": true
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "svcv1@websocket-f12-infra",
+   "comment_line": 563,
+   "base_second_pass": {
+    "close_start_line": 12929,
+    "span_lineno_start": 570,
+    "span_lineno_end": 12928
+   },
+   "cf09_finder": {
+    "start_line": 12929,
+    "end_line": 12931
+   },
+   "search_from_idx": 569,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "cache-refresh@async-coordinator",
+   "comment_line": 671,
+   "base_second_pass": {
+    "close_start_line": 1220,
+    "span_lineno_start": 678,
+    "span_lineno_end": 1219
+   },
+   "cf09_finder": {
+    "start_line": 1220,
+    "end_line": 1222
+   },
+   "search_from_idx": 677,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "svcv1@compat-warning-layer",
+   "comment_line": 12936,
+   "base_second_pass": {
+    "close_start_line": 15758,
+    "span_lineno_start": 12943,
+    "span_lineno_end": 15757
+   },
+   "cf09_finder": {
+    "start_line": 15758,
+    "end_line": 15760
+   },
+   "search_from_idx": 12942,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "svcv1@export-and-cache-core",
+   "comment_line": 15764,
+   "base_second_pass": {
+    "close_start_line": 16889,
+    "span_lineno_start": 15771,
+    "span_lineno_end": 16888
+   },
+   "cf09_finder": {
+    "start_line": 16889,
+    "end_line": 16891
+   },
+   "search_from_idx": 15770,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "svcv1@shared-context-surface",
+   "comment_line": 16896,
+   "base_second_pass": {
+    "close_start_line": 45556,
+    "span_lineno_start": 16903,
+    "span_lineno_end": 45555
+   },
+   "cf09_finder": {
+    "start_line": 45556,
+    "end_line": 45558
+   },
+   "search_from_idx": 16902,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/shim.py",
+   "language": "python",
+   "id": "shim@module",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": 90,
+    "span_lineno_start": 9,
+    "span_lineno_end": 89
+   },
+   "cf09_finder": {
+    "start_line": 90,
+    "end_line": 92
+   },
+   "search_from_idx": 8,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/transport.py",
+   "language": "python",
+   "id": "package-loading@transport-alt-bootstrap",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 8,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/weave_worker.py",
+   "language": "python",
+   "id": "wkv1@file-boundary",
+   "comment_line": 44,
+   "base_second_pass": {
+    "close_start_line": 1306,
+    "span_lineno_start": 51,
+    "span_lineno_end": 1305
+   },
+   "cf09_finder": {
+    "start_line": 1306,
+    "end_line": 1308
+   },
+   "search_from_idx": 50,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/weave_worker.py",
+   "language": "python",
+   "id": "wkv1@shared-bootstrap",
+   "comment_line": 285,
+   "base_second_pass": {
+    "close_start_line": 626,
+    "span_lineno_start": 292,
+    "span_lineno_end": 625
+   },
+   "cf09_finder": {
+    "start_line": 626,
+    "end_line": 628
+   },
+   "search_from_idx": 291,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/weave_worker.py",
+   "language": "python",
+   "id": "weave-worker@refresh_nodes_export_cache",
+   "comment_line": 429,
+   "base_second_pass": {
+    "close_start_line": 622,
+    "span_lineno_start": 436,
+    "span_lineno_end": 621
+   },
+   "cf09_finder": {
+    "start_line": 622,
+    "end_line": 624
+   },
+   "search_from_idx": 435,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/weave_worker.py",
+   "language": "python",
+   "id": "wkv1@carto-refresh-core",
+   "comment_line": 632,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 1174,
+    "end_line": 1176
+   },
+   "search_from_idx": 638,
+   "delta": true
+  },
+  {
+   "file": "src/workflowy_mcp/weave_worker.py",
+   "language": "python",
+   "id": "weave-worker@carto-refresh-job",
+   "comment_line": 639,
+   "base_second_pass": {
+    "close_start_line": 1171,
+    "span_lineno_start": 647,
+    "span_lineno_end": 1170
+   },
+   "cf09_finder": {
+    "start_line": 1171,
+    "end_line": 1173
+   },
+   "search_from_idx": 646,
+   "delta": false
+  },
+  {
+   "file": "src/workflowy_mcp/weave_worker.py",
+   "language": "python",
+   "id": "weave-worker@markdown-generate-job",
+   "comment_line": 1178,
+   "base_second_pass": {
+    "close_start_line": 1301,
+    "span_lineno_start": 1186,
+    "span_lineno_end": 1300
+   },
+   "cf09_finder": {
+    "start_line": 1301,
+    "end_line": 1303
+   },
+   "search_from_idx": 1185,
+   "delta": false
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "language": "python",
+   "id": "demo@limits",
+   "comment_line": 130,
+   "base_second_pass": {
+    "close_start_line": 141,
+    "span_lineno_start": 138,
+    "span_lineno_end": 140
+   },
+   "cf09_finder": {
+    "start_line": 141,
+    "end_line": 143
+   },
+   "search_from_idx": 137,
+   "delta": false
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "language": "python",
+   "id": "demo@quiet",
+   "comment_line": 146,
+   "base_second_pass": {
+    "close_start_line": 155,
+    "span_lineno_start": 154,
+    "span_lineno_end": 154
+   },
+   "cf09_finder": {
+    "start_line": 155,
+    "end_line": 157
+   },
+   "search_from_idx": 153,
+   "delta": false
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "language": "python",
+   "id": "demo@build",
+   "comment_line": 236,
+   "base_second_pass": {
+    "close_start_line": 245,
+    "span_lineno_start": 244,
+    "span_lineno_end": 244
+   },
+   "cf09_finder": {
+    "start_line": 245,
+    "end_line": 247
+   },
+   "search_from_idx": 243,
+   "delta": false
+  },
+  {
+   "file": "tests/test_agent_kit_build.py",
+   "language": "python",
+   "id": "demo@service",
+   "comment_line": 251,
+   "base_second_pass": {
+    "close_start_line": 261,
+    "span_lineno_start": 259,
+    "span_lineno_end": 260
+   },
+   "cf09_finder": {
+    "start_line": 261,
+    "end_line": 263
+   },
+   "search_from_idx": 258,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "f9-ambiguous-md-picker@glimpse-ext",
+   "comment_line": 1075,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 1080,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "carto-jobs@ws-open-polling",
+   "comment_line": 2431,
+   "base_second_pass": {
+    "close_start_line": 2451,
+    "span_lineno_start": 2438,
+    "span_lineno_end": 2450
+   },
+   "cf09_finder": {
+    "start_line": 2451,
+    "end_line": 2453
+   },
+   "search_from_idx": 2437,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "ws-onmessage@glimpse-ext",
+   "comment_line": 2456,
+   "base_second_pass": {
+    "close_start_line": 3211,
+    "span_lineno_start": 2463,
+    "span_lineno_end": 3210
+   },
+   "cf09_finder": {
+    "start_line": 3211,
+    "end_line": 3213
+   },
+   "search_from_idx": 2462,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "glimpse-md-dock@ws-get-current-modal-render-spec",
+   "comment_line": 2735,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 2740,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "carto-launch-feedback@ws-result-branches",
+   "comment_line": 3137,
+   "base_second_pass": {
+    "close_start_line": 3144,
+    "span_lineno_start": 3143,
+    "span_lineno_end": 3143
+   },
+   "cf09_finder": {
+    "start_line": 3144,
+    "end_line": 3146
+   },
+   "search_from_idx": 3142,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "f8@ws-action-handler",
+   "comment_line": 3155,
+   "base_second_pass": {
+    "close_start_line": 3169,
+    "span_lineno_start": 3161,
+    "span_lineno_end": 3168
+   },
+   "cf09_finder": {
+    "start_line": 3169,
+    "end_line": 3171
+   },
+   "search_from_idx": 3160,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "carto-jobs@ws-carto-result-branch",
+   "comment_line": 3173,
+   "base_second_pass": {
+    "close_start_line": 3181,
+    "span_lineno_start": 3180,
+    "span_lineno_end": 3180
+   },
+   "cf09_finder": {
+    "start_line": 3181,
+    "end_line": 3183
+   },
+   "search_from_idx": 3179,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "glimpse-path@__bulkF12p3Verdicts",
+   "comment_line": 4650,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 4656,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "uuidnav-async-reveal@glimpse-ext",
+   "comment_line": 5837,
+   "base_second_pass": {
+    "close_start_line": 5854,
+    "span_lineno_start": 5843,
+    "span_lineno_end": 5853
+   },
+   "cf09_finder": {
+    "start_line": 5854,
+    "end_line": 5856
+   },
+   "search_from_idx": 5842,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "saved-tabs@uuid-widget-ui",
+   "comment_line": 6300,
+   "base_second_pass": {
+    "close_start_line": 6414,
+    "span_lineno_start": 6306,
+    "span_lineno_end": 6413
+   },
+   "cf09_finder": {
+    "start_line": 6414,
+    "end_line": 6416
+   },
+   "search_from_idx": 6305,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "expand-groups@uuid-widget-ui",
+   "comment_line": 6757,
+   "base_second_pass": {
+    "close_start_line": 7057,
+    "span_lineno_start": 6764,
+    "span_lineno_end": 7056
+   },
+   "cf09_finder": {
+    "start_line": 7057,
+    "end_line": 7059
+   },
+   "search_from_idx": 6763,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "carto-jobs@uuid-widget-ui",
+   "comment_line": 7061,
+   "base_second_pass": {
+    "close_start_line": 7476,
+    "span_lineno_start": 7067,
+    "span_lineno_end": 7475
+   },
+   "cf09_finder": {
+    "start_line": 7476,
+    "end_line": 7478
+   },
+   "search_from_idx": 7066,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "f12-popup@keydown-dispatch",
+   "comment_line": 8381,
+   "base_second_pass": {
+    "close_start_line": 8487,
+    "span_lineno_start": 8388,
+    "span_lineno_end": 8486
+   },
+   "cf09_finder": {
+    "start_line": 8487,
+    "end_line": 8489
+   },
+   "search_from_idx": 8387,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "f8@keydown-handler",
+   "comment_line": 8609,
+   "base_second_pass": {
+    "close_start_line": 8621,
+    "span_lineno_start": 8615,
+    "span_lineno_end": 8620
+   },
+   "cf09_finder": {
+    "start_line": 8621,
+    "end_line": 8623
+   },
+   "search_from_idx": 8614,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "f12-popup@keyup-open",
+   "comment_line": 8695,
+   "base_second_pass": {
+    "close_start_line": 8761,
+    "span_lineno_start": 8702,
+    "span_lineno_end": 8760
+   },
+   "cf09_finder": {
+    "start_line": 8761,
+    "end_line": 8763
+   },
+   "search_from_idx": 8701,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "glimpse-md-preview@module",
+   "comment_line": 8916,
+   "base_second_pass": {
+    "close_start_line": 26284,
+    "span_lineno_start": 8924,
+    "span_lineno_end": 26283
+   },
+   "cf09_finder": {
+    "start_line": 26284,
+    "end_line": 26286
+   },
+   "search_from_idx": 8923,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "saved-tabs@last-dock-storage",
+   "comment_line": 12319,
+   "base_second_pass": {
+    "close_start_line": 12377,
+    "span_lineno_start": 12325,
+    "span_lineno_end": 12376
+   },
+   "cf09_finder": {
+    "start_line": 12377,
+    "end_line": 12379
+   },
+   "search_from_idx": 12324,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "mdpreview@slice-group-apply-row",
+   "comment_line": 14832,
+   "base_second_pass": {
+    "close_start_line": 14878,
+    "span_lineno_start": 14839,
+    "span_lineno_end": 14877
+   },
+   "cf09_finder": {
+    "start_line": 14878,
+    "end_line": 14880
+   },
+   "search_from_idx": 14838,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "mdpreview@anchor-view-apply-row",
+   "comment_line": 15432,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 15437,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "mdpreview@lightning-ribbon",
+   "comment_line": 17381,
+   "base_second_pass": {
+    "close_start_line": 17562,
+    "span_lineno_start": 17388,
+    "span_lineno_end": 17561
+   },
+   "cf09_finder": {
+    "start_line": 17562,
+    "end_line": 17564
+   },
+   "search_from_idx": 17387,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/glimpse-cache-client.js",
+   "language": "js_ts",
+   "id": "glimpse-loading@standalone-dom-bootstrap",
+   "comment_line": 26288,
+   "base_second_pass": {
+    "close_start_line": 26320,
+    "span_lineno_start": 26296,
+    "span_lineno_end": 26319
+   },
+   "cf09_finder": {
+    "start_line": 26320,
+    "end_line": 26322
+   },
+   "search_from_idx": 26295,
+   "delta": false
+  },
+  {
+   "file": "workflowy-glimpse-cache/marked-katex-init.js",
+   "language": "js_ts",
+   "id": "mdpreview@math-katex-init",
+   "comment_line": 1,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": null,
+   "search_from_idx": 7,
+   "delta": false
+  }
+ ],
+ "pair_deltas": [
+  {
+   "file": "beacon_obtain_code_snippet.py",
+   "language": "python",
+   "id": "bocsv1@file-core",
+   "comment_line": 66,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 3544,
+    "end_line": 3546
+   },
+   "search_from_idx": 72,
+   "delta": true
+  },
+  {
+   "file": "nexus_map_codebase.py",
+   "language": "python",
+   "id": "nmcv1@file-core",
+   "comment_line": 56,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 14639,
+    "end_line": 14641
+   },
+   "search_from_idx": 62,
+   "delta": true
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "language": "python",
+   "id": "ncv1@file-boundary",
+   "comment_line": 2138,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 18914,
+    "end_line": 18916
+   },
+   "search_from_idx": 2144,
+   "delta": true
+  },
+  {
+   "file": "src/workflowy_mcp/server.py",
+   "language": "python",
+   "id": "svcv1@file-boundary",
+   "comment_line": 552,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 45559,
+    "end_line": 45561
+   },
+   "search_from_idx": 558,
+   "delta": true
+  },
+  {
+   "file": "src/workflowy_mcp/weave_worker.py",
+   "language": "python",
+   "id": "wkv1@carto-refresh-core",
+   "comment_line": 632,
+   "base_second_pass": {
+    "close_start_line": null,
+    "span_lineno_start": null,
+    "span_lineno_end": null
+   },
+   "cf09_finder": {
+    "start_line": 1174,
+    "end_line": 1176
+   },
+   "search_from_idx": 638,
+   "delta": true
+  }
+ ],
+ "named_pair_delta_ids": {
+  "requested": [
+   "nmcv1@file-core",
+   "bocsv1@file-core",
+   "svcv1@file-boundary",
+   "ncv1@file-boundary",
+   "wkv1@carto-refresh-core"
+  ],
+  "found": [
+   "bocsv1@file-core",
+   "ncv1@file-boundary",
+   "nmcv1@file-core",
+   "svcv1@file-boundary",
+   "wkv1@carto-refresh-core"
+  ],
+  "missing": [],
+  "rows": [
+   {
+    "file": "beacon_obtain_code_snippet.py",
+    "language": "python",
+    "id": "bocsv1@file-core",
+    "comment_line": 66,
+    "base_second_pass": {
+     "close_start_line": null,
+     "span_lineno_start": null,
+     "span_lineno_end": null
+    },
+    "cf09_finder": {
+     "start_line": 3544,
+     "end_line": 3546
+    },
+    "search_from_idx": 72,
+    "delta": true
+   },
+   {
+    "file": "nexus_map_codebase.py",
+    "language": "python",
+    "id": "nmcv1@file-core",
+    "comment_line": 56,
+    "base_second_pass": {
+     "close_start_line": null,
+     "span_lineno_start": null,
+     "span_lineno_end": null
+    },
+    "cf09_finder": {
+     "start_line": 14639,
+     "end_line": 14641
+    },
+    "search_from_idx": 62,
+    "delta": true
+   },
+   {
+    "file": "src/workflowy_mcp/client/api_client_nexus.py",
+    "language": "python",
+    "id": "ncv1@file-boundary",
+    "comment_line": 2138,
+    "base_second_pass": {
+     "close_start_line": null,
+     "span_lineno_start": null,
+     "span_lineno_end": null
+    },
+    "cf09_finder": {
+     "start_line": 18914,
+     "end_line": 18916
+    },
+    "search_from_idx": 2144,
+    "delta": true
+   },
+   {
+    "file": "src/workflowy_mcp/server.py",
+    "language": "python",
+    "id": "svcv1@file-boundary",
+    "comment_line": 552,
+    "base_second_pass": {
+     "close_start_line": null,
+     "span_lineno_start": null,
+     "span_lineno_end": null
+    },
+    "cf09_finder": {
+     "start_line": 45559,
+     "end_line": 45561
+    },
+    "search_from_idx": 558,
+    "delta": true
+   },
+   {
+    "file": "src/workflowy_mcp/weave_worker.py",
+    "language": "python",
+    "id": "wkv1@carto-refresh-core",
+    "comment_line": 632,
+    "base_second_pass": {
+     "close_start_line": null,
+     "span_lineno_start": null,
+     "span_lineno_end": null
+    },
+    "cf09_finder": {
+     "start_line": 1174,
+     "end_line": 1176
+    },
+    "search_from_idx": 638,
+    "delta": true
+   }
+  ]
+ },
+ "multiline_comment_blocks": [
+  {
+   "file": "src/workflowy_mcp/dock_peek_metrics.py",
+   "line": 73,
+   "found": true,
+   "block": {
+    "record": "block",
+    "line": 73,
+    "end_line": 89,
+    "outcome": "kept",
+    "kind_raw": "ast",
+    "id": "dock-peek@render-source-metrics",
+    "field_keys": [
+     "comment",
+     "id",
+     "kind",
+     "role",
+     "slice_labels"
+    ],
+    "unknown_keys": []
+   },
+   "beacon": {
+    "id": "dock-peek@render-source-metrics",
+    "role": "ƒ build_render_source_metrics(nodes_by_id, root_ids)",
+    "slice_labels": "glimpse-render,nexus--mcp-api,nexus--anchors",
+    "kind": "ast",
+    "start_snippet": null,
+    "end_snippet": null,
+    "comment": "THE render-side source-metrics index ([ap:UH0UOU]): the SAME build_dock_peek_index bottom-up aggregator, merged over every top-level root of one render, so rendered headings carry dock.peek's four-field vocabulary (▸children · desc · self · tree) from the ONE metrics engine -- counts and byte totals cover the FULL pinned-cache subtree (completed/suppressed descendants included), never the filtered render forest, exactly dock.peek's semantics. Roots absent from the map are skipped (DOM-capture fail-soft); ids missing from the result stay unknown (the composer prints explicit '?' fields, never silent zeros). Consumed via RenderPolicy.source_metrics at the composer's ONE heading-metadata emitter. Pure; no I/O.",
+    "comment_line": 73,
+    "kind_explicit": true,
+    "show_span": true,
+    "show_span_explicit": false
+   },
+   "continuation_lines": 10,
+   "continuation_of": [
+    "comment"
+   ]
+  },
+  {
+   "file": "src/workflowy_mcp/dock_peek_metrics.py",
+   "line": 279,
+   "found": true,
+   "block": {
+    "record": "block",
+    "line": 279,
+    "end_line": 292,
+    "outcome": "kept",
+    "kind_raw": "ast",
+    "id": "auto-beacon@describe_dock_peek_recency_rule-4e",
+    "field_keys": [
+     "comment",
+     "id",
+     "kind",
+     "role",
+     "slice_labels"
+    ],
+    "unknown_keys": []
+   },
+   "beacon": {
+    "id": "auto-beacon@describe_dock_peek_recency_rule-4e",
+    "role": "describe_dock_peek_recency_rule",
+    "slice_labels": "nexus--anchors",
+    "kind": "ast",
+    "start_snippet": null,
+    "end_snippet": null,
+    "comment": "[ap:TVIIBN] 4e the ONE peek-side recency-rule line: under recent=N the compact peek renders this explicit sentence on its own line right below the header (beside describe_dock_peek_selection's selection phrase, same vocabulary) naming what was selected and teaching the 4d(a) rule -- sort_direction only orders these rows, it never changes which rows were chosen. The RENDER-verb twin (since_applied/render_scope wording) is server.py's _recency_header_sentence inside _shape_glimpse_family_return; two data shapes, one rule, each surface one composer. Pure.",
+    "comment_line": 279,
+    "kind_explicit": true,
+    "show_span": true,
+    "show_span_explicit": false
+   },
+   "continuation_lines": 7,
+   "continuation_of": [
+    "comment"
+   ]
+  },
+  {
+   "file": "src/workflowy_mcp/f8_slice_policy.py",
+   "line": 1,
+   "found": true,
+   "block": {
+    "record": "block",
+    "line": 1,
+    "end_line": 12,
+    "outcome": "kept",
+    "kind_raw": "ast",
+    "id": "f8policy@module",
+    "field_keys": [
+     "comment",
+     "id",
+     "kind",
+     "slice_labels"
+    ],
+    "unknown_keys": []
+   },
+   "beacon": {
+    "id": "f8policy@module",
+    "role": null,
+    "slice_labels": "slices",
+    "kind": "ast",
+    "start_snippet": null,
+    "end_snippet": null,
+    "comment": "Pure server-side F8 slice-policy core: Phase 1 (simplified search evaluator + minimal-subtree builder), Phase 0 (UUID-MEMBERSHIP-ONLY DOM-vs-cache validator -- every visible UUID must exist in cache; NO parent_id edge or name/note comparison, matching the proven docked-modal staleness contract; fail-closed only on a genuinely-missing UUID), and Phase 2 (suppression/ deprecated/expand plan builder). No WebSocket / no DOM / no broker; plain functions over plain dicts.",
+    "comment_line": 1,
+    "kind_explicit": true,
+    "show_span": true,
+    "show_span_explicit": false
+   },
+   "continuation_lines": 6,
+   "continuation_of": [
+    "comment"
+   ]
+  },
+  {
+   "file": "src/workflowy_mcp/managed_metadata.py",
+   "line": 325,
+   "found": true,
+   "block": {
+    "record": "block",
+    "line": 325,
+    "end_line": 342,
+    "outcome": "kept",
+    "kind_raw": "ast",
+    "id": "mcp-api@managed-source-line",
+    "field_keys": [
+     "comment",
+     "id",
+     "kind",
+     "role",
+     "slice_labels"
+    ],
+    "unknown_keys": []
+   },
+   "beacon": {
+    "id": "mcp-api@managed-source-line",
+    "role": "ƒ is_managed_source_line(note)",
+    "slice_labels": "nexus--anchors,nexus--mcp-api,glimpse-render",
+    "kind": "ast",
+    "start_snippet": null,
+    "end_snippet": null,
+    "comment": "THE source-map marker test ([ap:UH0UOU]): True iff the note's FIRST line carries a Cartographer/beacon source-map marker -- AST_QUALNAME: / MD_PATH: / BEACON ( / @beacon[ prefixes (the shapes the display stripper strips; the first three are also the refuse guard's first-line set) or a Path:/Root: header whose first whitespace-delimited token is exactly \"Path:\" or \"Root:\" (byte-identical to parse_path_or_root_from_note's first-line grammar, mirrored here to keep this module import-light -- the same mirror discipline as _REFUSE_FIRST_LINE_RE). This is the \"the line is source code\" signal the headings-only end-of-line metadata exemption keys on: the composer's ONE heading-metadata emitter suppresses the whole four-field vocabulary on such lines. Markers below line 1 are prose, never managed. Pure; no I/O.",
+    "comment_line": 325,
+    "kind_explicit": true,
+    "show_span": true,
+    "show_span_explicit": false
+   },
+   "continuation_lines": 11,
+   "continuation_of": [
+    "comment"
+   ]
+  },
+  {
+   "file": "src/workflowy_mcp/transforms.py",
+   "line": 1,
+   "found": true,
+   "block": {
+    "record": "block",
+    "line": 1,
+    "end_line": 8,
+    "outcome": "kept",
+    "kind_raw": "ast",
+    "id": "transforms@module",
+    "field_keys": [
+     "comment",
+     "id",
+     "kind",
+     "slice_labels"
+    ],
+    "unknown_keys": []
+   },
+   "beacon": {
+    "id": "transforms@module",
+    "role": null,
+    "slice_labels": "nexus-loading-flow",
+    "kind": "ast",
+    "start_snippet": null,
+    "end_snippet": null,
+    "comment": "Server-level FastMCP transforms applied at startup; hosts the Claude-Desktop-Windows outputSchema workaround and the mode-selected published-params-schema override (ParamsSchemaTransform) for the six family tools",
+    "comment_line": 1,
+    "kind_explicit": true,
+    "show_span": true,
+    "show_span_explicit": false
+   },
+   "continuation_lines": 2,
+   "continuation_of": [
+    "comment"
+   ]
+  },
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "line": 8218,
+   "found": true,
+   "block": {
+    "record": "block",
+    "line": 8218,
+    "end_line": 8239,
+    "outcome": "kept",
+    "kind_raw": "ast",
+    "id": "md-preview@headings-line-metadata",
+    "field_keys": [
+     "comment",
+     "id",
+     "kind",
+     "role",
+     "slice_labels"
+    ],
+    "unknown_keys": []
+   },
+   "beacon": {
+    "id": "md-preview@headings-line-metadata",
+    "role": "ƒ _headings_line_metadata_suffix(node_uuid, note, render_policy)",
+    "slice_labels": "nexus--md-preview,glimpse-render",
+    "kind": "ast",
+    "start_snippet": null,
+    "end_snippet": null,
+    "comment": "THE ONE headings-only end-of-line metadata emitter ([ap:UH0UOU]): every covered surface's heading suffix comes from HERE and nowhere else. One vocabulary with dock.peek: when the policy carries the render's source_metrics index, the suffix is exactly format_dock_peek_metrics over the same build_dock_peek_index engine (counts/bytes cover the FULL pinned-cache subtree -- completed and suppressed descendants included, never the filtered render forest). THE EXEMPTION: a managed source line (managed_metadata. is_managed_source_line -- a Cartographer/beacon source-map marker in the note's FIRST line) is source code and carries NONE of it, not even the legacy child count; an unmanaged parent of a managed subtree still shows its metrics (they legitimately include the managed descendants). No index in hand (an ad-hoc render with no cache operand) keeps the prior child-count-only suffix byte-for-byte; a uuid missing from a present index renders explicit '?' fields, never a silent zero. Pure; no I/O.",
+    "comment_line": 8218,
+    "kind_explicit": true,
+    "show_span": true,
+    "show_span_explicit": false
+   },
+   "continuation_lines": 15,
+   "continuation_of": [
+    "comment"
+   ]
+  }
+ ],
+ "multiline_comment_blocks_discovered": [
+  {
+   "file": "src/workflowy_mcp/client/api_client_nexus.py",
+   "line": 8218,
+   "end_line": 8239,
+   "id": "md-preview@headings-line-metadata",
+   "outcome": "kept",
+   "continuation_lines": 15,
+   "continuation_of": [
+    "comment"
+   ],
+   "named_in_lead_prompt": true
+  },
+  {
+   "file": "src/workflowy_mcp/dock_peek_metrics.py",
+   "line": 73,
+   "end_line": 89,
+   "id": "dock-peek@render-source-metrics",
+   "outcome": "kept",
+   "continuation_lines": 10,
+   "continuation_of": [
+    "comment"
+   ],
+   "named_in_lead_prompt": true
+  },
+  {
+   "file": "src/workflowy_mcp/dock_peek_metrics.py",
+   "line": 279,
+   "end_line": 292,
+   "id": "auto-beacon@describe_dock_peek_recency_rule-4e",
+   "outcome": "kept",
+   "continuation_lines": 7,
+   "continuation_of": [
+    "comment"
+   ],
+   "named_in_lead_prompt": true
+  },
+  {
+   "file": "src/workflowy_mcp/f8_slice_policy.py",
+   "line": 1,
+   "end_line": 12,
+   "id": "f8policy@module",
+   "outcome": "kept",
+   "continuation_lines": 6,
+   "continuation_of": [
+    "comment"
+   ],
+   "named_in_lead_prompt": true
+  },
+  {
+   "file": "src/workflowy_mcp/managed_metadata.py",
+   "line": 325,
+   "end_line": 342,
+   "id": "mcp-api@managed-source-line",
+   "outcome": "kept",
+   "continuation_lines": 11,
+   "continuation_of": [
+    "comment"
+   ],
+   "named_in_lead_prompt": true
+  },
+  {
+   "file": "src/workflowy_mcp/transforms.py",
+   "line": 1,
+   "end_line": 8,
+   "id": "transforms@module",
+   "outcome": "kept",
+   "continuation_lines": 2,
+   "continuation_of": [
+    "comment"
+   ],
+   "named_in_lead_prompt": true
+  }
+ ],
+ "counts": {
+  "python_blocks_with_opener_in_string": 22,
+  "python_string_tokens_with_opener": 302,
+  "js_openers_not_in_comment": 1,
+  "span_blocks_with_id": 103,
+  "span_kind_beacons_total": 104,
+  "span_kind_beacons_without_id": 1,
+  "span_pair_deltas": 5,
+  "span_base_paired": 62,
+  "span_cf09_paired": 67,
+  "named_ids_found": [
+   "bocsv1@file-core",
+   "ncv1@file-boundary",
+   "nmcv1@file-core",
+   "svcv1@file-boundary",
+   "wkv1@carto-refresh-core"
+  ],
+  "named_ids_missing": [],
+  "multiline_blocks_found": 6,
+  "multiline_blocks_discovered": 6,
+  "multiline_continuation_lines_total": 51
+ }
+}

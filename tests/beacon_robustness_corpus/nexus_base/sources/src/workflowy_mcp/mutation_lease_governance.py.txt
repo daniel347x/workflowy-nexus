@@ -1,0 +1,468 @@
+"""Typed-region ontology and the diagnostic create-funnel coverage warning.
+
+The on-disk mutation-lease plane retired in the Wave A cut. This historical
+module now holds the typed-region ontology used by Cartographer admission and
+the diagnostic create-funnel coverage warning. The in-process lock plane is
+``mutation_locks.py``; this module's filename is historical.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from . import carto_job_governance as gov
+from .carto_job_governance import GovernanceError
+
+LOGGER = logging.getLogger(__name__)
+
+_REGION_KINDS = frozenset({"exact_node", "child_set", "subtree", "ap_core"})
+# Frozen canonical typed-region order (§5.2), then by region key.
+_REGION_KIND_ORDER = {"ap_core": 0, "child_set": 1, "exact_node": 2, "subtree": 3}
+_PERSISTED_CORE_RE = re.compile(r"^[A-Z0-9]{3,}$")
+
+
+class MutationRegionError(GovernanceError):
+    """Malformed/unresolvable typed region (including an unresolvable live key)."""
+
+    code = "mutation_region_error"
+
+
+def _validate_uuid_text(value: Any, label: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise MutationRegionError(f"mutation region: {label} must be nonempty")
+    return raw
+
+
+def normalize_ap_core(value: Any) -> str:
+    """Normalize a supplied AP-ID handle to its uppercase base36 core.
+
+    INPUT normalization delegates to the existing AP-ID normalizer (§5.1) —
+    lazily imported so typed-region users do not eagerly import the client
+    modules. Invalid input fails closed.
+    """
+
+    from .client.api_client_nexus import _normalize_ap_id_input
+
+    core = _normalize_ap_id_input(str(value or ""))
+    if core is None:
+        raise MutationRegionError(f"mutation region: invalid AP core {value!r}")
+    return core
+
+
+def rehydrate_ancestor_chain(
+    key_uuid: str, cache_by_id: Mapping[str, Mapping[str, Any]]
+) -> tuple[str, ...]:
+    """Rebuild the CURRENT region-key-first ancestor chain from one adopted view.
+
+    The ONE audited fail-closed ancestor walk (``compute_footprint`` A1)
+    remains the authority — cycle-guarded, complete-to-vault, fail closed on
+    a missing ancestor.  A stored chain is never consulted here (A1).
+    """
+
+    try:
+        footprint = gov.compute_footprint(None, str(key_uuid), cache_by_id, kind="file")
+    except gov.FootprintUnresolvableError as exc:
+        raise MutationRegionError(
+            f"mutation region: live key {key_uuid!r} is unresolvable in the "
+            f"admitting operation's current adopted view: {exc}"
+        ) from exc
+    return tuple(footprint["ancestor_chain"])
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@MutationRegion-54et,
+#   role=MutationRegion,
+#   slice_labels=mci-lease-ontology,
+#   kind=ast,
+# ]
+class MutationRegion:
+    """One typed semantic region (§5.1 closed union, schema v1).
+
+    ``ancestor_chain`` is region-key-first (H2e): the region's own
+    node/parent/root UUID first, then successive parents through the vault
+    root.  It records topology AT ACQUISITION for evidence/diagnostics; it
+    is never the containment authority at a later admission (A1 — chains
+    are rehydrated from the admitting operation's current adopted view).
+    ``ap_core`` carries no graph chain.
+    """
+
+    kind: str
+    node_uuid: str | None = None
+    parent_uuid: str | None = None
+    root_uuid: str | None = None
+    core: str | None = None
+    ancestor_chain: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind not in _REGION_KINDS:
+            raise MutationRegionError(f"mutation region: unknown kind {self.kind!r}")
+        if self.kind == "ap_core":
+            if not isinstance(self.core, str) or not _PERSISTED_CORE_RE.fullmatch(self.core):
+                raise MutationRegionError(
+                    "mutation region: ap_core core must be uppercase base36 (>=3 chars)"
+                )
+            for absent in ("node_uuid", "parent_uuid", "root_uuid"):
+                if getattr(self, absent) is not None:
+                    raise MutationRegionError(f"mutation region: ap_core carries no {absent}")
+            if self.ancestor_chain:
+                raise MutationRegionError("mutation region: ap_core carries no ancestor chain")
+            return
+        key_field = {"exact_node": "node_uuid", "child_set": "parent_uuid", "subtree": "root_uuid"}[
+            self.kind
+        ]
+        key_value = getattr(self, key_field)
+        if not isinstance(key_value, str) or not key_value:
+            raise MutationRegionError(f"mutation region: {self.kind} requires {key_field}")
+        for other in ("node_uuid", "parent_uuid", "root_uuid"):
+            if other != key_field and getattr(self, other) is not None:
+                raise MutationRegionError(
+                    f"mutation region: {self.kind} carries no {other}"
+                )
+        if self.core is not None:
+            raise MutationRegionError(f"mutation region: {self.kind} carries no core")
+        if (
+            not isinstance(self.ancestor_chain, tuple)
+            or not self.ancestor_chain
+            or not all(isinstance(item, str) and item for item in self.ancestor_chain)
+        ):
+            raise MutationRegionError(
+                f"mutation region: {self.kind} requires a nonempty ancestor chain"
+            )
+        if self.ancestor_chain[0] != key_value:
+            raise MutationRegionError(
+                "mutation region: ancestor chain must be region-key-first (H2e)"
+            )
+
+    @property
+    def key(self) -> str:
+        """The region's identity key (graph UUID or normalized AP core)."""
+
+        if self.kind == "ap_core":
+            return str(self.core)
+        return str(getattr(self, {"exact_node": "node_uuid", "child_set": "parent_uuid", "subtree": "root_uuid"}[self.kind]))
+
+    def sort_key(self) -> tuple[int, str]:
+        return (_REGION_KIND_ORDER[self.kind], self.key)
+
+    def to_dict(self) -> dict[str, Any]:
+        if self.kind == "ap_core":
+            return {"kind": "ap_core", "core": self.core}
+        key_field = {"exact_node": "node_uuid", "child_set": "parent_uuid", "subtree": "root_uuid"}[
+            self.kind
+        ]
+        return {
+            "kind": self.kind,
+            key_field: getattr(self, key_field),
+            "ancestor_chain": list(self.ancestor_chain),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> MutationRegion:
+        if not isinstance(payload, Mapping):
+            raise MutationRegionError("mutation region: payload must be an object")
+        kind = payload.get("kind")
+        if kind == "ap_core":
+            allowed = {"kind", "core"}
+        elif kind in {"exact_node", "child_set", "subtree"}:
+            allowed = {
+                "kind",
+                {"exact_node": "node_uuid", "child_set": "parent_uuid", "subtree": "root_uuid"}[kind],
+                "ancestor_chain",
+            }
+        else:
+            raise MutationRegionError(f"mutation region: unknown kind {kind!r}")
+        extra = sorted(set(payload) - allowed)
+        if extra:
+            raise MutationRegionError(f"mutation region: unknown keys fail closed: {extra}")
+        chain = payload.get("ancestor_chain", ())
+        return cls(
+            kind=str(kind),
+            node_uuid=payload.get("node_uuid"),
+            parent_uuid=payload.get("parent_uuid"),
+            root_uuid=payload.get("root_uuid"),
+            core=payload.get("core"),
+            ancestor_chain=tuple(chain) if isinstance(chain, (list, tuple)) else (),
+        )
+
+
+def build_region_exact_node(
+    node_uuid: str, *, cache_by_id: Mapping[str, Mapping[str, Any]]
+) -> MutationRegion:
+    key = _validate_uuid_text(node_uuid, "node_uuid")
+    return MutationRegion(
+        kind="exact_node",
+        node_uuid=key,
+        ancestor_chain=rehydrate_ancestor_chain(key, cache_by_id),
+    )
+
+
+def build_region_child_set(
+    parent_uuid: str, *, cache_by_id: Mapping[str, Mapping[str, Any]]
+) -> MutationRegion:
+    key = _validate_uuid_text(parent_uuid, "parent_uuid")
+    return MutationRegion(
+        kind="child_set",
+        parent_uuid=key,
+        ancestor_chain=rehydrate_ancestor_chain(key, cache_by_id),
+    )
+
+
+def build_region_subtree(
+    root_uuid: str, *, cache_by_id: Mapping[str, Mapping[str, Any]]
+) -> MutationRegion:
+    key = _validate_uuid_text(root_uuid, "root_uuid")
+    return MutationRegion(
+        kind="subtree",
+        root_uuid=key,
+        ancestor_chain=rehydrate_ancestor_chain(key, cache_by_id),
+    )
+
+
+def build_region_ap_core(core: Any) -> MutationRegion:
+    return MutationRegion(kind="ap_core", core=normalize_ap_core(core))
+
+
+# @beacon[
+#   id=auto-beacon@normalize_mutation_regions-9iz6,
+#   role=normalize_mutation_regions,
+#   slice_labels=mci-lease-ontology,
+#   kind=ast,
+# ]
+def normalize_mutation_regions(
+    regions: Iterable[MutationRegion | Mapping[str, Any]],
+) -> tuple[MutationRegion, ...]:
+    """Canonical all-or-none region normalization (§5.2).
+
+    Validates every region, collapses byte-identical duplicates, rejects
+    conflicting duplicate payloads, and returns the canonical sorted tuple
+    (ap_core, child_set, exact_node, subtree; then by key).  The same order
+    is used by typed-region consumers.
+    """
+
+    normalized: dict[tuple[int, str], MutationRegion] = {}
+    for region in regions:
+        candidate = (
+            region
+            if isinstance(region, MutationRegion)
+            else MutationRegion.from_dict(region)
+        )
+        key = candidate.sort_key()
+        existing = normalized.get(key)
+        if existing is not None and existing != candidate:
+            raise MutationRegionError(
+                f"mutation regions: conflicting duplicate payloads for {candidate.kind}:{candidate.key}"
+            )
+        normalized[key] = candidate
+    if not normalized:
+        raise MutationRegionError("mutation regions: at least one region is required")
+    return tuple(normalized[key] for key in sorted(normalized))
+
+
+# ---------------------------------------------------------------------------
+# Region intersection (§5.3 truth table) + CARTO claim intersection (§11.1)
+# ---------------------------------------------------------------------------
+
+
+def _chain_for(key_uuid: str, cache_by_id: Mapping[str, Mapping[str, Any]] | None) -> tuple[str, ...]:
+    if cache_by_id is None:
+        raise MutationRegionError(
+            "mutation region containment requires the admitting operation's "
+            "current adopted view (cache_by_id); stored chains are never an "
+            "allow-decision authority (A1)"
+        )
+    return rehydrate_ancestor_chain(key_uuid, cache_by_id)
+
+
+# @beacon[
+#   id=auto-beacon@regions_intersect-7sfh,
+#   role=regions_intersect,
+#   slice_labels=mci-lease-ontology,
+#   kind=ast,
+# ]
+def regions_intersect(
+    a: MutationRegion,
+    b: MutationRegion,
+    *,
+    cache_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+) -> bool:
+    """The symmetric §5.3 region-intersection truth table.
+
+    Equality rows are pure over region keys.  Containment rows rehydrate
+    CURRENT ancestor chains from ``cache_by_id`` (A1) and fail closed when
+    it is absent or a key is unresolvable.  ``exact_node`` vs ``child_set``
+    NEVER intersects (content and child-order effects commute under Axiom
+    7); ``ap_core`` never intersects a graph region.
+    """
+
+    if a.kind == "ap_core" or b.kind == "ap_core":
+        return a.kind == b.kind == "ap_core" and a.core == b.core
+    if a.kind == "exact_node" and b.kind == "exact_node":
+        return a.node_uuid == b.node_uuid
+    if a.kind == "child_set" and b.kind == "child_set":
+        return a.parent_uuid == b.parent_uuid
+    if {a.kind, b.kind} == {"exact_node", "child_set"}:
+        return False
+    # At least one subtree: containment rows (rehydrated, fail closed).
+    # A1: EVERY participating live key's current chain is rehydrated — an
+    # unresolvable key on EITHER side fails closed, never answers from the
+    # stale stored chain.
+    if a.kind == "subtree" and b.kind in {"exact_node", "child_set"}:
+        _chain_for(str(a.root_uuid), cache_by_id)  # validates the subtree key
+        return str(a.root_uuid) in _chain_for(b.key, cache_by_id)
+    if b.kind == "subtree" and a.kind in {"exact_node", "child_set"}:
+        _chain_for(str(b.root_uuid), cache_by_id)  # validates the subtree key
+        return str(b.root_uuid) in _chain_for(a.key, cache_by_id)
+    if a.kind == "subtree" and b.kind == "subtree":
+        return str(a.root_uuid) in _chain_for(str(b.root_uuid), cache_by_id) or str(
+            b.root_uuid
+        ) in _chain_for(str(a.root_uuid), cache_by_id)
+    return False
+
+
+def regions_conflict_details(
+    regions_a: Sequence[MutationRegion],
+    regions_b: Sequence[MutationRegion],
+    *,
+    cache_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """First canonical conflicting pair across two region sets, or None."""
+
+    for left in normalize_mutation_regions(regions_a):
+        for right in normalize_mutation_regions(regions_b):
+            if regions_intersect(left, right, cache_by_id=cache_by_id):
+                return {
+                    "region_a": left.to_dict(),
+                    "region_b": right.to_dict(),
+                    "conflicting_regions_a": [r.to_dict() for r in normalize_mutation_regions(regions_a)][:8],
+                    "conflicting_regions_b": [r.to_dict() for r in normalize_mutation_regions(regions_b)][:8],
+                }
+    return None
+
+
+# @beacon[
+#   id=auto-beacon@mutation_regions_intersect_carto_claim-tz0u,
+#   role=mutation_regions_intersect_carto_claim,
+#   slice_labels=mci-lease-ontology,
+#   kind=ast,
+# ]
+def mutation_regions_intersect_carto_claim(
+    regions: Sequence[MutationRegion],
+    claim: Mapping[str, Any],
+    *,
+    cache_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+) -> MutationRegion | None:
+    """The §11.1 mutation-region vs CARTO-claim footprint intersection.
+
+    Returns the first conflicting region, or None.  ``claim`` is any mapping
+    carrying ``root_uuid`` (a live claim artifact or a CARTO admission
+    candidate footprint).  Every chain is rehydrated from ``cache_by_id``
+    (A1 — for BOTH the typed region keys and the claim root key); AP-core
+    alone never overlaps a CARTO claim.
+    """
+
+    claim_root = str(claim.get("root_uuid") or "")
+    if not claim_root:
+        raise MutationRegionError("carto claim overlap: claim lacks root_uuid")
+    # A1: the claim root is a live region key too — rehydrate its CURRENT
+    # chain once (existence-validated, fail closed), and rehydrate every
+    # typed region key's chain per comparison.
+    claim_chain = _chain_for(claim_root, cache_by_id)
+    for region in normalize_mutation_regions(regions):
+        if region.kind == "ap_core":
+            continue
+        region_chain = _chain_for(region.key, cache_by_id)
+        if region.kind in {"exact_node", "child_set"}:
+            # claim root is X or appears in X's (rehydrated) ancestor chain.
+            if claim_root == region.key or claim_root in region_chain:
+                return region
+            continue
+        # subtree S: claim root within S (S.root in claim's chain), or S
+        # within claim root (claim root in S's chain).
+        if claim_root in region_chain or str(region.root_uuid) in claim_chain:
+            return region
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Transition-mode CREATE coverage warning (§14) — diagnostic, never authority
+# ---------------------------------------------------------------------------
+
+_COVERAGE_WARNED_KEYS: set[str] = set()
+
+
+def _hint_covers_parent(coverage_hint: Any, account_scope_id: str | None, parent_uuid: str | None) -> bool:
+    """Basic account/region ownership identity for a PASSED claim mapping.
+
+    Inspects only the passed mapping — NEVER the governance directory
+    (a directory scan could let an ungoverned caller borrow another
+    operation's claim). Stored chains are sufficient here because this is a
+    diagnostic suppressor, never an authorization decision.
+    """
+
+    if coverage_hint is None:
+        return False
+    hint_account: str | None = None
+    covers = False
+    if isinstance(coverage_hint, Mapping):
+        # A CARTO claim artifact: account + footprint ancestor coverage.
+        hint_account = str(coverage_hint.get("account_scope_id") or "") or None
+        if parent_uuid:
+            chain = coverage_hint.get("ancestor_chain") or []
+            if coverage_hint.get("root_uuid") == parent_uuid or parent_uuid in chain:
+                covers = True
+    else:
+        return False
+    if account_scope_id and hint_account and account_scope_id != hint_account:
+        return False
+    return covers
+
+
+# @beacon[
+#   id=carto-governance@create-coverage-warning,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-workflowy-cache,mci-lease-seams,
+#   kind=ast,
+#   comment=S05 §14 transition-mode create-funnel coverage warning (diagnostic only, never authorization): invoked by WorkFlowyClientCore.create_node itself on every production entry before the send path; a passed claim mapping suppresses the structured warning ONLY on basic account/region ownership identity; no hint (or a mismatched hint) logs once per callsite per process; the helper NEVER scans the governance directory for a convenient overlapping owner — S07 replaces the hint with transaction-bound MutationContext and S11 flips to hard enforcement.,
+# ]
+def warn_create_governance_coverage(
+    *,
+    operation_label: str,
+    caller_summary: str,
+    account_scope_id: str | None = None,
+    parent_uuid: str | None = None,
+    coverage_hint: Any = None,
+    logger: Any = None,
+    dedupe_key: str | None = None,
+) -> bool:
+    """§14 transition-mode create-funnel coverage warning (diagnostic only).
+
+    Returns True when a warning was emitted.  A passed hint suppresses the
+    warning ONLY via :func:`_hint_covers_parent` identity — the hint confers
+    NO authorization, and this helper performs NO governance-directory scan
+    (permanent-fence locked).  Warning volume is bounded: one emission per
+    dedupe key (default: operation + caller summary) per process.
+    """
+
+    if _hint_covers_parent(coverage_hint, account_scope_id, parent_uuid):
+        return False
+    key = dedupe_key or f"{operation_label}:{caller_summary}"
+    if key in _COVERAGE_WARNED_KEYS:
+        return False
+    _COVERAGE_WARNED_KEYS.add(key)
+    log = logger or LOGGER
+    log.warning(
+        "TRANSITION COVERAGE WARNING: %s called WITHOUT a governance coverage "
+        "hint (account=%s parent=%s caller=%s). Ungoverned creates are "
+        "unsupported at coherence_mode=enforced (S07 MutationContext / S11 "
+        "hard enforcement). This is a transition-mode diagnostic only.",
+        operation_label,
+        account_scope_id or "unknown",
+        parent_uuid or "unknown",
+        caller_summary,
+    )
+    return True

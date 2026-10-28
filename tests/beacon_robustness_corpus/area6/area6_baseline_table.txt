@@ -1,0 +1,46 @@
+| case | before sha256[:12] | after (cur) sha256[:12] | changed | ids before -> after | result |
+|---|---|---|---|---|---|
+| py_01_two_good | 619658144e91 | a8659915ebae | True | ['alpha@f', 'beta@f', 'keep@g'] -> ['alpha@f', 'keep@g'] | mg=1 rm=1 |
+| py_02_numeric_second | e1eac2e5fd4e | 02d457d86b89 | True | ['auto-beacon@f-x1y2', 'carto@000123'] -> ['carto@000123'] | mg=1 rm=1 |
+| py_03_numeric_both | 8cb4f27afa3b | 9e68ecf01efe | True | ['x@001', 'y@002'] -> ['x@001'] | mg=1 rm=1 |
+| py_04_span_over_ast | 95d20bfc21ff | 95d20bfc21ff | False | ['s@f', 'a@f'] -> ['s@f', 'a@f'] | mg=- rm=- |
+| py_05_ast_over_span | dd02343cfed4 | dd02343cfed4 | False | ['a@f', 's@f'] -> ['a@f', 's@f'] | mg=- rm=- |
+| py_06_F2_lost_bracket | 9d0cc408913a | 8c53fb7ff949 | True | ['lost@0', 'good@g'] -> ['lost@0'] | mg=1 rm=1 |
+| py_07_lost_bracket_no_code_bracket | 4e844591880c | 4e844591880c | False | ['good@g'] -> ['good@g'] | mg=- rm=- |
+| py_08_idless_opener | 044b3467cf90 | af3893e452a8 | True | [None, 'good@g'] -> [''] | mg=1 rm=1 |
+| py_09_nested_opener | 6152625fe7ba | f42bba1df7ac | True | ['inner@0', 'good@g'] -> ['inner@0'] | mg=1 rm=1 |
+| py_10_junk_opener | 349de7873b0f | 9f6eee28146b | True | ['junk@0', 'good@g'] -> ['junk@0'] | mg=1 rm=1 |
+| py_11_docstring_two_examples | 1a6e3f9d09cd | c49869ace022 | True | ['real@h', 'ex1@0', 'ex2@0'] -> ['real@h', 'ex1@0'] | mg=1 rm=1 |
+| py_12_test_fixture_string | aa3828af6fa0 | 48f757943dad | True | ['first', 'second'] -> ['first'] | mg=1 rm=1 |
+| py_13_unterminated_after_good | 19b3a3a4ed2e | dbb1ff1f5ee9 | True | ['good@f', 'unterm@0'] -> ['unterm@0'] | mg=1 rm=1 |
+| py_14_multiline_showspan | 4398571bc929 | 4363ab1ba8aa | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| py_15_detached_indented | 797f43c846fc | a96bf17d9caa | True | ['stray@0', 'good@g'] -> ['stray@0'] | mg=1 rm=1 |
+| py_16_method_two_blocks | 6dd8a22fc142 | c20025e8df94 | True | ['a@C.m', 'b@C.m'] -> ['a@C.m'] | mg=1 rm=1 |
+| py_17_crlf_two_good | 42a45be4fb89 | 97feaa94ce6f | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| py_18_multiline_decorator | 128d014e0bef | 128d014e0bef | False | ['a@f', 'b@f'] -> ['a@f', 'b@f'] | mg=- rm=- |
+| py_19_three_blocks | e7fa2f237d9c | 365c1d9e906b | True | ['a@f', 'b@f', 'c@f'] -> ['a@f'] | mg=1 rm=2 |
+| py_20_double_hash_comments | e84bc1e15285 | 9b8809510a8d | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| py_21_formfeed | a20239f8e6fc | f83b7827c83f | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| py_22_comment_continuation_key | bb0b79af57cc | a4d111c5e7c0 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| js_01_two_good | af68413ee070 | bb827d14c484 | True | ['alpha@f', 'beta@f'] -> ['alpha@f'] | mg=1 rm=1 |
+| js_02_F2_lost_bracket | b4498d1b78ed | dc291eb66c5a | True | ['lost@0', 'good@g'] -> ['lost@0'] | mg=1 rm=1 |
+| js_03_jsdoc_two | 387bcb6a08ea | 3154a291b511 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| js_04_cblock_plus_line | 74f3ecabdaa2 | 7bf857a98efa | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| js_05_template_literal | b5a89e0559cb | c7663ba98847 | True | ['ex1@0', 'ex2@0'] -> ['ex1@0'] | mg=1 rm=1 |
+| js_06_code_mentions_opener | 3891dacc6555 | 3891dacc6555 | False | [None, 'good@g'] -> [None, 'good@g'] | mg=- rm=- |
+| js_07_unterminated_after_good | afbdb7c70ced | 7d9ee062c7f8 | True | ['good@f', 'unterm@0'] -> ['unterm@0'] | mg=1 rm=1 |
+| js_08_idless_and_nested | bb8c8fa33f59 | e29c34a42702 | True | [None, 'good@g'] -> [''] | mg=1 rm=1 |
+| ts_09_decorated_method | 9cb840afc6f1 | beb5090ab789 | True | ['a@C.m', 'b@C.m'] -> ['a@C.m'] | mg=1 rm=1 |
+| vue_10_script_two | 3bc7197f6acd | 30cae0b1bc09 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| vue_11_template_two | 1ed31d74ba88 | 1ed31d74ba88 | False | ['ta@0', 'tb@0', 'ta@0', 'tb@0'] -> ['ta@0', 'tb@0', 'ta@0', 'tb@0'] | mg=- rm=- |
+| md_01_two_good | 3bd3018c1e54 | d69523e51db1 | True | ['a@h', 'b@h'] -> ['a@h'] | mg=1 rm=1 |
+| md_02_numeric | 1280359d592f | 807d6fc323a2 | True | ['auto@h-1x', 'doc@000007'] -> ['doc@000007'] | mg=1 rm=1 |
+| md_03_ast_span | 00db3063eb5c | 00db3063eb5c | False | ['s@h', 'a@h'] -> ['s@h', 'a@h'] | mg=- rm=- |
+| md_04_lost_end | b72d4a193800 | d4f082427f74 | True | ['lost@0', 'good@h3'] -> ['lost@0'] | mg=1 rm=1 |
+| md_05_oneline_open_after_note | d15c82f03c8d | d345b71458b4 | True | ['a@h', 'b@h'] -> ['a@h'] | mg=1 rm=1 |
+| md_06_comment_with_arrow | 18421949f4ab | 18421949f4ab | False | ['a@h', 'b@h'] -> ['a@h', 'b@h'] | mg=- rm=- |
+| md_07_fenced_examples | fa789373181f | fa789373181f | False | [] -> [] | mg=- rm=- |
+| md_08_lost_bracket | 95d070cc2aa1 | 95d070cc2aa1 | False | ['good@h'] -> ['good@h'] | mg=- rm=- |
+| md_09_heading_in_html_comment_between | 9cc2afcf2cd9 | 17f47f49c8fa | True | ['a@h', 'b@h'] -> ['a@h'] | mg=1 rm=1 |
+| py_23_single_decorator | 7dad8613033e | 8aae0a506075 | True | ['a@f', 'b@f'] -> ['a@f'] | mg=1 rm=1 |
+| ts_24_single_above_decorator | e5015c80b1bc | e5015c80b1bc | False | ['a@C.m'] -> ['a@C.m'] | mg=- rm=- |

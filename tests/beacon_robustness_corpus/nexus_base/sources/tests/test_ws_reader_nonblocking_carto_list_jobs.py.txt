@@ -1,0 +1,328 @@
+"""APPLY-Timeout fix -- the widget's carto_list_jobs poll never blocks the pump.
+
+RECON AND FIX socket [ap:7125X0] (program [ap:HJNU1W]).  The widget in EVERY
+Workflowy tab polls ``carto_list_jobs`` once a second.  ``websocket_handler``
+used to answer it INLINE: a synchronous ``_scan_carto_job_files()`` (every job
+JSON read and liveness-classified -- 0.25 s on the live machine with 223 jobs)
+followed by an awaited multi-MB send.  With several tabs polling, the pump fell
+behind without bound; the tab's ``get_slice_group_config_result`` (the nested
+read slice-group APPLY needs) sat 58 s in the queue and APPLY timed out, until
+the connection died on a keepalive ping timeout (daemon log, 2026-09-28).
+
+Post-fix (``_carto_list_jobs_poll`` + ``_handle_carto_list_jobs``):
+* the pump only admits the poll and ``continue``s; the scan runs in a worker
+  thread inside a spawned task;
+* polls are coalesced (single-flight + 0.5 s spacing) -- the reply is
+  untargeted, so the broker broadcasts it to every tab;
+* the reply omits exactly the rows the widget hides (completed / cancelled).
+
+Sits beside ``test_ws_reader_nonblocking_refresh`` (the nodes-cache-refresh /
+F12 fix) and ``test_ws_reader_nonblocking_long_handlers`` (U4), and reuses
+their pump harness.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+import threading
+import time
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from workflowy_mcp import server as srv  # noqa: E402
+from test_ws_reader_nonblocking_refresh import (  # noqa: E402
+    PUMP_TIMEOUT_S,
+    _install_client_stub,
+    _QueueWebSocket,
+)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_poll_state(monkeypatch):
+    """Every test starts with no scan in flight and no recent scan."""
+    monkeypatch.setattr(srv, "_carto_list_jobs_in_flight", False, raising=False)
+    monkeypatch.setattr(srv, "_carto_list_jobs_last_started", float("-inf"), raising=False)
+
+
+async def _drain_until(predicate, *, timeout=PUMP_TIMEOUT_S):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError("condition not reached before the deadline")
+        await asyncio.sleep(0.01)
+
+
+def _results(ws):
+    return [f for f in ws.sent if f.get("action") == "carto_list_jobs_result"]
+
+
+# ---------------------------------------------------------------------------
+# The incident, reproduced: a slow scan must not hold the pump
+# ---------------------------------------------------------------------------
+
+
+def test_pump_answers_ping_while_the_jobs_scan_is_blocked(monkeypatch):
+    """CHANGE-DETECTING (red against the pre-fix inline clause): the scan
+    blocks on a THREADING event that only the pong sets.  A scan resident on
+    the event loop (inline, or spawned without to_thread) can never be
+    released, so the pump could never answer the ping -> timeout."""
+    _install_client_stub(monkeypatch)
+    release = threading.Event()
+    scan_threads: list[int] = []
+
+    def _blocked_scan(base_dir_str=None):
+        scan_threads.append(threading.get_ident())
+        assert release.wait(timeout=PUMP_TIMEOUT_S), (
+            "the jobs scan was never released: the pump could not answer the "
+            "ping while the scan ran (inline or on the event loop)"
+        )
+        return [{"job_id": "J-run", "status": "running"}]
+
+    monkeypatch.setattr(srv, "_scan_carto_job_files", _blocked_scan)
+
+    async def exercise():
+        loop_thread = threading.get_ident()
+        ws = _QueueWebSocket([{"action": "carto_list_jobs"}, {"action": "ping"}])
+
+        async def _release_on_pong():
+            await ws.pong_seen.wait()
+            release.set()
+
+        releaser = asyncio.ensure_future(_release_on_pong())
+        pump = asyncio.ensure_future(srv.websocket_handler(ws))
+        try:
+            await asyncio.wait_for(ws.result_seen.wait(), timeout=PUMP_TIMEOUT_S)
+        finally:
+            ws.close()
+            await asyncio.wait_for(pump, timeout=PUMP_TIMEOUT_S)
+            releaser.cancel()
+        return ws, loop_thread
+
+    ws, loop_thread = asyncio.run(exercise())
+    actions = [f.get("action") for f in ws.sent]
+    assert actions.index("pong") < actions.index("carto_list_jobs_result")
+    assert scan_threads and scan_threads[0] != loop_thread  # ran in a worker thread
+    assert _results(ws) == [
+        {
+            "action": "carto_list_jobs_result",
+            "success": True,
+            "jobs": [{"job_id": "J-run", "status": "running"}],
+        }
+    ]
+
+
+def test_correlated_reply_behind_a_poll_burst_is_delivered_while_the_scan_runs(monkeypatch):
+    """The APPLY shape: a nested Direction-A read is waiting on a request_id
+    Future; its reply arrives BEHIND a burst of polls from many tabs.  The
+    pump must hand the reply to its waiter while the (slow) scan is still
+    running -- pre-fix it sat behind every queued poll."""
+    _install_client_stub(monkeypatch)
+    release = threading.Event()
+    scan_started = threading.Event()
+
+    def _slow_scan(base_dir_str=None):
+        scan_started.set()
+        release.wait(timeout=1.0)  # one "slow" scan (pre-fix: blocks the pump)
+        return []
+
+    monkeypatch.setattr(srv, "_scan_carto_job_files", _slow_scan)
+
+    async def exercise():
+        ws = _QueueWebSocket([{"action": "carto_list_jobs"}])
+        pump = asyncio.ensure_future(srv.websocket_handler(ws))
+        try:
+            await _drain_until(scan_started.is_set, timeout=PUMP_TIMEOUT_S * 2)
+            demux = srv._ws_message_queue
+            demux.register_correlated_waiter("rq-apply-1")
+            # Eleven more tabs poll, THEN the tab's reply to APPLY's nested read.
+            for _ in range(11):
+                ws.feed({"action": "carto_list_jobs"})
+            fed_at = time.monotonic()
+            ws.feed(
+                {
+                    "action": "get_slice_group_config_result",
+                    "request_id": "rq-apply-1",
+                    "success": True,
+                }
+            )
+            reply = await demux.wait_for_correlated("rq-apply-1", PUMP_TIMEOUT_S)
+            # Wall clock, not loop time: a pump blocked in a synchronous scan
+            # freezes the loop's own timers, so only the wall clock tells.
+            delay = time.monotonic() - fed_at
+            scan_still_running = not release.is_set()
+        finally:
+            release.set()
+            ws.close()
+            await asyncio.wait_for(pump, timeout=PUMP_TIMEOUT_S * 20)
+        return reply, delay, scan_still_running
+
+    reply, delay, scan_still_running = asyncio.run(exercise())
+    assert delay < 1.0, f"the correlated reply waited {delay:.1f}s behind the poll burst"
+    assert scan_still_running
+    assert reply["request_id"] == "rq-apply-1"
+
+
+# ---------------------------------------------------------------------------
+# Coalescing: the load no longer multiplies with the number of tabs
+# ---------------------------------------------------------------------------
+
+
+def test_a_burst_of_polls_runs_one_scan_and_sends_one_broadcast(monkeypatch):
+    _install_client_stub(monkeypatch)
+    calls: list[float] = []
+
+    def _scan(base_dir_str=None):
+        calls.append(time.monotonic())
+        time.sleep(0.05)
+        return [{"job_id": "J-run", "status": "running"}]
+
+    monkeypatch.setattr(srv, "_scan_carto_job_files", _scan)
+
+    async def exercise():
+        ws = _QueueWebSocket([{"action": "carto_list_jobs"} for _ in range(40)])
+        pump = asyncio.ensure_future(srv.websocket_handler(ws))
+        await asyncio.wait_for(ws.result_seen.wait(), timeout=PUMP_TIMEOUT_S)
+        ws.close()
+        await asyncio.wait_for(pump, timeout=PUMP_TIMEOUT_S)
+        await asyncio.sleep(0.1)
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert len(calls) == 1
+    assert len(_results(ws)) == 1
+
+
+def test_polls_are_spaced_and_single_flight(monkeypatch):
+    """Unit lock on the admission rule: one scan in flight at a time, and no
+    new scan within the spacing window of the last one's start."""
+    spawned: list[object] = []
+
+    def _fake_spawn(coro):
+        spawned.append(coro)
+        coro.close()
+
+    import workflowy_mcp.coherence.operation_cache as opc
+
+    monkeypatch.setattr(opc, "create_isolated_context_task", _fake_spawn)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(srv.time, "monotonic", lambda: clock["now"])
+
+    assert srv._carto_list_jobs_poll(object()) is True  # first poll spawns
+    assert srv._carto_list_jobs_poll(object()) is False  # in flight -> dropped
+    srv._carto_list_jobs_in_flight = False  # the scan finished
+    clock["now"] += srv._CARTO_LIST_JOBS_MIN_SPACING_S / 2
+    assert srv._carto_list_jobs_poll(object()) is False  # inside the spacing window
+    clock["now"] += srv._CARTO_LIST_JOBS_MIN_SPACING_S
+    assert srv._carto_list_jobs_poll(object()) is True  # next second's poll spawns
+    assert len(spawned) == 2
+    # One tab polling once a second is never throttled below 1 Hz.
+    assert srv._CARTO_LIST_JOBS_MIN_SPACING_S < 1.0
+
+
+# ---------------------------------------------------------------------------
+# Payload: only the rows the widget shows; wire shapes unchanged
+# ---------------------------------------------------------------------------
+
+
+def test_reply_omits_exactly_the_rows_the_widget_hides(monkeypatch):
+    rows = [
+        {"job_id": "a", "status": "completed"},
+        {"job_id": "b", "status": "Cancelled"},
+        {"job_id": "c", "status": "failed"},
+        {"job_id": "d", "status": "completed_with_warnings"},
+        {"job_id": "e", "status": "running"},
+        {"job_id": "f", "status": "some_future_status"},
+        {"job_id": "g", "status": None},
+    ]
+    monkeypatch.setattr(srv, "_scan_carto_job_files", lambda base_dir_str=None: rows)
+
+    async def exercise():
+        ws = _QueueWebSocket()
+        await srv._handle_carto_list_jobs(ws)
+        return ws
+
+    ws = asyncio.run(exercise())
+    (result,) = _results(ws)
+    assert set(result) == {"action", "success", "jobs"}
+    assert result["success"] is True
+    assert [j["job_id"] for j in result["jobs"]] == ["c", "d", "e", "f", "g"]
+    assert srv._carto_list_jobs_in_flight is False
+
+
+def test_scan_failure_keeps_the_failure_frame_and_log_line(monkeypatch):
+    logged: list[str] = []
+
+    def _boom(base_dir_str=None):
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(srv, "_scan_carto_job_files", _boom)
+    monkeypatch.setattr(srv, "log_event", lambda msg, comp="SERVER": logged.append(msg))
+    srv._carto_list_jobs_in_flight = True
+
+    async def exercise():
+        ws = _QueueWebSocket()
+        await srv._handle_carto_list_jobs(ws)
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert _results(ws) == [
+        {"action": "carto_list_jobs_result", "success": False, "error": "disk gone"}
+    ]
+    assert logged == ["carto_list_jobs handler error: disk gone"]
+    assert srv._carto_list_jobs_in_flight is False  # released even on failure
+
+
+def test_closed_socket_on_send_releases_the_single_flight(monkeypatch):
+    monkeypatch.setattr(srv, "_scan_carto_job_files", lambda base_dir_str=None: [])
+    monkeypatch.setattr(srv, "log_event", lambda *a, **k: None)
+    srv._carto_list_jobs_in_flight = True
+
+    class _DeadSocket:
+        async def send(self, payload):
+            raise ConnectionError("closed")
+
+    asyncio.run(srv._handle_carto_list_jobs(_DeadSocket()))
+    assert srv._carto_list_jobs_in_flight is False
+
+
+# ---------------------------------------------------------------------------
+# The once-a-second watcher scans off the event loop too
+# ---------------------------------------------------------------------------
+
+
+def test_job_tracker_scans_in_a_worker_thread(monkeypatch):
+    threads: list[int] = []
+
+    def _scan(base_dir_str=None, *, include_inventory=False):
+        threads.append(threading.get_ident())
+        assert include_inventory
+        return {"rows": [], "observations": [], "uncertain": [], "complete": True}
+
+    monkeypatch.setattr(srv, "_scan_carto_job_files", _scan)
+    monkeypatch.setattr(srv, "_observe_carto_final_obligations", lambda _: {
+        "records": [], "uncertain": [], "complete": True})
+
+    async def exercise():
+        loop_thread = threading.get_ident()
+        await srv._refresh_carto_job_tracker_once()
+        return loop_thread
+
+    loop_thread = asyncio.run(exercise())
+    assert threads and threads[0] != loop_thread
+
+
+def test_no_inline_scan_remains_in_the_reader_loop():
+    import inspect
+
+    source = inspect.getsource(srv.websocket_handler)
+    assert "_scan_carto_job_files" not in source
+    assert "_carto_list_jobs_poll(websocket)" in source

@@ -1,0 +1,129 @@
+"""Regression locks for the UUID Explorer slice-group Apply dialog wiring.
+
+Final keyboard design (exhaustive live debugging): bare digits typed against a
+NON-EDITABLE focus are consumed by page-command layers (e.g. Vimium; B opened
+its bookmark Vomnibar) before any page listener sees them, while digits type
+normally into real editable controls (why F12+1/2 works from Workflowy's
+editor). The dialog therefore focuses a genuine 'Shortcut' text input on open
+and accepts ONLY 1/2/Escape (keydown primary, 'input' event as the text-entry
+fallback). The earlier MAIN/document_start ingress was removed as unnecessary.
+"""
+
+import json
+from pathlib import Path
+
+
+EXTENSION = Path(__file__).resolve().parents[1] / "workflowy-glimpse-cache"
+CLIENT = EXTENSION / "glimpse-cache-client.js"
+MANIFEST = EXTENSION / "manifest.json"
+
+
+def _source() -> str:
+    return CLIENT.read_text(encoding="utf-8")
+
+
+def test_slice_apply_has_no_native_title_tooltips() -> None:
+    source = _source()
+    dialog_start = source.index("function openSliceApplyDialog(")
+    dialog_end = source.index("function appendSliceGroupExpanderHeader(", dialog_start)
+    dialog = source[dialog_start:dialog_end]
+    row_start = source.index("const applyGroupBtn = document.createElement('button')")
+    row_end = source.index("tdApply.appendChild(applyGroupBtn)", row_start)
+    apply_button = source[row_start:row_end]
+
+    assert ".title =" not in dialog
+    assert ".title =" not in apply_button
+    assert "addQuestionHelp" in dialog
+    assert "helpBtn.textContent = '?'" in dialog
+    assert "data-slice-apply-help-note" in dialog
+
+
+def test_extension_versions_make_reload_provable() -> None:
+    source = _source()
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+    assert "const GLIMPSE_VERSION = '3.51.0';" in source
+    assert manifest["version"] == "3.36.1"
+
+
+def test_no_early_keyboard_ingress_machinery_remains() -> None:
+    """The diagnostic MAIN/document_start ingress + custom-event sink were
+    diagnostic scaffolding; the focused-editable-input fix replaces them."""
+    source = _source()
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    all_js = [
+        name
+        for entry in manifest["content_scripts"]
+        for name in entry.get("js", [])
+    ]
+
+    assert "early-keyboard-main.js" not in all_js
+    assert not (EXTENSION / "early-keyboard-main.js").exists()
+    assert "__glimpse_slice_apply_key__" not in source
+    assert "handleEarlyMainSliceApplyKey" not in source
+
+
+def test_dialog_focuses_a_real_shortcut_input_accepting_only_1_2_escape() -> None:
+    source = _source()
+    dialog = source[source.index("function openSliceApplyDialog(") :]
+    dialog = dialog[: dialog.index("function appendSliceGroupExpanderHeader(")]
+
+    assert "shortcutInput = document.createElement('input')" in dialog
+    assert "shortcutInput.type = 'text';" in dialog
+    assert "shortcutInput.focus(); shortcutInput.select();" in dialog
+    assert "shortcutInput.addEventListener('keydown'" in dialog
+    assert "shortcutInput.addEventListener('input'" in dialog
+    # Only 1/2/Escape act; no hidden A/B aliases.
+    assert "ev.key === 'Escape' || ev.key === '1' || ev.key === '2'" in dialog
+    assert "{ key: '1', label: 'Apply'" in dialog
+    assert "{ key: '2', label: 'Apply + make this tab default'" in dialog
+    assert "{ key: 'A'" not in dialog
+    assert "{ key: 'B'" not in dialog
+
+
+def test_central_keydown_keyup_fallbacks_remain() -> None:
+    source = _source()
+    dispatcher = source.index("id=f12-popup@keydown-dispatch")
+    branch = source.index("if (sliceApplyDialogState)", dispatcher)
+    dialog = source.index("function openSliceApplyDialog(")
+
+    assert dispatcher < branch < dialog
+    assert "sliceApplyDialogState.executeKey(event.key, 'keydown')" in source[branch:dialog]
+    keyup_start = source.index("document.addEventListener('keyup', (event) => {")
+    keyup_slice_branch = source.index(
+        "sliceApplyDialogState.executeKey(event.key, 'keyup')", keyup_start
+    )
+    assert keyup_start < keyup_slice_branch
+    assert "_sliceApplyEscHandler" not in source
+
+
+def test_slice_apply_dialog_state_closes_state() -> None:
+    source = _source()
+    dialog = source[source.index("function openSliceApplyDialog(") :]
+
+    assert "sliceApplyDialogState = {" in dialog
+    assert "if (key === 'Escape')" in dialog
+    assert "hit.run();" in dialog
+    assert "sliceApplyDialogState = null;" in source
+
+
+def test_copy_closes_and_minimizes_at_intent_time() -> None:
+    source = _source()
+    start = source.index("copyBtn.addEventListener('click'")
+    end = source.index("copyRow.appendChild(copyBtn)", start)
+    handler = source[start:end]
+
+    assert handler.index("closeSliceApplyDialog();") < handler.index(
+        "_copySliceGroupSearchString(gid, flashCopy);"
+    )
+    assert handler.index("_minimizeUuidNavigatorWidget();") < handler.index(
+        "_copySliceGroupSearchString(gid, flashCopy);"
+    )
+
+
+def test_slice_group_table_declares_its_three_real_cells() -> None:
+    source = _source()
+    assert "['Name', '', ''].forEach((label, idx)" in source
+    assert source.count("colSpan = 3;") >= 3
+    assert "const tdPrefixes = document.createElement('td')" not in source
+    assert "const tdRoot = document.createElement('td')" not in source

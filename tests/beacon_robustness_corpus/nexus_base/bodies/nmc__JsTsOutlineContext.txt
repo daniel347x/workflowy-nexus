@@ -1,0 +1,266 @@
+class JsTsOutlineContext:
+    """Per-parse JS/TS outline context shared by both outline builders.
+
+    Constructed once per outline-builder invocation. The same context
+    object is threaded unchanged through every recursive call into
+    ``_js_walk``; only ``qual_prefix`` (the recursive ancestry) and
+    ``scope_state`` (per-scope mutable parser state) vary by recursion.
+
+    Configuration that captures the Vue-vs-non-Vue divergence:
+
+    - ``line_offset0``: 0 for whole-file JS/TS; ``>0`` for Vue ``<script>``
+      blocks (the 0-based file row where ``source_text`` line 1 lives).
+      Applied by ``abs_line(local)``.
+
+    - ``qual_prefix``: None or empty for whole-file JS/TS; a prefix string
+      like ``"script_setup_0"`` for Vue script blocks (so AST_QUALNAMEs
+      from different ``<script>`` blocks don't collide). Applied by
+      ``qualify(inner_qual)`` which composes ``"{qual_prefix}:{inner}"``
+      when ``qual_prefix`` is non-empty, and is a no-op otherwise.
+
+    Critical invariant for non-Vue callers: with ``line_offset0=0`` and
+    ``qual_prefix=None`` (the defaults), ``abs_line(x) == x`` and
+    ``qualify(x) == x``. This is what guarantees byte-identical behavior
+    for whole-file JS/TS after the Phase D refactor.
+    """
+
+    file_path: str
+    source_text: str
+    source_bytes: bytes
+    language_name: str
+    root: Any
+    lines: list[str]
+    n: int
+    comment_mask: list[bool]
+    cleaned_comments: list[str]
+    line_offset0: int = 0
+    qual_prefix: Optional[str] = None
+    priority_counter: list[int] = field(default_factory=lambda: [100])
+
+    # -- Constructors -------------------------------------------------------
+
+    @classmethod
+    def from_file(cls, file_path: str, language_name: str) -> "JsTsOutlineContext":
+        """Build a context for whole-file JS/TS parsing.
+
+        Reads ``file_path`` from disk, parses with Tree-sitter, and
+        precomputes the comment mask. ``line_offset0=0`` and
+        ``qual_prefix=None`` (defaults) so abs/local and ast/inner are
+        identical -- the whole-file case is the no-op Vue configuration.
+        """
+        with open(file_path, "r", encoding="utf-8") as f:
+            source_text = f.read()
+        source_bytes = source_text.encode("utf-8")
+        parser = Parser()
+        language = get_language(language_name)  # type: ignore[operator]
+        parser.language = language
+        tree = parser.parse(source_bytes)
+        root = tree.root_node
+        lines = source_text.splitlines()
+        n = len(lines)
+        comment_mask, cleaned_comments = _build_js_comment_mask(lines)
+        return cls(
+            file_path=file_path,
+            source_text=source_text,
+            source_bytes=source_bytes,
+            language_name=language_name,
+            root=root,
+            lines=lines,
+            n=n,
+            comment_mask=comment_mask,
+            cleaned_comments=cleaned_comments,
+        )
+
+    @classmethod
+    def from_source(
+        cls,
+        *,
+        source_text: str,
+        file_path: str,
+        language_name: str,
+        line_offset0: int,
+        qual_prefix: str,
+    ) -> "JsTsOutlineContext":
+        """Build a context for parsing a JS/TS source string (Vue case).
+
+        ``source_text`` is the extracted ``<script>`` block content,
+        ``line_offset0`` is the 0-based file row where source_text line 1
+        lives, and ``qual_prefix`` is prepended to every AST_QUALNAME via
+        ``qualify(...)`` so script-block qualnames don't collide between
+        multiple ``<script>`` blocks in the same .vue file.
+        """
+        source_bytes = source_text.encode("utf-8")
+        parser = Parser()
+        language = get_language(language_name)  # type: ignore[operator]
+        parser.language = language
+        tree = parser.parse(source_bytes)
+        root = tree.root_node
+        lines = source_text.splitlines()
+        n = len(lines)
+        comment_mask, cleaned_comments = _build_js_comment_mask(lines)
+        return cls(
+            file_path=file_path,
+            source_text=source_text,
+            source_bytes=source_bytes,
+            language_name=language_name,
+            root=root,
+            lines=lines,
+            n=n,
+            comment_mask=comment_mask,
+            cleaned_comments=cleaned_comments,
+            line_offset0=line_offset0,
+            qual_prefix=qual_prefix,
+        )
+
+    # -- Coordinate transforms (the Vue divergence, localized) --------------
+
+    def abs_line(self, local_line: int) -> int:
+        """Translate a Tree-sitter local line into a file-absolute line.
+
+        For whole-file JS/TS this is the identity (``line_offset0=0``).
+        For Vue script blocks this adds ``line_offset0`` so the emitted
+        ``orig_lineno_start_unused`` / ``orig_lineno_end_unused`` fields
+        reference the .vue file's line space, not the extracted script
+        block's local line space.
+        """
+        return int(local_line) + int(self.line_offset0 or 0)
+
+    def qualify(self, inner_qual: str) -> str:
+        """Compose the externally-visible AST_QUALNAME from a recursive inner name.
+
+        For whole-file JS/TS (``qual_prefix=None`` or empty) this is the
+        identity. For Vue script blocks this prepends ``qual_prefix:`` (a
+        colon separator is auto-appended if not already present) so
+        AST_QUALNAMEs from multiple ``<script>`` blocks in the same .vue
+        file don't collide.
+
+        The ``inner_qual`` should still be used as the ``qual_prefix=``
+        argument when recursing into child scopes; only the externally
+        emitted ``ast_qualname`` field uses ``qualify(inner_qual)``.
+        """
+        pref = (self.qual_prefix or "").strip()
+        if pref and not pref.endswith(":"):
+            pref = pref + ":"
+        return f"{pref}{inner_qual}" if pref else inner_qual
+
+    # -- Note construction --------------------------------------------------
+
+    def make_note(
+        self,
+        ast_qual: str,
+        start_line_local: Optional[int] = None,
+        doc: Optional[str] = None,
+    ) -> str:
+        """Build the Workflowy note text for an emitted JS/TS AST node.
+
+        Always starts with ``AST_QUALNAME: {ast_qual}``. If ``doc`` is
+        provided, appends a ``---`` separator and the docstring. If
+        ``start_line_local`` is provided, slurps adjacent JS/TS comments
+        from the local source view (uses ``self.lines`` / ``self.n`` /
+        ``self.comment_mask`` / ``self.cleaned_comments``) and appends
+        them under a ``CONTEXT COMMENTS (JS/TS):`` block.
+
+        Note: ``start_line_local`` is intentionally the LOCAL line (used
+        to look up comments in the local source view, which for Vue is
+        the extracted script block). For node emission in the outline
+        tree, use ``self.abs_line(start_line_local)`` to compute
+        ``orig_lineno_start_unused``.
+        """
+        note_lines: List[str] = [f"AST_QUALNAME: {ast_qual}"]
+        if doc:
+            note_lines.append("---")
+            note_lines.append(doc)
+        if isinstance(start_line_local, int):
+            ctx_comments = _extract_js_ast_comment_context(
+                start_line_local,
+                self.lines,
+                self.n,
+                self.comment_mask,
+                self.cleaned_comments,
+            )
+            if ctx_comments:
+                note_lines.append("")
+                note_lines.append("CONTEXT COMMENTS (JS/TS):")
+                note_lines.extend(ctx_comments)
+        return "\n".join(note_lines)
+
+    # -- Shared mutable state -----------------------------------------------
+
+    def next_priority(self) -> int:
+        """Return the next priority value (100, 200, 300, ...) and advance.
+
+        Encapsulates the ``[100]`` mutable list that was previously
+        threaded as a closure variable. Each emitted outline node should
+        set ``"priority": ctx.next_priority()`` exactly once.
+        """
+        p = self.priority_counter[0]
+        self.priority_counter[0] += 100
+        return p
+
+    # -- Convenience wrappers around Phase A / B.1 module-level helpers ----
+
+    def node_text(self, node: Any) -> str:
+        """Decode a tree-sitter node's source bytes to a UTF-8 string.
+
+        Wrapper around the Phase A module-level ``_js_node_text``.
+        """
+        return _js_node_text(node, self.source_bytes)
+
+    def is_function_like(self, v: Any) -> bool:
+        """Return True when ``v`` is an arrow_function or function expression.
+
+        Wrapper around the Phase A module-level ``_js_is_function_like``.
+        """
+        return _js_is_function_like(v)
+
+    def callee_simple_name(self, v: Any) -> str:
+        """Return the trailing identifier of a ``call_expression``'s callee.
+
+        Wrapper around the Phase A module-level ``_js_callee_simple_name``.
+        """
+        return _js_callee_simple_name(v, self.source_bytes)
+
+    def find_function_wrapper_body(self, v: Any) -> Any:
+        """Detect ``computed(() => ...)`` wrapper calls and return inner body.
+
+        Wrapper around the Phase B.1 module-level
+        ``_js_find_function_wrapper_body``.
+        """
+        return _js_find_function_wrapper_body(v, self.source_bytes)
+
+    def find_define_store_setup_body(self, v: Any) -> Any:
+        """Return the BODY node of the setup function passed to ``defineStore``.
+
+        Wrapper around the Phase B.1 module-level
+        ``_js_find_define_store_setup_body``.
+        """
+        return _js_find_define_store_setup_body(v, self.source_bytes)
+
+    def find_define_store_options_object(self, v: Any) -> Any:
+        """Return the options object passed to ``defineStore``.
+
+        Wrapper around the Phase B.1 module-level
+        ``_js_find_define_store_options_object``.
+        """
+        return _js_find_define_store_options_object(v, self.source_bytes)
+
+    def key_text(self, n: Any) -> str:
+        """Return the text of an object-literal property key.
+
+        Wrapper around the Phase B.1 module-level ``_js_key_text``.
+        """
+        return _js_key_text(n, self.source_bytes)
+
+    def params_text(self, fn_node: Any) -> str:
+        """Return a function-like node's parameter list as ``(a, b, ...)``.
+
+        Wrapper around the Phase B.1 module-level ``_js_params_text``.
+        """
+        return _js_params_text(fn_node, self.source_bytes)
+
+    def body_node(self, fn_node: Any) -> Any:
+        """Return the ``body`` field of a function-like tree-sitter node.
+
+        Wrapper around the Phase B.1 module-level ``_js_body_node``.
+        """
+        return _js_body_node(fn_node)

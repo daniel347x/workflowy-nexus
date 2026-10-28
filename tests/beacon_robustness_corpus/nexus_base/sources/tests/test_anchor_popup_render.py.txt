@@ -1,0 +1,144 @@
+"""Regression locks for rendering Anchor Docks from the Anchors popup.
+
+The popup is UI chrome only: anchor discovery stays server-authoritative, and
+Render must enter the existing raw-root RenderProjectionSpec/apply pipeline.
+"""
+
+from pathlib import Path
+
+
+CLIENT = (
+    Path(__file__).resolve().parents[1]
+    / "workflowy-glimpse-cache"
+    / "glimpse-cache-client.js"
+)
+
+
+def _source() -> str:
+    return CLIENT.read_text(encoding="utf-8")
+
+
+def _function_block(source: str, name: str, next_name: str) -> str:
+    start = source.index(f"function {name}(")
+    end = source.index(f"function {next_name}(", start)
+    return source[start:end]
+
+
+def test_anchor_render_delegates_to_shared_raw_root_apply_pipeline() -> None:
+    source = _source()
+    block = _function_block(
+        source, "_renderAnchorFromPopup", "_makeAnchorRenderButton"
+    )
+
+    assert "closeAnchorListPopup();" in block
+    assert "_minimizeUuidNavigatorWidget();" in block
+    assert block.index("closeAnchorListPopup();") < block.index(
+        "_minimizeUuidNavigatorWidget();"
+    ) < block.index("applySliceGroupIntoDock(null, {")
+    assert "applySliceGroupIntoDock(null, {" in block
+    assert "rootUuid: uid" in block
+    assert "sortBy: 'none'" in block
+    assert "renderTimeoutMs: CACHE_RENDER_LONG_TIMEOUT_MS" in block
+    assert "const generation = ++dockedRenderGeneration;" in block
+    assert "renderGeneration: generation" in block
+    assert "requestSliceModalRender" not in block
+
+
+def test_anchor_and_slice_descend_preferences_are_strictly_decoupled() -> None:
+    source = _source()
+    render_block = _function_block(
+        source, "_renderAnchorFromPopup", "_makeAnchorRenderButton"
+    )
+    popup_block = _function_block(
+        source, "showAnchorListPopup", "openAnchorListPopupFromServer"
+    )
+
+    assert "const ANCHOR_POPUP_OPTS_KEY = 'glimpse_anchor_popup_options';" in source
+    assert "const SLICE_APPLY_OPTS_KEY = 'glimpse_slice_apply_options';" in source
+    assert "const applyOpts = _readAnchorPopupOptions();" in render_block
+    assert (
+        "applyOpts.descendThroughDocks ? 'all' : 'stop_at_child_anchors'"
+        in render_block
+    )
+    assert "_readSliceApplyOptions" not in render_block
+    assert "_readAnchorPopupOptions().descendThroughDocks" in popup_block
+    assert "_saveAnchorPopupOptions({ descendThroughDocks });" in popup_block
+    assert "_saveSliceApplyOptions" not in popup_block
+    assert "Descend child Docks: ON" in popup_block
+
+
+def test_one_time_migration_repairs_the_contaminated_slice_preference() -> None:
+    source = _source()
+    start = source.index("// ONE-TIME repair for the just-shipped coupling bug")
+    end = source.index("// Published handle consumed", start)
+    migration = source[start:end]
+
+    assert "localStorage.getItem(ANCHOR_POPUP_OPTS_KEY) == null" in migration
+    assert "const contaminatedSliceOpts = _readSliceApplyOptions();" in migration
+    assert "descendThroughDocks: !!contaminatedSliceOpts.descendThroughDocks" in migration
+    assert "_saveSliceApplyOptions({ descendThroughDocks: true });" in migration
+
+
+def test_primary_explorer_controls_share_one_real_button_header_row() -> None:
+    source = _source()
+    start = source.index("function initializeUuidNavigator()")
+    end = source.index("function requestUuidPath(", start)
+    block = source[start:end]
+
+    ordered_controls = """[
+      uuidRowToggleBtn,
+      refreshBtn,
+      skipToggleBtn,
+      mdDockToggleBtn,
+      groupsToggleBtn,
+      globalTagsToggleBtn,
+      anchorsHeaderBtn,
+    ]"""
+    assert ordered_controls in block
+    assert "styleHeaderActionButton(btn);" in block
+    assert "headerMain.appendChild(btn);" in block
+    assert "btn.style.border = '1px solid #555';" in block
+    assert "container.appendChild(refreshControlsRow);" not in block
+    assert "container.appendChild(uuidRowToggleBtn);" not in block
+    assert "groupsHeaderBtns.appendChild(anchorsHeaderBtn);" not in source
+
+
+def test_global_tags_are_comma_delimited_and_tall_enough_to_scan() -> None:
+    source = _source()
+
+    assert "hashed.join(', ')" in source
+    assert "globalTagsArea.rows = 5;" in source
+    assert "globalTagsArea.style.height = '88px';" in source
+    assert "globalTagsArea.style.minHeight = '72px';" in source
+    assert "globalTagsArea.style.overflowY = 'auto';" in source
+
+
+def test_minimized_explorer_has_a_structural_status_visibility_guard() -> None:
+    source = _source()
+
+    assert "data-glimpse-uuidnav-minimized" in source
+    assert ":not([data-glimpse-uuidnav-header=\"1\"]) { display: none !important; }" in source
+    assert "data-glimpse-uuidnav-hide-when-minimized" in source
+    assert "uuidNavigatorHeaderMainEl.style.display = minimized ? 'none' : 'inline-flex';" in source
+
+
+def test_tree_and_flat_anchor_rows_both_have_render_button() -> None:
+    source = _source()
+    tree_block = _function_block(
+        source, "_renderAnchorTreeInto", "_renderAnchorFlatInto"
+    )
+    flat_block = _function_block(
+        source, "_renderAnchorFlatInto", "copyTextForAnchorPopup"
+    )
+
+    assert "_makeAnchorRenderButton(node.id)" in tree_block
+    assert "_makeAnchorRenderButton(_uid)" in flat_block
+
+
+def test_raw_root_success_toast_is_not_labeled_as_slice() -> None:
+    source = _source()
+    block = _function_block(source, "displaySliceInDock", "requestCompileSliceSearch")
+
+    assert "_rs && _rs.kind === 'raw_root'" in block
+    assert "? 'Rendered subtree'" in block
+    assert "statusLead" in block

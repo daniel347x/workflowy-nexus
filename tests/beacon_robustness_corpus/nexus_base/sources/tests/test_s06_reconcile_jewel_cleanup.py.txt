@@ -1,0 +1,287 @@
+"""S06 Gate B — JEWEL-free generic reconcile.
+
+Proves reconcile_tree runs the same five-phase engine with NO JEWEL
+machinery: historical `jewel_file` / `protect_notes_emoji_delete_guard` keys
+are ignored extra input (§13.3), the diagnostic .weave journal reports
+generic completed operations, explicitly_preserved_ids keeps its
+identity-seeding protection, and emoji alone no longer shields deletion.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+from workflowy_mcp.client.workflowy_move_reconcile import reconcile_tree
+
+REPO = Path(__file__).resolve().parents[1]
+RECONCILE = REPO / "src" / "workflowy_mcp" / "client" / "workflowy_move_reconcile.py"
+
+
+def _fakes(target_nodes: list[dict]):
+    """In-memory Workflowy fakes. target_nodes are the pre-existing nodes
+    (each needs id/parent_id/priority; name/note optional)."""
+    calls: dict[str, list] = {
+        "create": [], "update": [], "delete": [], "move": [],
+    }
+    store = {str(n["id"]): dict(n) for n in target_nodes}
+
+    async def list_nodes(parent_id):
+        return [dict(n) for n in store.values() if n.get("parent_id") == parent_id]
+
+    async def create_node(parent_id, data):
+        new_id = f"NEW-{len(calls['create']) + 1}"
+        calls["create"].append((parent_id, dict(data)))
+        siblings = [n for n in store.values() if n.get("parent_id") == parent_id]
+        prio = max([int(n.get("priority") or 0) for n in siblings] or [0]) + 100
+        store[new_id] = {
+            "id": new_id,
+            "parent_id": parent_id,
+            "priority": prio,
+            "name": data.get("name"),
+            "note": data.get("note"),
+        }
+        return new_id
+
+    async def update_node(node_id, data):
+        calls["update"].append((node_id, dict(data)))
+        store[node_id].update({k: v for k, v in data.items() if k in ("name", "note")})
+
+    async def delete_node(node_id):
+        calls["delete"].append(node_id)
+        store.pop(node_id, None)
+        return True
+
+    async def move_node(node_id, new_parent, position="top"):
+        calls["move"].append((node_id, new_parent, position))
+        store[node_id]["parent_id"] = new_parent
+
+    async def export_nodes(root):
+        return {"nodes": [dict(n) for n in store.values()]}
+
+    return calls, store, list_nodes, create_node, update_node, delete_node, move_node, export_nodes
+
+
+def _run(source_json, target, **kwargs):
+    calls, store, list_nodes, create_node, update_node, delete_node, move_node, export_nodes = _fakes(target)
+    journal: list[dict] = []
+    kwargs.setdefault("dry_run", True)
+    kwargs.setdefault("skip_delete_bulk_export_wait", True)
+    kwargs.setdefault("log_to_file_msg", lambda _m: None)
+    kwargs.setdefault("log_weave_entry", journal.append)
+    kwargs.setdefault("allow_pure_reorder", True)
+    plan = asyncio.run(
+        reconcile_tree(
+            source_json,
+            "ROOT",
+            list_nodes=list_nodes,
+            create_node=create_node,
+            update_node=update_node,
+            delete_node=delete_node,
+            move_node=move_node,
+            export_nodes=export_nodes,
+            **kwargs,
+        )
+    )
+    return plan, calls, store, journal
+
+
+_BASE_SOURCE = {
+    "export_root_id": "ROOT",
+    "export_root_children_status": "complete",
+    "nodes": [
+        {"id": "A", "name": "Node A", "children_status": "complete", "children": []},
+    ],
+    "original_ids_seen": ["A"],
+}
+
+
+def test_historical_jewel_keys_are_ignored_extra_input() -> None:
+    """§13.3/H3 compatibility fixture: jewel_file and
+    protect_notes_emoji_delete_guard are naturally ignored by the generic
+    parser — identical plan with and without them."""
+    target = [{"id": "A", "parent_id": "ROOT", "priority": 100, "name": "Node A", "note": ""}]
+    plan_plain, calls_plain, _, _ = _run(_BASE_SOURCE, target)
+    legacy = {
+        **_BASE_SOURCE,
+        "jewel_file": "legacy_terrain.json",
+        "protect_notes_emoji_delete_guard": True,
+    }
+    plan_legacy, calls_legacy, _, _ = _run(legacy, target)
+    assert plan_plain == plan_legacy
+    assert calls_plain == calls_legacy
+    assert "jewel_sync_summary" not in plan_plain
+
+
+def test_real_run_create_journal_is_generic_and_no_jewel_import() -> None:
+    source = {
+        "export_root_id": "ROOT",
+        "nodes": [
+            {"id": None, "name": "Brand New", "children_status": "complete", "children": []},
+        ],
+        "original_ids_seen": [],
+    }
+    plan, calls, store, journal = _run(source, [], dry_run=False)
+    assert calls["create"], "create wrapper was not invoked"
+    create_entries = [e for e in journal if e.get("op") == "create"]
+    statuses = [e.get("status") for e in create_entries]
+    assert statuses == ["started", "completed"]
+    assert create_entries[0]["resumability_safe"] is False
+    assert create_entries[1]["resumability_safe"] is True
+    assert "nexus_json_tools" not in sys.modules
+
+
+def test_dry_run_plan_has_no_jewel_fields() -> None:
+    plan, _, _, _ = _run(_BASE_SOURCE, [{"id": "A", "parent_id": "ROOT", "priority": 100, "name": "Other", "note": ""}])
+    assert plan is not None
+    assert "jewel_sync_summary" not in plan
+    for section in ("creates", "moves", "reorders", "updates"):
+        for entry in plan.get(section, []):
+            assert "jewel" not in repr(entry).casefold()
+
+
+def test_emoji_alone_no_longer_protects_deletion() -> None:
+    """§13.2 intentional change: a 📝-prefixed Workflowy-only node under a
+    mapped subtree is an ordinary unmatched node for the DELETE phase."""
+    source = {
+        "export_root_id": "ROOT",
+        "export_root_children_status": "complete",
+        "nodes": [],
+        "original_ids_seen": ["E"],
+        "protect_notes_emoji_delete_guard": True,  # ignored legacy key
+    }
+    target = [{"id": "E", "parent_id": "ROOT", "priority": 100, "name": "📝 my notes", "note": ""}]
+    _, calls, _, journal = _run(source, target, dry_run=False)
+    assert calls["delete"] == ["E"]
+    skipped = [e for e in journal if e.get("status") == "skipped"]
+    assert skipped == []
+
+
+def test_explicitly_preserved_ids_still_protects_ids_and_ancestors() -> None:
+    """REAL ancestor propagation (A5): the CHILD is preserved; the parent is
+    protected purely by being its ancestor."""
+    source = {
+        "export_root_id": "ROOT",
+        "export_root_children_status": "complete",
+        "nodes": [],
+        "original_ids_seen": ["P", "C"],
+        "explicitly_preserved_ids": ["C"],
+    }
+    target = [
+        {"id": "P", "parent_id": "ROOT", "priority": 100, "name": "parent", "note": ""},
+        {"id": "C", "parent_id": "P", "priority": 100, "name": "preserved child", "note": ""},
+    ]
+    _, calls, store, _ = _run(source, target, dry_run=False)
+    # C is preserved directly; P survives ONLY via the ancestor walk.
+    assert calls["delete"] == []
+    assert set(store) == {"P", "C"}
+
+
+def test_five_phases_and_synthetic_priority_unchanged() -> None:
+    """Create + update + delete all still apply; a freshly created node
+    models physical BOTTOM placement (no phantom reorder)."""
+    source = {
+        "export_root_id": "ROOT",
+        "export_root_children_status": "complete",
+        "nodes": [
+            {"id": "U", "name": "renamed", "note": "same", "children_status": "complete", "children": []},
+            {"id": None, "name": "appended", "children_status": "complete", "children": []},
+        ],
+        "original_ids_seen": ["U", "D"],
+    }
+    target = [
+        {"id": "U", "parent_id": "ROOT", "priority": 100, "name": "original", "note": "same"},
+        {"id": "D", "parent_id": "ROOT", "priority": 200, "name": "doomed", "note": ""},
+    ]
+    plan, calls, store, _ = _run(source, target, dry_run=False)
+    assert calls["update"] and calls["update"][0][0] == "U"
+    assert calls["create"], "create wrapper was not invoked"
+    assert calls["delete"] == ["D"]
+    # The new node is modeled at the physical bottom, so source order
+    # [U, appended] matches reality: NO reorder moves are emitted.
+    assert calls["move"] == []
+
+
+def test_parent_changing_move_still_applies() -> None:
+    """Phase 2 MOVE parity: a node whose source parent differs from its
+    target parent is moved with position='bottom'."""
+    source = {
+        "export_root_id": "ROOT",
+        "export_root_children_status": "complete",
+        "nodes": [
+            {
+                "id": "P2",
+                "name": "newparent",
+                "children_status": "complete",
+                "children": [
+                    {"id": "A", "name": "mover", "children_status": "complete", "children": []},
+                ],
+            },
+        ],
+        "original_ids_seen": ["A", "P1", "P2"],
+    }
+    target = [
+        {"id": "P1", "parent_id": "ROOT", "priority": 100, "name": "oldparent", "note": ""},
+        {"id": "P2", "parent_id": "ROOT", "priority": 200, "name": "newparent", "note": ""},
+        {"id": "A", "parent_id": "P1", "priority": 100, "name": "mover", "note": ""},
+    ]
+    _, calls, store, _ = _run(source, target, dry_run=False)
+    assert ("A", "P2", "bottom") in calls["move"]
+    assert store["A"]["parent_id"] == "P2"
+
+
+def test_same_parent_sibling_reorder_still_applies() -> None:
+    """Phase 3 REORDER parity: source sibling order [B, A] against target
+    visual order [A, B] emits the reverse-desired-order TOP moves."""
+    source = {
+        "export_root_id": "ROOT",
+        "export_root_children_status": "complete",
+        "nodes": [
+            {"id": "B", "name": "second-first", "children_status": "complete", "children": []},
+            {"id": "A", "name": "first-second", "children_status": "complete", "children": []},
+        ],
+        "original_ids_seen": ["A", "B"],
+    }
+    target = [
+        {"id": "A", "parent_id": "ROOT", "priority": 100, "name": "first-second", "note": ""},
+        {"id": "B", "parent_id": "ROOT", "priority": 200, "name": "second-first", "note": ""},
+    ]
+    _, calls, _, _ = _run(source, target, dry_run=False)
+    assert calls["move"] == [("A", "ROOT", "top"), ("B", "ROOT", "top")]
+
+
+def test_module_source_has_no_jewel_vocabulary() -> None:
+    source = RECONCILE.read_text(encoding="utf-8")
+    for token in (
+        "jewel_file",
+        "jewel_sync_ledger",
+        "jewel_sync_summary",
+        "update_jewel_with_uuid",
+        "transform_jewel",
+        "nexus_json_tools",
+        "completed_jewel_ok",
+        "completed_jewel_failed",
+        "protect_notes_emoji_delete_guard",
+        "_is_salvageable_notes_delete_guard",
+        "NOTES_MARKER",
+        "nexus_weave_enchanted",
+        "JEWEL",
+        "JEWELSTORM",
+        "[GUIDANCE]",
+    ):
+        assert token not in source, f"retired JEWEL token {token!r} still in reconcile module"
+    assert "import sys" not in source
+    assert "import importlib" not in source
+    # The active engine and its five phases survive.
+    for phase in ("PHASE 0", "PHASE 1", "PHASE 2", "PHASE 3", "PHASE 4", "PHASE 5"):
+        assert phase in source
+    assert "async def reconcile_tree(" in source
+    assert "original_ids_seen" in source
+    assert "explicitly_preserved_ids" in source
+
+
+def test_etch_logger_has_no_jewelstorm_route() -> None:
+    source = (REPO / "src" / "workflowy_mcp" / "client" / "api_client_etch.py").read_text(encoding="utf-8")
+    assert "jewelstorm" not in source
+    assert '"jewel"' not in source

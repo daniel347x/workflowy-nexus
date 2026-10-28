@@ -1,0 +1,191 @@
+def parse_python_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    """Parse @beacon[...] comment blocks from Python source lines.
+
+    Expected form (we control this schema):
+
+        # @beacon[
+        #   id=example@1234,
+        #   role=model:forward,
+        #   slice_labels=FP,DA,
+        #   kind=ast|span,
+        #   start_snippet="def forward(",
+        #   end_snippet="return y",
+        # ]
+
+    Returns a list of dicts with keys:
+        id, role, slice_labels, kind, start_snippet, end_snippet,
+        comment_line, kind_explicit.
+
+    ``diagnostics``, when a list, receives the parser's own decisions in
+    discovery order: one ``block`` record per opener (outcome ``kept`` or
+    ``skipped_unknown_kind``), one ``close`` record per close candidate the
+    second pass examines, one ``close_match`` per close it matches. The
+    return value is the same with or without it.
+    """
+    beacons: list[dict[str, Any]] = []
+
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            body = stripped.lstrip("#").lstrip()
+            if body.startswith("@beacon["):
+                comment_line = i + 1  # 1-based
+                block_lines = [body]
+                i += 1
+                block_end_line = None
+                # Collect until a line containing ']' (inclusive)
+                while i < n:
+                    next_line = lines[i].lstrip()
+                    if next_line.startswith("#"):
+                        next_body = next_line.lstrip("#").lstrip()
+                    else:
+                        next_body = next_line
+                    block_lines.append(next_body)
+                    # Close only when the metadata delimiter line begins with ']'.
+                    # This avoids premature termination when a value contains a stray ']'.
+                    if next_body.strip().startswith("]"):
+                        block_end_line = i + 1
+                        i += 1
+                        break
+                    i += 1
+
+                # Parse block_lines into key/value pairs (skip first/last structural lines)
+                field_texts: list[str] = []
+                inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+                for raw in inner_lines:
+                    text = raw.strip()
+                    if not text or text.startswith("@beacon"):
+                        continue
+                    field_texts.append(text)
+                # THE ONE shared field parser (beacon_mutation_contract): a line
+                # starts a field only with a known key + '='; others continue it.
+                fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+                kind_raw = fields.get("kind")
+                kind = (kind_raw or "span").strip().lower() or "span"
+                if kind not in {"ast", "span"}:
+                    # Unknown/unsupported kind – skip silently for now
+                    if diagnostics is not None:
+                        diagnostics.append(_beacon_block_diagnostic(
+                            comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                        ))
+                    continue
+
+                show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+                beacon = {
+                    "id": fields.get("id"),
+                    "role": fields.get("role"),
+                    "slice_labels": fields.get("slice_labels"),
+                    "kind": kind,
+                    "start_snippet": fields.get("start_snippet"),
+                    "end_snippet": fields.get("end_snippet"),
+                    "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                    "comment_line": comment_line,
+                    "kind_explicit": bool(kind_raw),
+                    "show_span": show_span,
+                    "show_span_explicit": show_span_explicit,
+                }
+                beacons.append(beacon)
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "kept", fields, field_texts,
+                    ))
+                continue
+        i += 1
+
+    # Second pass: compute span ranges for Python span beacons using @beacon-close[...] by id.
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        # Only override when no span was previously set.
+        if beacon.get("span_lineno_start") is not None and beacon.get("span_lineno_end") is not None:
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        # Find end of opener's metadata block (first line containing ']')
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+            else:
+                body = stripped
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        # Scan forward for matching @beacon-close[...] with same id
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1]
+            if "@beacon-close[" in raw:
+                close_lines = [raw]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1]
+                    close_lines.append(next_raw)
+                    # Structural ']' closer (after stripping '#'), for
+                    # consistency with the opener parse. (Dan, June 2026.)
+                    _nb = next_raw.lstrip()
+                    if _nb.startswith("#"):
+                        _nb = _nb.lstrip("#").lstrip()
+                    if _nb.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    text = cl.strip()
+                    # Strip leading '#' and whitespace
+                    if text.startswith("#"):
+                        text = text.lstrip("#").lstrip()
+                    # Drop trailing ',' and ']'
+                    while text and text[-1] in ",]":
+                        text = text[:-1].rstrip()
+                    if text.startswith("id="):
+                        _, val = text.split("=", 1)
+                        close_id = val.strip()
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    # Line where @beacon-close[...] started
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons

@@ -1,0 +1,8 @@
+    def _node_source_order_line(node: dict[str, Any]) -> int:
+        cached = span_sort_lines.get(id(node))
+        if isinstance(cached, int):
+            return cached
+        ln = node.get("orig_lineno_start_unused") if isinstance(node, dict) else None
+        if isinstance(ln, int):
+            return ln
+        return 10**9

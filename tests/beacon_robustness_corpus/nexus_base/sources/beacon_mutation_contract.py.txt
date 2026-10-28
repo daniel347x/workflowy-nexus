@@ -1,0 +1,616 @@
+"""beacon_mutation_contract.py -- pure, stdlib-only contracts for the beacon mutation seam.
+
+THE DEPENDENCE-GRAPH INVARIANT (load-bearing, SPEC v5 §2):
+nexus_map_codebase.py imports higher workflowy_mcp layers and must be lazily
+imported from foundation code (the documented module-load cycle). Therefore
+THIS module must NEVER import nexus_map_codebase, and nexus_map_codebase must
+NEVER import the workflowy_mcp package from these types. Both sides import
+THIS ONE tiny stdlib-only contracts module. There is deliberately NO edge
+between the mutation-spec module (workflowy_mcp.lightning_rod_mutation_spec)
+and nexus_map_codebase.
+
+PLACEMENT (forced, not a choice): this module lives at the REPO ROOT -- it
+cannot live inside src/workflowy_mcp/ because nexus_map_codebase must never
+import the workflowy_mcp package, and both consumers must be able to import
+it. As a repo-root module it is one of the modules NOT covered by the
+editable install's live-source link: after editing it, re-run
+``pip install -e .`` BEFORE every pytest run (the SPEC v5 §12 stale-venv
+rule), and keep it listed in pyproject.toml's py-modules packaging config
+(force-include) or packaged (uvx) installs will ImportError while the
+editable venv passes.
+
+Contents (all pure; no I/O):
+  * ``NODE_DECORATION_SYMBOLS`` + ``strip_leading_decoration_symbols`` -- THE
+    SINGLE HOME for the decoration-strip machinery (moved out of
+    nexus_map_codebase, which imports + re-exports both names). The symbol
+    set is NEVER duplicated in two modules (drift).
+  * ``validate_beacon_comment_text`` -- the ONE beacon-comment validator
+    (SPEC v5 §3).
+  * ``BeaconCommentIntent`` / ``BeaconWriteIntent`` -- frozen comment-intent
+    types passed AS COMMIT OPERANDS through the commit seam.
+  * ``CommentResolution`` + ``resolve_beacon_comment`` -- the ONE comment
+    resolver (SPEC v5 §5 step 7 ordered contract; all comparisons in
+    parser-normalized form).
+  * ``BEACON_FIELD_KEYS`` + ``parse_beacon_field_lines`` -- THE ONE beacon
+    field parser (key/value logic) shared by every per-language block parser
+    in nexus_map_codebase and beacon_obtain_code_snippet; supports multi-line
+    (wrapped) field values. ``beacon_field_unknown_keys`` reports the
+    unknown-key lines it continues or ignores.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Any, Literal, Optional
+
+
+# ---------------------------------------------------------------------------
+# Decoration-strip machinery -- THE SINGLE HOME (moved from nexus_map_codebase)
+# ---------------------------------------------------------------------------
+#
+# The trident plus every AST/file-type emoji Cartographer applies
+# DETERMINISTICALLY when generating a node NAME. These must never be embedded
+# in a beacon's role= / comment= field: when they are, the name builder
+# ("f'{TRIDENT} {display_role}'" or "f'{display_role}'") would re-emit them,
+# compounding e.g. into "🔱 🔱 🔱 name" on successive refreshes.
+#
+# ⚠ SINGLE-HOME RULE (SPEC v5 §2): this set lives HERE and ONLY here.
+# nexus_map_codebase imports + re-exports it so every existing call site is
+# untouched; the EMOJI_* / TRIDENT constants there remain for name-building,
+# and their VALUES must stay in lockstep with this set. NEVER duplicate the
+# symbol set in two modules (drift).
+NODE_DECORATION_SYMBOLS = frozenset({
+    "🔱",   # TRIDENT
+    "📂",   # EMOJI_FOLDER
+    "📄",   # EMOJI_FILE
+    "🐍",   # EMOJI_PYTHON
+    "📘",   # EMOJI_MARKDOWN
+    "🗄️",  # EMOJI_SQL (base glyph + U+FE0F variation selector)
+    "🐚",   # EMOJI_SHELL
+    "📦",   # EMOJI_CLASS
+    "ƒ",    # EMOJI_FUNC
+    "⚡",   # EMOJI_ASYNC
+    "💎",   # EMOJI_CONST
+    "🟨",   # EMOJI_JS
+    "🟦",   # EMOJI_TS
+    "🟩",   # EMOJI_VUE
+})
+
+
+# @beacon[
+#   id=auto-beacon@strip_leading_decoration_symbols-strip,
+#   slice_labels=nexus--tags,carto-fwd-source,
+#   kind=ast,
+#   comment=Strip any leading run of NODE_DECORATION_SYMBOLS (and surrounding whitespace) from a beacon role/comment value before it is used to build a Workflowy node NAME. Prevents trident/AST-emoji from being baked into role=/comment= and then compounding on each deterministic F12 refresh. Whitespace-and-symbol-only input collapses to "". SINGLE HOME: moved from nexus_map_codebase to beacon_mutation_contract (SPEC v5 §2); nexus_map_codebase imports + re-exports it.,
+# ]
+def strip_leading_decoration_symbols(text_value):
+    """Remove a leading run of Cartographer decoration symbols from a string.
+
+    Cartographer deterministically prepends the trident (and AST-type emoji)
+    to generated node NAMEs. Agents sometimes accidentally include those same
+    symbols inside a beacon's ``role=`` / ``comment=`` field; if left in, the
+    name builder re-emits them and they compound (e.g. ``🔱 🔱
+    🔱 name``) on every refresh.
+
+    This strips any leading sequence of whitespace and/or symbols drawn from
+    ``NODE_DECORATION_SYMBOLS`` from the front of ``text_value``. Symbols that
+    appear later in the string (legitimate content) are left untouched. A value
+    consisting only of decoration symbols / whitespace collapses to ``""``.
+    """
+    if not text_value or not isinstance(text_value, str):
+        return text_value or ""
+    s = text_value
+    # Prefix-based stripping (NOT char-by-char): some decoration symbols are
+    # multi-codepoint (e.g. EMOJI_SQL "🗄️" is a base glyph plus a
+    # U+FE0F variation selector). A char-by-char "ch in NODE_DECORATION_SYMBOLS"
+    # test can never match a multi-codepoint symbol, so we match whole symbols
+    # by prefix, longest-first, looping until no leading decoration remains.
+    symbols_longest_first = sorted(NODE_DECORATION_SYMBOLS, key=len, reverse=True)
+    while True:
+        s = s.lstrip()
+        # Drop a stray leading variation selector / ZWJ left behind by an
+        # already-stripped base glyph (defensive; keeps output clean).
+        while s and s[0] in ("️", "‍"):
+            s = s[1:]
+        matched = False
+        for sym in symbols_longest_first:
+            if sym and s.startswith(sym):
+                s = s[len(sym):]
+                matched = True
+                break
+        if not matched:
+            break
+    return s.strip()
+
+
+# ---------------------------------------------------------------------------
+# §3 Comment validation -- THE ONE validator
+# ---------------------------------------------------------------------------
+
+# Block/beacon delimiters can never appear inside a one-line beacon comment.
+_FORBIDDEN_COMMENT_TOKENS = ("/*", "*/", "<!--", "-->", "@beacon[", "BEACON (")
+
+# FIXPOINT RULE B (§3 transport entities): the Markdown beacon builder applies
+# decode_workflowy_transport_entities_for_markdown_source on every subsequent
+# F12 write, so an entity-containing comment would drift on cycle 2. Reject
+# the named HTML entities (lt, gt, amp, quot) AND both numeric character
+# reference forms (the &#-plus-digits decimal form AND the &#x-hex form) --
+# one regex; total determinism; trivial expressiveness loss.
+_TRANSPORT_ENTITY_RE = re.compile(
+    r"&(?:lt|gt|amp|quot);|&#\d+;|&#[xX][0-9a-fA-F]+;",
+    re.IGNORECASE,
+)
+
+
+# @beacon[
+#   id=auto-beacon@validate_beacon_comment_text-val1,
+#   slice_labels=nexus--tags,beacon-writeback,agent-kit-vendor,
+#   kind=ast,
+#   comment=THE ONE beacon-comment validator (SPEC v5 §3), shared by every mutation ingress. Rejects LF/CR/NUL, all other C0 controls, DEL, C1 controls, U+2028/U+2029, block delimiters (/* */ <!-- -->), beacon delimiters (@beacon[ / BEACON (), and Workflowy transport-entity patterns (named lt/gt/amp/quot + decimal/hex numeric refs -- fixpoint rule B). Applies the single-home leading-decoration strip so the accepted value is a fixpoint of the F12 round-trip (fixpoint rule A). Empty/whitespace normalizes to None. Commas, = and ] are SAFE and never rejected (Dan's ruling) -- internal AND trailing.,
+# ]
+def validate_beacon_comment_text(value: Any) -> Optional[str]:
+    """Validate and normalize a caller-supplied beacon comment (THE ONE validator).
+
+    The on-disk beacon grammars write this onto a single metadata line inside
+    Python/JS block comments, HTML comments, SQL comments, shell/YAML
+    comments, etc. Deliberately strict: one line, no control characters, no
+    block/beacon delimiters, no Workflowy transport entities.
+
+    REJECTIONS (SPEC v5 §3):
+      * LF, CR, NUL -- plus ALL other C0 controls, DEL, C1 controls,
+        U+2028 (LINE SEPARATOR), U+2029 (PARAGRAPH SEPARATOR);
+      * ``/*``, ``*/``, ``<!--``, ``-->``, ``@beacon[``, ``BEACON (``;
+      * transport-entity patterns (fixpoint rule B): the named entities
+        ``&lt; &gt; &amp; &quot;`` and BOTH numeric reference forms
+        (``&#123;`` decimal, ``&#x1F;`` hex) -- anything
+        ``decode_workflowy_transport_entities_for_markdown_source``-shaped
+        would drift on the next F12 write cycle.
+
+    FIXPOINT RULE A (decoration): ingress applies the SAME leading-decoration
+    normalization that F12 re-reads apply (the single-home
+    ``strip_leading_decoration_symbols``), so the accepted value is a
+    fixpoint of the round-trip. Explicit API comments then SKIP the strip and
+    the transport-entity decode at write time (those remain for note-derived
+    comments only).
+
+    COMMAS / '=' / ']' are SAFE AND NEVER REJECTED (Dan's ruling), internal
+    AND trailing. (The legacy field parser may drop a trailing run of ',' /
+    ']' on a later rebuild -- accepted loss, documented in §3; it can never
+    surface as a false conflict because the resolver compares all values in
+    parser-normalized form.)
+
+    Empty/whitespace normalizes to ``None``. Raises ``ValueError`` on any
+    rejection.
+    """
+    if value is None:
+        return None
+    comment = str(value).strip()
+    if not comment:
+        return None
+    # Fixpoint rule A: leading-decoration normalization at ingress.
+    comment = strip_leading_decoration_symbols(comment)
+    if not comment:
+        return None
+    for ch in comment:
+        code = ord(ch)
+        if (
+            code < 0x20  # C0 controls (incl. \n, \r, \x00)
+            or code == 0x7F  # DEL
+            or 0x80 <= code <= 0x9F  # C1 controls
+            or code in (0x2028, 0x2029)  # LINE / PARAGRAPH SEPARATOR
+        ):
+            raise ValueError(
+                f"unsafe beacon comment {comment!r}: contains forbidden "
+                f"control character U+{code:04X}"
+            )
+    for token in _FORBIDDEN_COMMENT_TOKENS:
+        if token in comment:
+            raise ValueError(
+                f"unsafe beacon comment {comment!r}: contains forbidden token {token!r}"
+            )
+    if _TRANSPORT_ENTITY_RE.search(comment):
+        raise ValueError(
+            f"unsafe beacon comment {comment!r}: contains a Workflowy "
+            "transport-entity pattern (would drift on the next F12 write cycle)"
+        )
+    return comment
+
+
+# @beacon[
+#   id=auto-beacon@_parser_normalize_comment_value-l0ro,
+#   role=_parser_normalize_comment_value,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+# ]
+def _parser_normalize_comment_value(value: Optional[str]) -> str:
+    """Replicate the legacy beacon field parser's rebuild-time normalization.
+
+    The legacy parsers strip a trailing run of ',' / ']' when re-reading a
+    rebuilt beacon block. All comment equality/conflict comparisons happen in
+    this PARSER-NORMALIZED form (SPEC v5 §5 step 7, NORMALIZATION FIRST) so a
+    trailing-comma comment converges in ONE cycle instead of producing a
+    false conflict on re-run. Nothing is ever REJECTED here for a trailing
+    delimiter (§3) -- normalization exists purely for comparison/writing.
+    """
+    text = (value or "").strip()
+    while text and text[-1] in ",]":
+        text = text[:-1].rstrip()
+    return text
+
+
+# ---------------------------------------------------------------------------
+# THE ONE beacon field parser (key/value logic shared by every block parser)
+# ---------------------------------------------------------------------------
+
+# Every field name any beacon block parser reads. A line starts a NEW field
+# only when it begins with one of these names followed by '=' (optional
+# spaces before the '='); every other line CONTINUES the previous field.
+BEACON_FIELD_KEYS = frozenset({
+    "id",
+    "role",
+    "slice_labels",
+    "kind",
+    "start_snippet",
+    "end_snippet",
+    "comment",
+    "comments",
+    "show_span",
+})
+
+_BEACON_FIELD_START_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+# @beacon[
+#   id=auto-beacon@parse_beacon_field_lines-mlbf,
+#   role=parse_beacon_field_lines,
+#   slice_labels=beacon-writeback,carto-fwd-source,
+#   kind=ast,
+#   comment=THE ONE beacon field parser shared by every per-language block parser (nexus_map_codebase + beacon_obtain_code_snippet): a line starts a field only if it begins with a KNOWN key and '='; any other line continues the previous field (multi-line values, joined with one space); the trailing ',' / ']' run is stripped from the value's last line only, then surrounding quotes. Single-line blocks parse exactly as the legacy per-site loops did.,
+# ]
+def parse_beacon_field_lines(texts: Any) -> dict[str, str]:
+    """Parse a beacon block's inner lines into ``{key: value}``.
+
+    ``texts`` are the block's inner lines with the language's comment prefix
+    ALREADY stripped by the caller, and the caller's structural lines (the
+    ``@beacon[`` opener, ``<!--`` / ``-->`` wrappers, the closing ``]``)
+    already excluded. Each caller keeps its own prefix stripping and block
+    collection; only this key/value logic is shared.
+
+    Rules:
+      * a line whose text begins with a key in ``BEACON_FIELD_KEYS`` followed
+        by ``=`` starts a new field (value = the text after the first ``=``);
+      * any other non-empty line continues the current field (a wrapped
+        value); text before the first field is ignored;
+      * parts are joined with ONE space;
+      * the trailing run of ``,`` / ``]`` is stripped from the joined value
+        (i.e. from its LAST line only -- a wrapped inner line may end in a
+        comma), then one pair of surrounding quotes;
+      * a repeated key: the last occurrence wins.
+
+    For a block whose fields are all single-line this returns exactly what
+    the historical per-site loops returned.
+    """
+    fields: dict[str, str] = {}
+    cur_key: Optional[str] = None
+    parts: list[str] = []
+
+    def _flush() -> None:
+        if cur_key is None:
+            return
+        val = " ".join(p for p in parts if p).strip()
+        while val and val[-1] in ",]":
+            val = val[:-1].rstrip()
+        # Same quote rule as the historical loops (byte-identical results).
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
+            val = val[1:-1]
+        fields[cur_key] = val
+
+    for raw in texts or ():
+        text = (raw or "").strip()
+        if not text:
+            continue
+        m = _BEACON_FIELD_START_RE.match(text)
+        if m and m.group(1) in BEACON_FIELD_KEYS:
+            _flush()
+            cur_key = m.group(1)
+            parts = [text[m.end():].strip()]
+        elif cur_key is not None:
+            parts.append(text)
+    _flush()
+    return fields
+
+
+# @beacon[
+#   id=auto-beacon@beacon_field_unknown_keys-ufk1,
+#   slice_labels=beacon-writeback,carto-fwd-source,
+#   kind=ast,
+#   comment=The field parser's silent decision, said out loud: the keys of lines that look like key=value but name no BEACON_FIELD_KEYS key, which parse_beacon_field_lines glues onto the previous field (or ignores before the first). Same start regex, same key set; pure. Called by the block parsers only when a diagnostics sink is passed.,
+# ]
+def beacon_field_unknown_keys(texts: Any) -> list[str]:
+    """Return, in input order, the key of every text that starts like a field
+    (``_BEACON_FIELD_START_RE``) but whose key is not in
+    ``BEACON_FIELD_KEYS``: the lines ``parse_beacon_field_lines`` treats as a
+    continuation of the previous field, or ignores before the first field."""
+    unknown: list[str] = []
+    for raw in texts or ():
+        text = (raw or "").strip()
+        if not text:
+            continue
+        m = _BEACON_FIELD_START_RE.match(text)
+        if m and m.group(1) not in BEACON_FIELD_KEYS:
+            unknown.append(m.group(1))
+    return unknown
+
+
+# ---------------------------------------------------------------------------
+# Frozen comment-intent types (commit operands -- no synthetic note text)
+# ---------------------------------------------------------------------------
+
+
+# THE ONE comment_mode vocabulary (2R4E1P): shared by the MCP mutation
+# normalizer, the intent classmethods and the resolver, so the three can
+# never drift. 'fill' is the default (today's fill-if-empty semantics, with
+# conflicts KEPT as warnings); 'replace' overwrites; 'append' extends.
+COMMENT_MUTATION_MODES: tuple = ("fill", "replace", "append")
+
+
+def _kept_conflict_warning(existing: Optional[str], requested: str, source: str) -> str:
+    """The ONE kept-conflict warning text (both texts, plus the remedy)."""
+    return (
+        f"existing {source} comment {existing!r} kept; requested comment "
+        f"{requested!r} was NOT applied (comment_mode 'fill' never overwrites). "
+        "Re-run with comment_mode 'replace' to overwrite, or 'append' to extend."
+    )
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@BeaconCommentIntent-le7f,
+#   role=BeaconCommentIntent,
+#   slice_labels=beacon-writeback,agent-kit-vendor,
+#   kind=ast,
+#   comment=The typed comment intent carried by a mutation operation (2R4E1P). preserve: no comment requested -- keep the pre-existing comment (disk-parsed authoritative, note fallback), never rejects. fill_if_empty: the DEFAULT fill semantics -- fill ONLY an empty comment; a conflicting existing comment is now KEPT with a warning (kept_existing_conflict), labels still ensured, never an error. replace: explicit opt-in overwrite. append: keep the existing comment and extend it with the requested text.,
+# ]
+class BeaconCommentIntent:
+    """The typed comment intent carried by a mutation operation.
+
+    ``mode='preserve'``       -- no comment requested: keep the pre-existing
+                                 comment (disk-parsed authoritative, note
+                                 fallback); never rejects; a label-only
+                                 mutation never erases a comment.
+    ``mode='fill_if_empty'``  -- a comment was requested: fill ONLY when the
+                                 disk field is empty; a DIFFERENT existing
+                                 comment is KEPT (kept_existing_conflict
+                                 resolution + warning), never an error and
+                                 never an overwrite (2R4E1P).
+    ``mode='replace'``        -- explicit opt-in overwrite: write the
+                                 requested comment even when one exists
+                                 (equal text stays idempotent).
+    ``mode='append'``         -- keep the existing comment and extend it
+                                 with the requested text (empty disk fills;
+                                 already-appended text stays idempotent).
+    """
+
+    mode: Literal["preserve", "fill_if_empty", "replace", "append"]
+    value: Optional[str] = None
+
+    @classmethod
+    def preserve(cls) -> "BeaconCommentIntent":
+        return cls(mode="preserve", value=None)
+
+    @classmethod
+    def fill_if_empty(cls, value: Any) -> "BeaconCommentIntent":
+        validated = validate_beacon_comment_text(value)
+        if validated is None:
+            raise ValueError("fill_if_empty requires a non-empty comment value")
+        return cls(mode="fill_if_empty", value=validated)
+
+    @classmethod
+    def replace(cls, value: Any) -> "BeaconCommentIntent":
+        validated = validate_beacon_comment_text(value)
+        if validated is None:
+            raise ValueError("replace requires a non-empty comment value")
+        return cls(mode="replace", value=validated)
+
+    @classmethod
+    def append(cls, value: Any) -> "BeaconCommentIntent":
+        validated = validate_beacon_comment_text(value)
+        if validated is None:
+            raise ValueError("append requires a non-empty comment value")
+        return cls(mode="append", value=validated)
+
+    def to_dict(self) -> dict:
+        return {"mode": self.mode, "value": self.value}
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@BeaconWriteIntent-w15i,
+#   role=BeaconWriteIntent,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+# ]
+class BeaconWriteIntent:
+    """The authoritative write intent populated at plan construction.
+
+    Passed AS A COMMIT OPERAND through the commit seam -- commit NEVER
+    reverse-engineers intent from derived outcome fields. ``source`` records
+    which ingress produced it (extensible; 'legacy_f12' marks the legacy
+    F12-per-node path, which expresses its comment-from-note behavior as
+    ``write_intent=None`` rather than as an intent).
+    """
+
+    comment: BeaconCommentIntent
+    source: Literal["legacy_f12", "lightning_rod"]
+
+    def to_dict(self) -> dict:
+        return {"comment": self.comment.to_dict(), "source": self.source}
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@CommentResolution-nr8j,
+#   role=CommentResolution,
+#   slice_labels=beacon-writeback,
+#   kind=ast,
+# ]
+class CommentResolution:
+    """The resolve result: outcome + resolved value + conflict detail.
+
+    ``outcome`` is one of 'preserve' | 'fill' | 'idempotent' |
+    'replace' | 'append' | 'kept_existing_conflict'. ``resolved`` is the
+    value to write (the parser-normalized form; ``None`` when there is
+    nothing to write). ``existing_comment`` carries the pre-existing
+    comment a resolution kept. ``warning`` is the agent-facing message for
+    a 'kept_existing_conflict' outcome (both texts: existing vs requested)
+    -- a fill-mode conflict is a WARNING, never an error (2R4E1P);
+    ``conflict_detail`` carries the same text for continuity.
+    """
+
+    outcome: str
+    resolved: Optional[str] = None
+    conflict_detail: Optional[str] = None
+    existing_comment: Optional[str] = None
+    warning: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "outcome": self.outcome,
+            "resolved": self.resolved,
+            "conflict_detail": self.conflict_detail,
+            "existing_comment": self.existing_comment,
+            "warning": self.warning,
+        }
+
+
+# @beacon[
+#   id=auto-beacon@resolve_beacon_comment-res1,
+#   slice_labels=nexus--tags,beacon-writeback,agent-kit-vendor,
+#   kind=ast,
+#   comment=THE ONE comment resolver (SPEC v5 §5 step 7 ordered contract; 2R4E1P). NORMALIZATION FIRST: requested / note_comment / disk_comment are all compared in parser-normalized form (trailing run of , and ] stripped, replicating the legacy field parser) and the value WRITTEN is the normalized form. preserve never rejects (disk value wins, note fallback, divergence is NOT an error). fill_if_empty NEVER errors: divergent note+disk -> kept_existing_conflict (disk wins); disk == requested -> idempotent; disk != requested -> kept_existing_conflict (existing comment kept, WARNING carries both texts); disk empty + note != requested -> kept_existing_conflict (the note's claim is kept); disk empty (note empty or == requested) -> fill (materialize; a re-run then noops via the idempotent rule -- invariant 10). A kept conflict means LABELS STILL ENSURED, comment kept, comment_outcome='kept_existing_conflict' + warning; re-run with replace/append to change it. replace writes the requested text (equal text -> idempotent). append keeps the existing comment and extends it: empty disk -> fill, already-appended text -> idempotent, else existing + ' ' + requested.,
+# ]
+def resolve_beacon_comment(
+    *,
+    intent: BeaconCommentIntent,
+    note_comment: Optional[str],
+    disk_comment: Optional[str],
+    beacon_exists_on_disk: bool,
+) -> CommentResolution:
+    """Resolve the comment to write for a beacon mutation (THE ONE resolver).
+
+    PURE. Evaluate in EXACTLY this order (SPEC v5 §5 step 7, 2R4E1P):
+
+    * NORMALIZATION FIRST: before ANY equality/conflict comparison,
+      requested, note_comment and disk_comment are compared in
+      PARSER-NORMALIZED form (the same trailing ','/']' strip the legacy
+      field parser applies on rebuild). The value WRITTEN to disk is the
+      normalized form.
+
+    * intent = preserve (no comment requested): NEVER rejects. resolved =
+      disk_comment when non-empty, else note_comment (fallback), else None.
+      Note/disk divergence is NOT an error under preserve; a label-only
+      mutation never erases a comment.
+
+    * intent = fill_if_empty (requested) -- 'empty' describes the DISK field.
+      A fill-mode conflict is a WARNING, never an error: the labels are
+      still ensured and the existing comment is kept
+      (outcome='kept_existing_conflict', warning carries BOTH texts):
+      1. note and disk BOTH non-empty and DIFFERENT -> kept_existing_conflict,
+         resolved = disk (disk wins), warning names both texts.
+      2. disk non-empty and == requested -> idempotent (keeps existing).
+      3. disk non-empty and != requested -> kept_existing_conflict,
+         resolved = disk, warning names both texts and points at
+         comment_mode 'replace' / 'append'.
+      4. disk empty and note non-empty and != requested ->
+         kept_existing_conflict, resolved = note (never silently fill over
+         the note's claim), warning names both texts.
+      5. disk empty (note empty or == requested) -> fill with requested. A
+         note-side match does NOT make this idempotent: the disk field is
+         empty and gets materialized; after the commit, a re-run hits rule 2
+         and is a noop (invariant 10).
+
+    * intent = replace (explicit opt-in overwrite):
+      1. disk non-empty and == requested -> idempotent.
+      2. otherwise -> outcome='replace', resolved = requested (note/disk
+         divergence is irrelevant: the caller explicitly overwrites).
+
+    * intent = append (keep the existing comment, extend it):
+      1. disk empty -> fill with requested.
+      2. disk == requested, or disk already ends with ' ' + requested ->
+         idempotent (re-runs stay noops, invariant 10).
+      3. otherwise -> outcome='append', resolved = existing + ' ' +
+         requested (comments are single-line; the caller's text supplies
+         any date it wants).
+    """
+    norm_requested = (
+        _parser_normalize_comment_value(intent.value)
+        if intent.mode in ("fill_if_empty", "replace", "append")
+        else ""
+    )
+    norm_note = _parser_normalize_comment_value(note_comment)
+    norm_disk = (
+        _parser_normalize_comment_value(disk_comment) if beacon_exists_on_disk else ""
+    )
+
+    if intent.mode == "preserve":
+        resolved = norm_disk or norm_note or None
+        return CommentResolution(outcome="preserve", resolved=resolved)
+
+    # fill_if_empty: conflicts are KEPT with a warning, never errors (2R4E1P).
+    if intent.mode == "fill_if_empty":
+        if norm_note and norm_disk and norm_note != norm_disk:
+            warning = _kept_conflict_warning(norm_disk, norm_requested, "on-disk")
+            return CommentResolution(
+                outcome="kept_existing_conflict",
+                resolved=norm_disk,
+                conflict_detail=warning,
+                existing_comment=norm_disk,
+                warning=warning,
+            )
+        if norm_disk and norm_disk == norm_requested:
+            return CommentResolution(outcome="idempotent", resolved=norm_disk)
+        if norm_disk and norm_disk != norm_requested:
+            warning = _kept_conflict_warning(norm_disk, norm_requested, "on-disk")
+            return CommentResolution(
+                outcome="kept_existing_conflict",
+                resolved=norm_disk,
+                conflict_detail=warning,
+                existing_comment=norm_disk,
+                warning=warning,
+            )
+        if not norm_disk and norm_note and norm_note != norm_requested:
+            warning = _kept_conflict_warning(
+                norm_note, norm_requested, "cached-note"
+            )
+            return CommentResolution(
+                outcome="kept_existing_conflict",
+                resolved=norm_note,
+                conflict_detail=warning,
+                existing_comment=norm_note,
+                warning=warning,
+            )
+        # disk empty (note empty or == requested) -> fill with requested.
+        return CommentResolution(outcome="fill", resolved=norm_requested or None)
+
+    # replace: explicit opt-in overwrite.
+    if intent.mode == "replace":
+        if norm_disk and norm_disk == norm_requested:
+            return CommentResolution(outcome="idempotent", resolved=norm_disk)
+        return CommentResolution(outcome="replace", resolved=norm_requested or None)
+
+    # append: keep the existing comment and extend it.
+    if intent.mode == "append":
+        if not norm_disk:
+            return CommentResolution(outcome="fill", resolved=norm_requested or None)
+        if norm_disk == norm_requested or norm_disk.endswith(" " + norm_requested):
+            return CommentResolution(outcome="idempotent", resolved=norm_disk)
+        return CommentResolution(
+            outcome="append",
+            resolved=f"{norm_disk} {norm_requested}",
+        )
+
+    # Unreachable today (the mode Literal is closed); fail closed loudly.
+    raise ValueError(f"unknown comment intent mode {intent.mode!r}")

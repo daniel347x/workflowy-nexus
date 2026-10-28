@@ -1,0 +1,560 @@
+"""beacon_integrity -- the read-only engine of ``beacon.check``.
+
+Reports, file by file, every beacon problem Cartographer or the tag writers
+would trip over, by comparing three views of one file: what the shared block
+parsers saw (their diagnostics sink), what Cartographer's own single-file
+mapping attached (``map_codebase`` read with the note parser), and what the
+tag writer's pure helpers would anchor. Every row's ``code`` comes from
+``BEACON_CHECK_CODES`` and names the function whose rule produced it.
+
+The engine defines no rule of its own: block structure, block ends, anchors,
+duplicates, the Vue section split, the extension table and comment
+validation all come from the shared functions. It reads the files it is
+given and writes nothing: no disk write, no Workflowy call, no lease, no
+refresh, no job, no suppress list. Synchronous, stateless, re-entrant.
+"""
+from __future__ import annotations
+
+import os
+from typing import Any, Mapping, Sequence
+
+from .client.api_client_nexus import (
+    _BEACON_LANGUAGE_BY_EXT,
+    _extract_path_header_from_note,
+    _import_cartographer_module,
+    _is_cartographer_parse_error_sentinel,
+    _path_value_looks_like_any_file,
+    parse_cartographer_note_for_preview,
+    resolve_cartographer_path_from_node,
+)
+from .f8_slice_policy import collect_subtree_ids
+from beacon_mutation_contract import validate_beacon_comment_text
+
+SEVERITY_ORDER = ("error", "warning", "info")
+
+
+def _code(severity: str, view: str, authority: str) -> dict[str, str]:
+    return {"severity": severity, "view": view, "authority": authority}
+
+
+# The stable problem-code table (MasterSpec §4): later revisions add codes,
+# never rename them.
+BEACON_CHECK_CODES: Mapping[str, Mapping[str, str]] = {
+    "file_unreadable": _code("error", "file", "_parse_disk_beacons_for_language / map_codebase (strict UTF-8 read)"),
+    "file_missing": _code("warning", "file", "resolve_cartographer_path_from_node"),
+    "mapper_parse_error": _code("error", "mapper", "_is_cartographer_parse_error_sentinel over map_codebase"),
+    "unterminated_block": _code("error", "parser", "parse_*_beacon_blocks"),
+    "unknown_kind": _code("error", "parser", "parse_*_beacon_blocks"),
+    "missing_id": _code("error", "parser", "parse_*_beacon_blocks"),
+    "unknown_field_key": _code("warning", "parser", "parse_beacon_field_lines / beacon_field_unknown_keys"),
+    "legacy_field": _code("info", "parser", "parse_beacon_field_lines"),
+    "duplicate_id": _code("error", "mapper", "_duplicate_beacon_ids"),
+    "block_not_mapped": _code("error", "mapper", "map_codebase + parse_cartographer_note_for_preview"),
+    "two_blocks_one_symbol": _code("error", "mapper", "map_codebase + parse_cartographer_note_for_preview"),
+    "kind_changed_by_mapper": _code("warning", "mapper", "map_codebase"),
+    "no_slice_labels": _code("warning", "mapper", "map_codebase (_canonicalize_slice_labels)"),
+    "slice_labels_derived": _code("info", "mapper", "map_codebase vs parse_*_beacon_blocks"),
+    "span_without_close": _code("info", "parser", "parse_*_beacon_blocks"),
+    "orphan_close": _code("info", "parser", "parse_*_beacon_blocks"),
+    "block_end_mismatch": _code("error", "writer", "_beacon_block_extent_for_language vs parse_*_beacon_blocks"),
+    "writer_anchor_mismatch": _code("error", "writer", "_find_anchor_matched_beacons vs map_codebase"),
+    "writer_anchor_ambiguous": _code("error", "writer", "_find_anchor_matched_beacons"),
+    "writer_target_ambiguous": _code("error", "writer", "_resolve_anchor_target_line"),
+    "comment_rejected": _code("info", "comment", "validate_beacon_comment_text"),
+    "empty_comment": _code("info", "comment", "beacon grammar (comment recommended)"),
+}
+
+_LEGACY_KEYS = ("comments", "role")
+
+
+def _row(file: str, line: int, code: str, beacon_id: Any, message: str, detail: dict | None = None) -> dict:
+    spec = BEACON_CHECK_CODES[code]
+    return {
+        "file": file,
+        "line": int(line or 0),
+        "code": code,
+        "severity": spec["severity"],
+        "view": spec["view"],
+        "authority": spec["authority"],
+        "beacon_id": beacon_id if beacon_id not in ("", None) else None,
+        "message": message,
+        "detail": detail or {},
+    }
+
+
+def _sort_key(row: Mapping[str, Any]) -> tuple:
+    return (
+        row["file"], row["line"], SEVERITY_ORDER.index(row["severity"]),
+        row["code"], row["beacon_id"] or "",
+    )
+
+
+def _bid(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _label(bid: str) -> str:
+    return f"block {bid}" if bid else "a block with no id"
+
+
+def _walk(node: Mapping[str, Any]):
+    yield node
+    for child in node.get("children") or []:
+        yield from _walk(child)
+
+
+def _node_line(node: Mapping[str, Any]) -> int:
+    for key in ("orig_lineno_start_unused", "_md_heading_line"):
+        value = node.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    return 0
+
+
+def _records(node: Mapping[str, Any]) -> list[dict]:
+    return [
+        payload
+        for kind, payload in parse_cartographer_note_for_preview(str(node.get("note") or ""))
+        if kind == "beacon"
+    ]
+
+
+# @beacon[
+#   id=beacon-check@check_beacon_file,
+#   slice_labels=carto-fwd-source,beacon-writeback,
+#   kind=ast,
+#   comment=The read-only check of one file: reads it once for the prefilter, then compares the shared parsers' diagnostics, Cartographer's single-file map (map_codebase + the note parser) and the tag writer's extent/anchor helpers, and returns the sorted problem rows. Defines no rule of its own; writes nothing.,
+# ]
+def check_beacon_file(
+    abs_path: str,
+    *,
+    display_path: str | None = None,
+    repo_root: str | None = None,
+) -> list[dict]:
+    """Return the problem rows of one file, sorted (U01 §6.6 steps 1-9).
+
+    A file whose extension is not in the writers' table returns ``[]``.
+    Unreadable files and mapper failures are rows; any other exception is a
+    defect and propagates.
+    """
+    file = display_path or abs_path
+    language = _BEACON_LANGUAGE_BY_EXT.get(os.path.splitext(abs_path)[1].lower())
+    if language is None:
+        return []
+    try:
+        with open(abs_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        exc = f"{type(e).__name__}: {e}"
+        return [_row(file, 0, "file_unreadable", None,
+                     f"The file cannot be read as UTF-8 ({exc}), so Cartographer and the tag writers cannot use any beacon in it.",
+                     {"exception": exc})]
+    # Every opener and close test of every parser requires this substring.
+    if "@beacon" not in text:
+        return []
+
+    carto = _import_cartographer_module()
+    rows: list[dict] = []
+    diag: list[dict] = []
+    section_of_line: dict[int, str] = {}
+
+    # Step 3: structure.
+    if language == "vue":
+        try:
+            source_bytes = text.encode("utf-8")
+            sections = carto._vue_sfc_sections(source_bytes, carto._parse_vue_sfc_tree(source_bytes))
+        except Exception as e:  # noqa: BLE001 -- a failed section split is a row
+            exc = f"{type(e).__name__}: {e}"
+            return [_row(file, 0, "mapper_parse_error", None,
+                         f"Cartographer's Vue section split failed ({exc}), so no beacon in this file reaches the map.",
+                         {"exception": exc})]
+        beacons: list[dict] = []
+        for section in sections:
+            for b in carto._vue_section_beacons(section, diagnostics=diag):
+                section_of_line[b.get("comment_line")] = section.get("type")
+                beacons.append(b)
+        lines, writer_beacons = carto._parse_disk_beacons_for_language("vue", abs_path)
+    else:
+        lines, beacons = carto._parse_disk_beacons_for_language(language, abs_path, diagnostics=diag)
+        writer_beacons = beacons
+
+    # Step 4: the parsers' own decisions.
+    end_line_of: dict[int, Any] = {}
+    close_ids: dict[int, Any] = {}
+    matched_closes: set[int] = set()
+    for rec in diag:
+        if rec["record"] == "close":
+            close_ids.setdefault(rec["line"], rec["id"])
+            continue
+        if rec["record"] == "close_match":
+            matched_closes.add(rec["line"])
+            continue
+        line, bid, outcome = rec["line"], _bid(rec["id"]), rec["outcome"]
+        if rec["end_line"] is None:
+            rows.append(_row(file, line, "unterminated_block", bid,
+                             f"The parser finds no closing ']' line for {_label(bid)}, so it reads to the end of the file and every later beacon in this file is invisible.",
+                             {}))
+        if outcome == "skipped_unknown_kind":
+            rows.append(_row(file, line, "unknown_kind", bid,
+                             f"{_label(bid).capitalize()} has kind={rec['kind_raw']!r}, which is neither ast nor span, so the parsers skip it and it does not exist for Cartographer or the tag writers.",
+                             {"kind_raw": rec["kind_raw"]}))
+        elif outcome == "skipped_empty_id":
+            rows.append(_row(file, line, "missing_id", None,
+                             "This Markdown block has no id=, so the parser drops it and Cartographer never maps it.",
+                             {}))
+        elif outcome == "kept":
+            end_line_of[line] = rec["end_line"]
+            if not bid:
+                rows.append(_row(file, line, "missing_id", None,
+                                 "This block has no id=, so Cartographer maps it under a fallback name and the tag writers cannot address it.",
+                                 {}))
+            legacy = [k for k in _LEGACY_KEYS if k in rec["field_keys"]]
+            if legacy:
+                rows.append(_row(file, line, "legacy_field", bid,
+                                 f"{_label(bid).capitalize()} uses the legacy field(s) {', '.join(k + '=' for k in legacy)} (role= is deprecated; comments= is read as comment=).",
+                                 {"keys": legacy}))
+        if rec["unknown_keys"]:
+            keys = list(rec["unknown_keys"])
+            rows.append(_row(file, line, "unknown_field_key", bid,
+                             f"{_label(bid).capitalize()} has line(s) starting with {', '.join(k + '=' for k in keys)}, which is not a beacon field key, so the field parser glues the line onto the previous field (or ignores it before the first).",
+                             {"keys": keys}))
+    for line, cid in sorted(close_ids.items()):
+        if line not in matched_closes:
+            rows.append(_row(file, line, "orphan_close", cid,
+                             f"This line contains the close marker, so the parser examined it as a close candidate and read id {cid!r} from the lines up to the next ']' line; it matched no span opener, so it is inert for Cartographer and the writers (beside a span_without_close on an opener with another id, it is a close-id typo).",
+                             {}))
+
+    # Step 5: duplicates, by THE rule.
+    lines_of_id: dict[str, list[int]] = {}
+    for b in beacons:
+        lines_of_id.setdefault(_bid(b.get("id")), []).append(b.get("comment_line"))
+    duplicate_rows: dict[str, dict] = {}
+    for dup in carto._duplicate_beacon_ids(beacons):
+        dup_lines = lines_of_id.get(dup, [])
+        row = _row(file, dup_lines[1] if len(dup_lines) > 1 else 0, "duplicate_id", dup,
+                   f"Id {dup} is used by {len(dup_lines)} blocks in this file (lines {', '.join(str(x) for x in dup_lines)}), so the refresh adds a duplicate warning node and beacon.tags.ensure/remove refuse with ambiguous_beacon_id.",
+                   {"lines": dup_lines})
+        duplicate_rows[dup] = row
+        rows.append(row)
+
+    # Step 6: comments, by THE validator.
+    for b in beacons:
+        bid, comment = _bid(b.get("id")), b.get("comment")
+        if comment is None or not str(comment).strip():
+            rows.append(_row(file, b.get("comment_line"), "empty_comment", bid,
+                             f"{_label(bid).capitalize()} has no comment=.", {}))
+            continue
+        try:
+            validate_beacon_comment_text(comment)
+        except ValueError as e:
+            rows.append(_row(file, b.get("comment_line"), "comment_rejected", bid,
+                             f"The comment of {_label(bid)} would be refused if sent as a new comment ({e}); on disk it maps and is kept as is.",
+                             {}))
+
+    # Step 7: the mapper view.
+    try:
+        tree = carto.map_codebase(abs_path, repo_root=repo_root)
+    except Exception as e:  # noqa: BLE001 -- the mapper's failure is a row
+        exc = f"{type(e).__name__}: {e}"
+        rows.append(_row(file, 0, "mapper_parse_error", None,
+                         f"Cartographer's map of this file failed ({exc}), so no beacon in it reaches the map.",
+                         {"exception": exc}))
+        return _finish(rows, file)
+
+    file_failed = False
+    for child in tree.get("children") or []:
+        for node in _walk(child):
+            name = str(node.get("name") or "")
+            if _is_cartographer_parse_error_sentinel(name):
+                whole = node is child
+                file_failed = file_failed or whole
+                rows.append(_row(file, 0, "mapper_parse_error", None,
+                                 f"Cartographer's outline builder failed ({name}), so no beacon in this {'file' if whole else 'section'} reaches the map.",
+                                 {"name": name, "note": str(node.get("note") or "")}))
+
+    nodes_with_records: list[tuple[dict, list[dict]]] = []
+    if not file_failed:
+        for node in _walk(tree):
+            recs = _records(node)
+            if recs:
+                nodes_with_records.append((node, recs))
+        records_of_id: dict[str, list[dict]] = {}
+        for node, recs in nodes_with_records:
+            for rec in recs:
+                records_of_id.setdefault(_bid(rec.get("id")), []).append(rec)
+            if len(recs) > 1:
+                ids = [_bid(r.get("id")) for r in recs]
+                symbol = node.get("ast_qualname") or str(node.get("name") or "")
+                rows.append(_row(file, _node_line(node), "two_blocks_one_symbol", None,
+                                 f"The mapped symbol {symbol} carries {len(recs)} beacon records ({', '.join(ids)}); one symbol should carry one block.",
+                                 {"ids": ids}))
+        for dup, row in duplicate_rows.items():
+            row["detail"]["mapped_records"] = len(records_of_id.get(dup, []))
+        for b in beacons:
+            bid = _bid(b.get("id"))
+            if not bid:
+                continue
+            mapped = records_of_id.get(bid, [])
+            if not mapped:
+                rows.append(_row(file, b.get("comment_line"), "block_not_mapped", bid,
+                                 f"Block {bid} reaches no mapped node: Cartographer drops it silently, so no symbol or span carries its labels.",
+                                 {}))
+                continue
+            if len(lines_of_id.get(bid, [])) != 1 or len(mapped) != 1:
+                continue
+            rec = mapped[0]
+            rec_labels = str(rec.get("slice_labels") or "").strip()
+            if b.get("kind_explicit") and b.get("kind") != rec.get("kind"):
+                rows.append(_row(file, b.get("comment_line"), "kind_changed_by_mapper", bid,
+                                 f"Block {bid} says kind={b.get('kind')}, but Cartographer maps it as kind={rec.get('kind')}.",
+                                 {"block_kind": b.get("kind"), "mapped_kind": rec.get("kind")}))
+            if not rec_labels:
+                rows.append(_row(file, b.get("comment_line"), "no_slice_labels", bid,
+                                 f"Block {bid} maps with no slice label, so it is in no slice.", {}))
+            elif not str(b.get("slice_labels") or "").strip():
+                rows.append(_row(file, b.get("comment_line"), "slice_labels_derived", bid,
+                                 f"Block {bid} has no slice_labels=; Cartographer derived {rec_labels!r} from its role or id prefix.",
+                                 {"slice_labels": rec_labels}))
+            if rec.get("kind") == "span" and not b.get("start_snippet") and b.get("span_lineno_start") is None:
+                rows.append(_row(file, b.get("comment_line"), "span_without_close", bid,
+                                 f"Span {bid} has no matching close block, so it spans to the end of the file (legitimate if intended).",
+                                 {}))
+
+    # Step 8: the writer view (Vue: script sections and vue:script targets).
+    for b in beacons:
+        end_line = end_line_of.get(b.get("comment_line"))
+        if end_line is None:
+            continue
+        if language == "vue" and section_of_line.get(b.get("comment_line")) != "script_element":
+            continue
+        ext = carto._beacon_block_extent_for_language(language, lines, b)
+        if ext is None or (ext[1] + 1 < end_line if language == "markdown" else ext[1] + 1 != end_line):
+            bid = _bid(b.get("id"))
+            writer = "finds no extent" if ext is None else f"ends it on line {ext[1] + 1}"
+            rows.append(_row(file, b.get("comment_line"), "block_end_mismatch", bid,
+                             f"The parser ends {_label(bid)} on line {end_line} but the tag writer {writer}, so beacon.tags.ensure/remove refuse it or rewrite the wrong lines.",
+                             {"parser_end_line": end_line, "writer_end_line": None if ext is None else ext[1] + 1}))
+
+    if file_failed:
+        return _finish(rows, file)
+    index = carto._python_decorator_ranges_by_definition(lines) if language == "python" else None
+    outline = tree.get("children") or []
+    for node, _recs in nodes_with_records:
+        qualname = node.get("ast_qualname")
+        if node.get("ast_type") and qualname and language in ("python", "js_ts", "vue"):
+            if language == "vue" and not str(qualname).startswith("vue:script"):
+                continue
+            symbol = str(qualname)
+            idx, ambiguous = carto._resolve_anchor_target_line(
+                language, abs_path, lines, qualname, None, None, outline=outline,
+            )
+            if ambiguous:
+                rows.append(_row(file, _node_line(node), "writer_target_ambiguous", None,
+                                 f"The symbol {symbol} names several outline nodes, so beacon.tags.ensure on it refuses with ambiguous_beacon_anchor.",
+                                 {"symbol": symbol}))
+                continue
+            if idx is None:
+                continue
+        elif language == "markdown" and isinstance(node.get("_md_heading_line"), int):
+            idx = node["_md_heading_line"] - 1
+            symbol = str(node.get("name") or "")
+        else:
+            continue
+        matches = carto._find_anchor_matched_beacons(
+            language, lines, writer_beacons, idx, decorator_ranges_by_definition=index,
+        )
+        if len(matches) > 1:
+            ids = [_bid(m[0].get("id")) for m in matches]
+            rows.append(_row(file, idx + 1, "writer_anchor_ambiguous", None,
+                             f"{len(matches)} blocks ({', '.join(ids)}) anchor {symbol} (line {idx + 1}) for the tag writer, so beacon.tags.ensure on it refuses with ambiguous_beacon_anchor.",
+                             {"ids": ids}))
+        x_id = (carto._extract_beacon_id_from_note(node.get("note")) or "").strip()
+        if not x_id:
+            continue
+        x_blocks = [wb for wb in writer_beacons if _bid(wb.get("id")) == x_id]
+        if len(x_blocks) != 1:
+            continue
+        block = x_blocks[0]
+        if block.get("comment_line") in {m[0].get("comment_line") for m in matches}:
+            continue
+        ext = carto._beacon_block_extent_for_language(language, lines, block)
+        extent = "no writer extent" if ext is None else f"a writer extent of lines {ext[0] + 1}-{ext[1] + 1}"
+        rows.append(_row(file, block.get("comment_line"), "writer_anchor_mismatch", x_id,
+                         f"Cartographer attaches block {x_id} ({extent}) to {symbol} (line {idx + 1}), but the tag writer's anchor rule does not reach the block from that line, so beacon.tags.ensure on {symbol} refuses with beacon_identity_conflict.",
+                         {"target_line": idx + 1, "symbol": symbol,
+                          "writer_extent": None if ext is None else [ext[0] + 1, ext[1] + 1]}))
+
+    return _finish(rows, file)
+
+
+def _finish(rows: list[dict], file: str) -> list[dict]:
+    for row in rows:
+        row["file"] = file
+    rows.sort(key=_sort_key)
+    return rows
+
+
+def _display_path(abs_path: str, root_abs: str | None) -> str:
+    if root_abs:
+        try:
+            rel = os.path.relpath(abs_path, root_abs)
+        except ValueError:
+            rel = ""
+        if rel and rel != "." and not rel.startswith("..") and not os.path.isabs(rel):
+            return rel.replace(os.sep, "/")
+    return abs_path
+
+
+def _file_header(node: Mapping[str, Any] | None) -> tuple[str, str] | None:
+    header = _extract_path_header_from_note(str((node or {}).get("note") or (node or {}).get("no") or ""))
+    if header and header[0] == "Path" and _path_value_looks_like_any_file(header[1]):
+        return header
+    return None
+
+
+def collect_mapped_beacon_files(nodes_by_id: Mapping[str, Mapping], node_id: str) -> dict:
+    """The beacon-language FILE nodes a mapped FILE, FOLDER or ``Root:`` node
+    covers in the given cache, resolved to disk.
+
+    Returns ``{"root_abs", "files", "missing", "skipped"}``; each file entry
+    is ``{"abs_path", "display_path", "node_id"}`` (missing entries add
+    ``"reason"``), sorted by ``display_path``.
+    """
+    target = nodes_by_id.get(node_id)
+    if _file_header(target):
+        candidates = [node_id]
+    else:
+        candidates = [
+            cid for cid in collect_subtree_ids(nodes_by_id, [node_id])
+            if _file_header(nodes_by_id.get(cid))
+        ]
+
+    root_abs = None
+    target_abs = None
+    try:
+        resolved = resolve_cartographer_path_from_node(node_id=node_id, nodes_by_id=nodes_by_id)
+        root_abs, target_abs = resolved.get("root_abs"), resolved.get("abs_path")
+    except Exception:  # noqa: BLE001 -- an unresolvable target has no root
+        pass
+    if root_abs is None:
+        header = _extract_path_header_from_note(str((target or {}).get("note") or (target or {}).get("no") or ""))
+        if header and header[0] == "Root":
+            root_abs = target_abs
+
+    files: list[dict] = []
+    missing: list[dict] = []
+    skipped = 0
+    for cid in candidates:
+        _kind, value = _file_header(nodes_by_id.get(cid))
+        if os.path.splitext(value)[1].lower() not in _BEACON_LANGUAGE_BY_EXT:
+            skipped += 1
+            continue
+        try:
+            abs_path = resolve_cartographer_path_from_node(node_id=cid, nodes_by_id=nodes_by_id)["abs_path"]
+        except Exception as e:  # noqa: BLE001 -- recorded as missing
+            missing.append({"abs_path": None, "display_path": value, "node_id": cid,
+                            "reason": f"{type(e).__name__}: {e}"})
+            continue
+        entry = {"abs_path": abs_path, "display_path": _display_path(abs_path, root_abs), "node_id": cid}
+        if not os.path.isfile(abs_path):
+            missing.append({**entry, "reason": "no file on disk at the mapped path"})
+            continue
+        files.append(entry)
+    files.sort(key=lambda f: f["display_path"])
+    missing.sort(key=lambda f: f["display_path"])
+    return {"root_abs": root_abs, "files": files, "missing": missing, "skipped": skipped}
+
+
+# @beacon[
+#   id=beacon-check@run_beacon_check,
+#   slice_labels=carto-fwd-source,beacon-writeback,
+#   kind=ast,
+#   comment=Checks a list of files (plus the mapped files that are missing on disk) and assembles the report: summary_line, counts over every row, and the rows at or above min_severity, kept severity-first up to max_rows and returned in file-and-line order.,
+# ]
+def run_beacon_check(
+    files: Sequence[Mapping[str, Any]],
+    *,
+    repo_root: str | None = None,
+    missing: Sequence[Mapping[str, Any]] = (),
+    skipped: int = 0,
+    min_severity: str = "warning",
+    max_rows: int = 300,
+) -> dict:
+    """Check every file entry and return ``{"summary_line", "counts",
+    "rows", "rows_truncated", "min_severity"}``. A ``min_severity`` outside
+    ``SEVERITY_ORDER`` or ``max_rows < 1`` raises ``ValueError``."""
+    if min_severity not in SEVERITY_ORDER:
+        raise ValueError(f"min_severity must be one of {SEVERITY_ORDER}, not {min_severity!r}")
+    if isinstance(max_rows, bool) or not isinstance(max_rows, int) or max_rows < 1:
+        raise ValueError(f"max_rows must be an integer >= 1, not {max_rows!r}")
+
+    all_rows: list[dict] = []
+    for m in missing:
+        where = m.get("abs_path") or m.get("display_path")
+        all_rows.append(_row(str(m.get("display_path") or m.get("abs_path") or ""), 0, "file_missing", None,
+                             f"The map lists this file but nothing usable is on disk at {where} ({m.get('reason')}); refresh the map or restore the file.",
+                             {"node_id": m.get("node_id"), "reason": m.get("reason")}))
+    for f in files:
+        all_rows.extend(check_beacon_file(f["abs_path"], display_path=f.get("display_path"), repo_root=repo_root))
+    all_rows.sort(key=_sort_key)
+
+    by_severity = {s: 0 for s in SEVERITY_ORDER}
+    by_code: dict[str, int] = {}
+    for row in all_rows:
+        by_severity[row["severity"]] += 1
+        by_code[row["code"]] = by_code.get(row["code"], 0) + 1
+    counts = {
+        "files_checked": len(files),
+        "files_skipped": int(skipped),
+        "files_missing": len(missing),
+        "files_unreadable": by_code.get("file_unreadable", 0),
+        "files_with_problems": len({r["file"] for r in all_rows if r["severity"] != "info"}),
+        "by_severity": by_severity,
+        "by_code": dict(sorted(by_code.items())),
+    }
+
+    shown = SEVERITY_ORDER[: SEVERITY_ORDER.index(min_severity) + 1]
+    kept: list[dict] = []
+    eligible = 0
+    for severity in shown:
+        same = [r for r in all_rows if r["severity"] == severity]
+        eligible += len(same)
+        kept.extend(same[: max(0, max_rows - len(kept))])
+    kept.sort(key=_sort_key)
+    return {
+        "summary_line": beacon_check_summary_line(all_rows, len(files)),
+        "counts": counts,
+        "rows": kept,
+        "rows_truncated": eligible - len(kept),
+        "min_severity": min_severity,
+    }
+
+
+def _count(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def beacon_check_summary_line(rows: list[dict], files_checked: int) -> str:
+    """One line in the batch writers' style: ``N files · E errors · W warnings
+    · I info``, then the one problem row, or the problem codes with counts."""
+    sev = {s: sum(1 for r in rows if r["severity"] == s) for s in SEVERITY_ORDER}
+    base = (
+        f"{_count(files_checked, 'file')} · {_count(sev['error'], 'error')} · "
+        f"{_count(sev['warning'], 'warning')} · {sev['info']} info"
+    )
+    problems = [r for r in rows if r["severity"] in ("error", "warning")]
+    if not problems:
+        return base
+    if len(problems) == 1:
+        r = problems[0]
+        message = r["message"] if len(r["message"]) <= 110 else r["message"][:107] + "..."
+        return f"{base} ({r['file']}:{r['line']} {r['code']} — {message})"
+    groups: list[str] = []
+    for severity in ("error", "warning"):
+        codes: dict[str, int] = {}
+        for r in problems:
+            if r["severity"] == severity:
+                codes[r["code"]] = codes.get(r["code"], 0) + 1
+        groups.extend(f"{c} ×{n}" for c, n in sorted(codes.items(), key=lambda kv: (-kv[1], kv[0])))
+    shown = ", ".join(groups[:4]) + (", ..." if len(groups) > 4 else "")
+    return f"{base} ({shown})"

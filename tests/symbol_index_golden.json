@@ -1,0 +1,1211 @@
+[
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "helper",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "beacon~contains",
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "30000000-0000-0000-0000-000000000003",
+     "name": "## helper",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "name"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000003 line=? ast='helper' name='ƒ helper()' file='/nbbw/repo' via=ast+name+beacon~contains+ast~contains+name~contains\nid=30000000-0000-0000-0000-000000000003 line=? ast='(none)' name='## helper' file='/nbbw/repo' via=name"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "srv@helper",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "beacon",
+      "beacon~contains",
+      "ast~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "helper role text",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "beacon",
+      "beacon~contains",
+      "ast~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "Client.fetch",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000002",
+     "name": "⚡ fetch(self, x) #net",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "Client.fetch",
+     "line": null,
+     "via": [
+      "ast",
+      "ast~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "fetch",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000002",
+     "name": "⚡ fetch(self, x) #net",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "Client.fetch",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "class Client",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000001",
+     "name": "📦 class Client",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "Client",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "ƒ fetch_all(self)",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000004",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "50000000-0000-0000-0000-000000000001",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/copy/copy.py",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000004 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/repo' via=ast+name+ast~contains+name~contains\nid=50000000-0000-0000-0000-000000000001 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/copy/copy.py' via=ast+name+ast~contains+name~contains"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "duplicate_name",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000005",
+     "name": "ƒ duplicate_name()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "duplicate_name",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "20000000-0000-0000-0000-000000000001",
+     "name": "ƒ duplicate_name()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "duplicate_name",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000005 line=? ast='duplicate_name' name='ƒ duplicate_name()' file='/nbbw/repo' via=ast+name+ast~contains+name~contains\nid=20000000-0000-0000-0000-000000000001 line=? ast='duplicate_name' name='ƒ duplicate_name()' file='/nbbw/repo' via=ast+name+ast~contains+name~contains"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "duplicate_name",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "20000000-0000-0000-0000-000000000001",
+     "name": "ƒ duplicate_name()",
+     "file_path": "/nbbw/repo/util.py",
+     "ast_qualname": "duplicate_name",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "duplicate_name",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "20000000-0000-0000-0000-000000000001",
+     "name": "ƒ duplicate_name()",
+     "file_path": "/nbbw/repo/util.py",
+     "ast_qualname": "duplicate_name",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "duplicate_name",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000005",
+     "name": "ƒ duplicate_name()",
+     "file_path": "/nbbw/repo/server.py",
+     "ast_qualname": "duplicate_name",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "duplicate_name",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "20000000-0000-0000-0000-000000000001",
+     "name": "ƒ duplicate_name()",
+     "file_path": "/nbbw/repo/util.py",
+     "ast_qualname": "duplicate_name",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "err",
+  "NetworkError",
+  "read_text_snippet_by_symbol: no FILE node with Path:/Root: matching 'nope.py' was found",
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: no FILE node with Path:/Root: matching 'nope.py' was found"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "Wrong.fetch_all",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000004",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast",
+      "name"
+     ]
+    },
+    {
+     "uuid": "50000000-0000-0000-0000-000000000001",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/copy/copy.py",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast",
+      "name"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000004 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/repo' via=ast+name\nid=50000000-0000-0000-0000-000000000001 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/copy/copy.py' via=ast+name"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "Other.fetch",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000002",
+     "name": "⚡ fetch(self, x) #net",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "Client.fetch",
+     "line": null,
+     "via": [
+      "ast",
+      "name"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "etch_a",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000004",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "50000000-0000-0000-0000-000000000001",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/copy/copy.py",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000004 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/repo' via=ast~contains+name~contains\nid=50000000-0000-0000-0000-000000000001 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/copy/copy.py' via=ast~contains+name~contains"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "span",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "20000000-0000-0000-0000-000000000002",
+     "name": "🔱 span thing",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "beacon~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "util@span-thing",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "20000000-0000-0000-0000-000000000002",
+     "name": "🔱 span thing",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "beacon",
+      "beacon~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "vue_like",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "20000000-0000-0000-0000-000000000003",
+     "name": "ƒ vue_like()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "vue:script0:vue_like",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "vue:script0:vue_like",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "20000000-0000-0000-0000-000000000003",
+     "name": "ƒ vue_like()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "vue:script0:vue_like",
+     "line": null,
+     "via": [
+      "ast",
+      "ast~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "server.py",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "00000000-0000-0000-0000-0000000000f1",
+     "name": "🐍 server.py",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "name",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "util",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "00000000-0000-0000-0000-0000000000f2",
+     "name": "🐍 util.py",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "name",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/util.py' (file_node_id=00000000-0000-0000-0000-0000000000f2)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "Getting Started",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "30000000-0000-0000-0000-000000000001",
+     "name": "# Getting Started",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "name"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/docs/guide.md' (file_node_id=00000000-0000-0000-0000-0000000000f3)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "Install - Final Steps",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "30000000-0000-0000-0000-000000000002",
+     "name": "## Install - Final Steps #doc",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "name"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/docs/guide.md' (file_node_id=00000000-0000-0000-0000-0000000000f3)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 0,
+   "resolved_symbol": "Final Steps",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: no matching node found for symbol 'Final Steps' (symbol_kind='auto')"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 0,
+   "resolved_symbol": "hidden_only",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: no matching node found for symbol 'hidden_only' (symbol_kind='auto')"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "only_in_copy",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "50000000-0000-0000-0000-000000000002",
+     "name": "ƒ only_in_copy()",
+     "file_path": "/nbbw/copy/copy.py",
+     "ast_qualname": "only_in_copy",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/copy/copy.py' (file_node_id=00000000-0000-0000-0000-0000000000f5)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "fetch_all",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000004",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "50000000-0000-0000-0000-000000000001",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/copy/copy.py",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000004 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/repo' via=ast+name+ast~contains+name~contains\nid=50000000-0000-0000-0000-000000000001 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/copy/copy.py' via=ast+name+ast~contains+name~contains"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "fetch_all",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000004",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 0,
+   "resolved_symbol": "only_in_copy",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: no matching node found for symbol 'only_in_copy' (symbol_kind='auto')"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 0,
+   "resolved_symbol": "zz_missing_symbol",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "auto",
+   "candidates": [],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: no matching node found for symbol 'zz_missing_symbol' (symbol_kind='auto')"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "helper",
+   "resolved_symbol_kind": "beacon",
+   "resolved_symbol_kind_input": "beacon",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "beacon~contains",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "helper",
+   "resolved_symbol_kind": "ast",
+   "resolved_symbol_kind_input": "ast",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "beacon~contains",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "helper",
+   "resolved_symbol_kind": "name",
+   "resolved_symbol_kind_input": "name",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "beacon~contains",
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "30000000-0000-0000-0000-000000000003",
+     "name": "## helper",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "name"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000003 line=? ast='helper' name='ƒ helper()' file='/nbbw/repo' via=ast+name+beacon~contains+ast~contains+name~contains\nid=30000000-0000-0000-0000-000000000003 line=? ast='(none)' name='## helper' file='/nbbw/repo' via=name"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "srv@helper",
+   "resolved_symbol_kind": "ast",
+   "resolved_symbol_kind_input": "ast",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "beacon",
+      "beacon~contains",
+      "ast~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "fetch",
+   "resolved_symbol_kind": "name",
+   "resolved_symbol_kind_input": "function",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000002",
+     "name": "⚡ fetch(self, x) #net",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "Client.fetch",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 1,
+   "resolved_symbol": "Client.fetch",
+   "resolved_symbol_kind": "ast",
+   "resolved_symbol_kind_input": "qualname",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000002",
+     "name": "⚡ fetch(self, x) #net",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "Client.fetch",
+     "line": null,
+     "via": [
+      "ast",
+      "ast~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "beacon_get_code_snippet: resolved file_path does not exist on disk: '/nbbw/repo/server.py' (file_node_id=00000000-0000-0000-0000-0000000000f1)"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "etch_a",
+   "resolved_symbol_kind": "beacon",
+   "resolved_symbol_kind_input": "beacon",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000004",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "50000000-0000-0000-0000-000000000001",
+     "name": "ƒ fetch_all()",
+     "file_path": "/nbbw/copy/copy.py",
+     "ast_qualname": "fetch_all",
+     "line": null,
+     "via": [
+      "ast~contains",
+      "name~contains"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000004 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/repo' via=ast~contains+name~contains\nid=50000000-0000-0000-0000-000000000001 line=? ast='fetch_all' name='ƒ fetch_all()' file='/nbbw/copy/copy.py' via=ast~contains+name~contains"
+  ]
+ ],
+ [
+  "ok",
+  {
+   "success": true,
+   "match_count": 2,
+   "resolved_symbol": "helper",
+   "resolved_symbol_kind": "auto",
+   "resolved_symbol_kind_input": "bogus",
+   "candidates": [
+    {
+     "uuid": "10000000-0000-0000-0000-000000000003",
+     "name": "ƒ helper()",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": "helper",
+     "line": null,
+     "via": [
+      "ast",
+      "name",
+      "beacon~contains",
+      "ast~contains",
+      "name~contains"
+     ]
+    },
+    {
+     "uuid": "30000000-0000-0000-0000-000000000003",
+     "name": "## helper",
+     "file_path": "/nbbw/repo",
+     "ast_qualname": null,
+     "line": null,
+     "via": [
+      "name"
+     ]
+    }
+   ],
+   "truncated": 0
+  },
+  [
+   "snippet-err",
+   "NetworkError",
+   "read_text_snippet_by_symbol: symbol is ambiguous; candidates:\nid=10000000-0000-0000-0000-000000000003 line=? ast='helper' name='ƒ helper()' file='/nbbw/repo' via=ast+name+beacon~contains+ast~contains+name~contains\nid=30000000-0000-0000-0000-000000000003 line=? ast='(none)' name='## helper' file='/nbbw/repo' via=name"
+  ]
+ ]
+]

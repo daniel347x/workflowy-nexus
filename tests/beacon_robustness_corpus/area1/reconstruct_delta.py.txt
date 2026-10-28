@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+"""Reconstruct the EXACT C1+C2 20-key golden delta list against a345dc7.
+
+Built on area-1/a1lib.py (patched parsers etc.) and area-1/measure_golden.py
+(uncapped; per-record attribution added).  Reads the verified immutable base
+snapshot /mnt/c/tmp/beacon_robustness/u01/freezes/work/base_a345dc7
+(byte-identical to git archive a345dc7; independently equal to area-1/tree).
+Writes only under /mnt/c/tmp/beacon_robustness/u01/freezes/.
+"""
+from __future__ import annotations
+
+import collections
+import datetime
+import hashlib
+import json
+import os
+import re
+import shutil
+import sys
+
+WORK = "/mnt/c/tmp/beacon_robustness/u01/freezes/work"
+FREEZES = "/mnt/c/tmp/beacon_robustness/u01/freezes"
+A1 = "/mnt/c/tmp/beacon_robustness/area-1"
+BASE = os.path.join(WORK, "base_a345dc7")
+BASE_REV = "a345dc780f0a6fed4b47a63b3fd13c914b15309f"
+
+# --- the base root must be FIRST on sys.path -------------------------------
+for _p in (os.path.join(BASE, "src"), BASE, os.path.join(BASE, "tests"), WORK):
+    while _p in sys.path:
+        sys.path.remove(_p)
+sys.path.insert(0, WORK)
+sys.path.insert(0, os.path.join(BASE, "tests"))
+sys.path.insert(0, os.path.join(BASE, "src"))
+sys.path.insert(0, BASE)
+for _m in ("nexus_map_codebase", "beacon_mutation_contract", "beacon_check_fixtures", "a1lib_base"):
+    sys.modules.pop(_m, None)
+
+# a1lib copy with SNAP pointed at the verified base snapshot
+src = open(os.path.join(A1, "a1lib.py"), encoding="utf-8").read()
+src2 = src.replace(
+    'SNAP = "/mnt/c/tmp/beacon_robustness/probes/snapshot"',
+    f'SNAP = {BASE!r}',
+)
+assert src2 != src
+with open(os.path.join(WORK, "a1lib_base.py"), "w", encoding="utf-8", newline="\n") as f:
+    f.write(src2)
+
+import a1lib_base as L  # noqa: E402
+import beacon_check_fixtures as fx  # noqa: E402
+
+n = L.n
+assert os.path.dirname(os.path.abspath(n.__file__)) == BASE, n.__file__
+assert os.path.dirname(os.path.abspath(fx.__file__)) == os.path.join(BASE, "tests"), fx.__file__
+
+TREE_TESTS = os.path.join(BASE, "tests")
+golden = json.load(open(os.path.join(TREE_TESTS, "beacon_seams_baseline.json"), encoding="utf-8"))
+SHORT = {"python": "python", "js": "js_ts", "markdown": "markdown", "sql": "sql", "sh": "shell", "yaml": "yaml"}
+STOP_ORDER = ["C1_opener_or_close", "C1a_opener_only", "C2_no_prefix_line", "C3a_blank_line",
+              "C1+C2", "C1+C2+C3a", "C3b_prefix_only_line"]
+
+sources = {}
+for fn in sorted(os.listdir(os.path.join(TREE_TESTS, "beacon_seams_corpus"))):
+    if fn.endswith(".txt"):
+        sources[f"corpus:{fn[:-4]}"] = (fn[:-4], open(os.path.join(TREE_TESTS, "beacon_seams_corpus", fn), "rb").read().decode("utf-8"))
+for name, (fname, text) in fx.all_text_fixtures().items():
+    sources[f"fixture:{name}"] = (fname, text)
+
+
+def sha256_text(t: str) -> str:
+    return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
+
+def sha256_file(p: str) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+summary = {"sources": len(sources), "pinned_sources": len(golden["parsers"]),
+           "current_equals_baseline_parsers": 0, "current_differs_baseline_parsers": [],
+           "pinned_baseline_note": ("beacon_seams_baseline.json pins base_rev 0c2ad8312be620a7b8cb397e271461dc9d50b3c2; "
+                                    "on all 54 sources x 6 parsers (324 records) the a345dc7 parsers still equal the pinned "
+                                    "lists, so 'before' below is both the pinned golden record and the a345dc7 behaviour"),
+           "base_snapshot": BASE_REV}
+
+keys_detail: dict[tuple[str, str], dict] = {}
+for key, (fname, text) in sources.items():
+    lines = text.splitlines()
+    pinned = golden["parsers"].get(key)
+    for short, lang in SHORT.items():
+        parser = getattr(n, L.PARSER_NAME[lang])
+        diag = []
+        cur = parser(lines, diagnostics=diag)
+        if pinned is not None:
+            if json.loads(json.dumps(cur)) == pinned.get(short):
+                summary["current_equals_baseline_parsers"] += 1
+            else:
+                summary["current_differs_baseline_parsers"].append([key, short])
+        srows = L.python_string_rows(text) if lang == "python" else None
+        recs = {}
+        for rec in diag:
+            if rec.get("record") != "block":
+                continue
+            c = L.classify_block(lang, lines, rec, srows)
+            recs[rec["line"]] = c
+        cand_diffs: dict[str, dict[int, dict]] = {}
+        for cn in L.CANDIDATES:
+            if cn.startswith("MD_") and lang != "markdown":
+                continue
+            after = L.patched_parser(lang, cn)(lines)
+            d = L.diff_parses(cur, after)
+            cand_diffs[cn] = {item["line"]: item for item in d}
+        if cand_diffs.get("C1+C2"):
+            own = L.LANG_BY_EXT.get(os.path.splitext(fname)[1].lower())
+            own = "js_ts" if own == "vue" else own
+            tag = "own_language" if own == lang else "cross_language"
+            after12 = L.patched_parser(lang, "C1+C2")(lines)
+            deltas = []
+            for line, item in sorted(cand_diffs["C1+C2"].items()):
+                r = recs.get(line)
+                cls = "new_block_surfaced" if r is None else (
+                    "anomalous_block_changed" if r["anomalous"] else "CLEAN_block_changed")
+                attribution = {cn: (line in cand_diffs[cn]) for cn in STOP_ORDER}
+                for cn in sorted(cand_diffs):
+                    if cn.startswith("MD_"):
+                        attribution[cn] = line in cand_diffs[cn]
+                entry = {
+                    "line": line,
+                    "class": cls,
+                    "before": item["before"],
+                    "after": item["after"],
+                    "changed_by": attribution,
+                }
+                if r is not None:
+                    entry["before_record"] = {
+                        "outcome": r["outcome"], "unterminated": r["unterminated"],
+                        "interior_openers": r["interior_openers"],
+                        "interior_close_openers": r["interior_close_openers"],
+                        "interior_noprefix": r["interior_noprefix"],
+                        "one_line_opener": r["one_line_opener"],
+                        "fires_first": r["fires"],
+                        "end_line": r["end_line"], "id": r["id"], "kind_raw": r["kind_raw"],
+                    }
+                deltas.append(entry)
+            keys_detail[(key, short)] = {
+                "source": key, "filename": fname, "parser": short, "tag": tag,
+                "test_case": f"tests/beacon_seams_baseline.json :: parsers[{key!r}][{short!r}]",
+                "clause": "U01 §6.3",
+                "pinned_beacons": len(cur), "patched_beacons": len(after12),
+                "delta_counts": {
+                    "new_block_surfaced": sum(1 for d in deltas if d["class"] == "new_block_surfaced"),
+                    "anomalous_block_changed": sum(1 for d in deltas if d["class"] == "anomalous_block_changed"),
+                    "CLEAN_block_changed": sum(1 for d in deltas if d["class"] == "CLEAN_block_changed"),
+                    "total": len(deltas),
+                },
+                "before_beacons": json.loads(json.dumps(cur)),
+                "after_beacons": json.loads(json.dumps(after12)),
+                "deltas": deltas,
+            }
+
+# ---- extra keys that only appear when the blank-line stop is added --------
+c3a_only: dict[str, dict] = {}
+for key, (fname, text) in sources.items():
+    lines = text.splitlines()
+    for short, lang in SHORT.items():
+        parser = getattr(n, L.PARSER_NAME[lang])
+        cur = parser(lines)
+        d12 = {i["line"]: i for i in L.diff_parses(cur, L.patched_parser(lang, "C1+C2")(lines))}
+        d123a = {i["line"]: i for i in L.diff_parses(cur, L.patched_parser(lang, "C1+C2+C3a")(lines))}
+        extra = sorted(set(d123a) - set(d12))
+        changed = sorted(l for l in set(d123a) & set(d12) if d123a[l] != d12[l])
+        if extra or changed:
+            c3a_only[f"{key}|{short}"] = {
+                "records_only_with_c3a": extra,
+                "records_differing_between_c1c2_and_c1c2c3a": changed,
+            }
+
+own = [k for k, v in keys_detail.items() if v["tag"] == "own_language"]
+cross = [k for k, v in keys_detail.items() if v["tag"] == "cross_language"]
+cls_by = collections.Counter()
+cls_by_tag = collections.Counter()
+for v in keys_detail.values():
+    for d in v["deltas"]:
+        cls_by[d["class"]] += 1
+        cls_by_tag[f"{d['class']}|{v['tag']}"] += 1
+
+# ---- separation from the later combined (lexical/pairing/wrapper) changes --
+REPAIRED_SPANS = ["nmcv1@file-core", "bocsv1@file-core", "svcv1@file-boundary",
+                  "ncv1@file-boundary", "wkv1@carto-refresh-core"]
+span_kind = 0
+ids_seen = collections.Counter()
+for v in keys_detail.values():
+    for d in v["deltas"]:
+        for side in ("before", "after"):
+            b = d[side]
+            if b:
+                if b.get("kind") == "span":
+                    span_kind += 1
+                ids_seen[str(b.get("id"))] += 1
+overlap = {
+    "deltas_involving_span_kind": span_kind,
+    "deltas_total": sum(len(v["deltas"]) for v in keys_detail.values()),
+    "repaired_span_ids_seen_anywhere_in_deltas": [i for i in REPAIRED_SPANS if i in ids_seen],
+    "id_values_in_deltas_top": ids_seen.most_common(8),
+    "note": ("None of the five re-paired whole-file span ids (nor any non-null id) occurs in these deltas: "
+             "the C1+C2 stop-rule delta is cleanly separate from the later §6.7 pairing / §6.8 lexical / §6.5 "
+             "wrapper corrections named in U01 §10 (5 re-paired spans, the JS pseudo-block at "
+             "tests/js/test_saved_tabs_drive_ui.js:1548, the in-string examples). The deltas here are the JS "
+             "parser's pseudo-blocks over #-language sources that a stop at the next structural line surfaces."),
+}
+
+out = {
+    "schema": "beacon_robustness/u01/area1_c1c2_delta@1",
+    "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "base_rev": BASE_REV,
+    "base_snapshot": BASE,
+    "base_snapshot_note": "git archive a345dc7 extracted by this helper; diff -r equal to area-1/tree",
+    "provenance": {
+        "a1lib_source": os.path.join(A1, "a1lib.py"),
+        "a1lib_source_sha256": sha256_file(os.path.join(A1, "a1lib.py")),
+        "a1lib_base_copy": os.path.join(WORK, "a1lib_base.py"),
+        "a1lib_base_copy_sha256": sha256_file(os.path.join(WORK, "a1lib_base.py")),
+        "a1lib_base_copy_diff": "only the SNAP constant (probes/snapshot -> base_a345dc7)",
+        "measure_logic": os.path.join(A1, "measure_golden.py"),
+        "measure_logic_sha256": sha256_file(os.path.join(A1, "measure_golden.py")),
+        "golden_baseline": os.path.join(TREE_TESTS, "beacon_seams_baseline.json"),
+        "golden_baseline_sha256": sha256_file(os.path.join(TREE_TESTS, "beacon_seams_baseline.json")),
+        "golden_baseline_base_rev_field": golden.get("base_rev"),
+        "nexus_map_codebase": os.path.abspath(n.__file__),
+        "nexus_map_codebase_sha256": sha256_file(n.__file__),
+        "beacon_mutation_contract": os.path.abspath(L.bmc.__file__),
+        "beacon_mutation_contract_sha256": sha256_file(L.bmc.__file__),
+        "fixtures_module": os.path.abspath(fx.__file__),
+        "fixtures_module_sha256": sha256_file(fx.__file__),
+        "module_resolution": "base root first on sys.path; a1lib_base asserts its own __file__ is the base root",
+    },
+    "clause_6_3_verbatim": (
+        "U01 §6.3 Collection recovery: bracket terminator is a comment body beginning `]`; trailing comma, "
+        "spaces and a trailing ordinary comment are accepted structurally. A bracket in a field value is not a "
+        "terminator. Before a next structural open OR close, stop the damaged block and reprocess that line. "
+        "Stop before a nonblank non-comment line in line-comment forms. Bare blank/prefix-only lines do not "
+        "truncate wrapped fields. In wrapped comments stop at the actual wrapper end, next structural opener, "
+        "section boundary or EOF; record a missing bracket without swallowing another block. A missing wrapper "
+        "never gives ownership of later headings/code/prose. Record terminated_by = "
+        "bracket/next_opener/non_comment_line/wrapper_end/section_end/eof plus offending line. At EOF retain the "
+        "last field. A stray bracket does not open a block or terminate an unrelated span."
+    ),
+    "candidate_for_this_list": "C1+C2 = stop before the next structural @beacon[ / @beacon-close[ line AND "
+                               "before a non-blank line without the opener's comment prefix (line-comment forms)",
+    "verification": summary,
+    "counts": {
+        "keys_total": len(keys_detail),
+        "keys_own_language": len(own),
+        "keys_cross_language": len(cross),
+        "deltas_total": sum(len(v["deltas"]) for v in keys_detail.values()),
+        **{f"deltas_{k}": v for k, v in cls_by.items()},
+        **{f"deltas_{k}": v for k, v in cls_by_tag.items()},
+    },
+    "keys": [keys_detail[k] for k in sorted(keys_detail)],
+    "field_notes": {
+        "deltas": ("each delta comes from area-1's diff_parses over the parsers' RETURNED beacon lists, keyed by "
+                   "comment_line; 'before' = null means no returned beacon at that line in the a345dc7/pinned parse "
+                   "(a diagnostics block record may still exist: see before_record / before_beacons)"),
+        "changed_by": ("per-record presence in each candidate's diff; the list identity is C1+C2 = the stop-rule "
+                       "candidate (clause §6.3)"),
+        "before_beacons/after_beacons": "the complete returned beacon lists for the key (not capped)",
+        "class": ("new_block_surfaced = present only after the stop rule; anomalous_block_changed = an existing "
+                  "record whose parse changed and which area-1's classifier marks anomalous; CLEAN_block_changed "
+                  "would be a clean record changed (none for C1+C2)"),
+        "tag": "own_language = source's own language parser; cross_language = the JS parser over '#-comment' sources",
+    },
+    "expected_changes_draft": [
+        {
+            "test": "tests/beacon_seams_baseline.json",
+            "case": f"parsers[{k['source']!r}][{k['parser']!r}]",
+            "clause": "U01 §6.3 (collection recovery: stop the damaged block before the next structural open or "
+                      "close; stop before a nonblank non-comment line in line-comment forms)",
+            "old_result": {"beacons": k["pinned_beacons"],
+                           "changed_lines": [d["line"] for d in k["deltas"]]},
+            "new_result": {"beacons": k["patched_beacons"],
+                           "changed_lines": [d["line"] for d in k["deltas"]]},
+            "records": k["delta_counts"],
+            "detail": f"area1_c1c2_delta.json keys[source={k['source']!r}, parser={k['parser']!r}]",
+        }
+        for k in (keys_detail[k] for k in sorted(keys_detail))
+    ] + [
+        {
+            "test": "tests/test_beacon_check_engine.py",
+            "case": "unterminated_block::EXPECTED_ROWS",
+            "clause": "U01 §6.3 + the re-baselining the stop rule forces",
+            "old_result": "{(14, 'unterminated_block'), (14, 'unknown_kind')} (line 62 at a345dc7)",
+            "new_result": ("re-baseline by name: the line-14 record is the own-language key's anomalous change "
+                           "(fixture:unterminated_block, python); the check engine rows depend on the new bounded "
+                           "record and must be re-measured, not guessed"),
+            "detail": "engine_expectation below; the fixture text is tests/beacon_check_fixtures.py::unterminated_block",
+        },
+    ],
+    "overlap_with_later_combined_changes": overlap,
+    "later_combined_c3a": {
+        "note": "records (source|parser -> lines) that ALSO change when the blank-line stop C3a is added to "
+                "C1+C2; these are NOT part of the stop-rule-only delta and blank-line stops are separately "
+                "measured as NOT viable (6 real multi-line comment= blocks)",
+        "records": c3a_only,
+    },
+    "engine_expectation": {
+        "file": "tests/test_beacon_check_engine.py",
+        "line": 62,
+        "at_a345dc7": "EXPECTED_ROWS['unterminated_block'] = {(14, 'unterminated_block'), (14, 'unknown_kind')}",
+        "note": "fixture:unterminated_block (python) is the own-language key of this list; its rows change "
+                "under the stop rule and must be re-baselined by name in tests/beacon_robustness_expected_changes.json",
+    },
+}
+os.makedirs(os.path.join(FREEZES, "area1"), exist_ok=True)
+outp = os.path.join(FREEZES, "area1", "area1_c1c2_delta.json")
+with open(outp, "w", encoding="utf-8", newline="\n") as f:
+    json.dump(out, f, ensure_ascii=False, indent=1, sort_keys=False, default=str)
+    f.write("\n")
+
+print(json.dumps({"wrote": outp, "bytes": os.path.getsize(outp),
+                  "verification": {k: (v if k != "current_differs_baseline_parsers" else len(v)) for k, v in summary.items()},
+                  "counts": out["counts"],
+                  "keys": [f"{k[0]} | {k[1]} | {v['tag']}" for k, v in sorted(keys_detail.items())],
+                  "c3a_extra_keys": len(c3a_only)}, indent=1))

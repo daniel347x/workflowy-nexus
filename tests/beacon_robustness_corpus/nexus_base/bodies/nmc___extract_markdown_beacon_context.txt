@@ -1,0 +1,65 @@
+def _extract_markdown_beacon_context(
+    lines: list[str],
+    comment_line: int,
+    enabled: bool = False,
+) -> List[str]:
+    """Extract nearby HTML comment lines (non-beacon) around a Markdown beacon.
+
+    We look above and below the beacon's comment_line for HTML comments
+    (<!-- ... -->) that do not contain @beacon[. Blank lines are skipped.
+
+    DISABLED BY DEFAULT (Dan, May 2026)
+    -----------------------------------
+    Unlike Python/JS-TS/SQL/Shell, where comment-slurping pulls genuine
+    documentation (docstrings, adjacent comments) into the Workflowy node
+    note as a free benefit, in Markdown an HTML comment is part of the
+    section's *body content* rather than metadata about the section.
+    Slurping it into the node note duplicates it in an awkward
+    ``CONTEXT COMMENTS (MD):`` block sandwiched between the BEACON
+    metadata and the section body.
+
+    The comments are not lost when slurping is disabled: they remain in
+    the source ``.md`` file on disk and are visible via ``read_text_file``
+    or ``read_text_snippet`` on the heading's beacon UUID. Only the
+    duplicate copy in the Workflowy note is suppressed.
+
+    The full above/below traversal logic is preserved below the early
+    return so a future caller can opt back in by passing ``enabled=True``
+    if a use case for Markdown comment slurping ever emerges.
+    """
+    if not enabled:
+        return []
+
+    context: List[str] = []
+
+    # Above
+    j = comment_line - 1
+    while j >= 1:
+        stripped = lines[j - 1].strip()
+        if not stripped:
+            j -= 1
+            continue
+        if stripped.startswith("<!--") and "@beacon[" not in stripped:
+            # Skip pure sentinel lines like "<!--" and "-->", but keep
+            # single-line comments that actually contain text.
+            if stripped != "<!--" and stripped != "-->":
+                context.insert(0, stripped)
+            j -= 1
+            continue
+        break
+
+    # Below
+    j = comment_line + 1
+    while j <= len(lines):
+        stripped = lines[j - 1].strip()
+        if not stripped:
+            j += 1
+            continue
+        if stripped.startswith("<!--") and "@beacon[" not in stripped:
+            if stripped != "<!--" and stripped != "-->":
+                context.append(stripped)
+            j += 1
+            continue
+        break
+
+    return _strip_beacon_meta_blocks_from_context(context)

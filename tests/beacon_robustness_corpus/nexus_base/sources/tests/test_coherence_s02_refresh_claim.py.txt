@@ -1,0 +1,566 @@
+"""S02 §16.1 — refresh-publication claim, dedupe, and successor tests."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    NOW,
+    RecordedSleep,
+    make_coherence_root,
+    s02_fetch,
+    s02_make_export,
+    s02_node,
+    s02_set_barrier,
+)
+
+from workflowy_mcp.coherence import (
+    COMPAT_PATCH_KIND,
+    REFRESH_CUT_SCHEMA_VERSION,
+    RefreshCutToken,
+    RefreshPublicationClaim,
+    new_claim_id,
+    new_epoch_id,
+    read_manifest,
+    read_refresh_claim,
+    run_full_refresh,
+    write_refresh_claim,
+)
+from workflowy_mcp.coherence.errors import CoherenceSchemaError, RefreshClaimError
+from workflowy_mcp.coherence.paths import coherence_lock_async
+from workflowy_mcp.coherence.refresh_authority import _recover_dead_owner_locked
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+def _snapshot_dir(tmp_path: Path) -> Path:
+    target = tmp_path / "snapshots"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _fake_claim(
+    paths,
+    *,
+    status: str = "downloading",
+    owner_pid: int | None = None,
+    owner_pid_create_time: float | None = None,
+    owner_start_ticks: int | None = None,
+    owner_boot_id: str | None = None,
+    cut_hard: int = 0,
+    cut_external: int = 0,
+    target_epoch_number: int | None = None,
+    target_epoch_id: str | None = None,
+    refresh_kind: str = "system",
+) -> RefreshPublicationClaim:
+    from workflowy_mcp import carto_job_governance as gov
+
+    manifest = read_manifest(paths, required=True)
+    pid = os.getpid() if owner_pid is None else owner_pid
+    # A claim owned by the CURRENT pid must carry the real stable identity
+    # (start ticks + boot id) or the liveness classifier cannot see it alive;
+    # a foreign pid stamps NO stable fields (legacy shape — a genuinely
+    # absent pid still classifies dead, an unverifiable one unknown≡live).
+    if pid == os.getpid():
+        identity = gov.current_process_identity()
+        create_time = identity.create_time if owner_pid_create_time is None else owner_pid_create_time
+        start_ticks = identity.start_ticks if owner_start_ticks is None else owner_start_ticks
+        boot_id = identity.boot_id if owner_boot_id is None else owner_boot_id
+    else:
+        create_time = 1.0 if owner_pid_create_time is None else owner_pid_create_time
+        start_ticks = owner_start_ticks
+        boot_id = owner_boot_id
+    claim = RefreshPublicationClaim(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        claim_id=new_claim_id(),
+        owner_pid=pid,
+        owner_pid_create_time=create_time,
+        owner_start_ticks=start_ticks,
+        owner_boot_id=boot_id,
+        refresh_kind=refresh_kind,
+        status=status,
+        cut_token=RefreshCutToken(
+            schema_version=REFRESH_CUT_SCHEMA_VERSION,
+            account_scope_id=ACCOUNT_A,
+            epoch_number=manifest.epoch_number,
+            epoch_id=manifest.epoch_id,
+            journal_head_seq=manifest.journal_head_seq,
+            hard_barrier_generation=cut_hard,
+            external_dirt_generation=cut_external,
+            captured_at=NOW,
+        ),
+        requested_hard_generation=0,
+        requested_external_generation=0,
+        target_epoch_number=(
+            manifest.epoch_number + 1 if target_epoch_number is None else target_epoch_number
+        ),
+        target_epoch_id=new_epoch_id() if target_epoch_id is None else target_epoch_id,
+        started_at=NOW,
+        updated_at=NOW,
+        result=None,
+    )
+    write_refresh_claim(paths, claim)
+    return claim
+
+
+# ---------------------------------------------------------------------------
+# Schema validation
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_cut_token_roundtrip(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = read_manifest(paths, required=True)
+    cut = RefreshCutToken(
+        schema_version=REFRESH_CUT_SCHEMA_VERSION,
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        journal_head_seq=0,
+        hard_barrier_generation=2,
+        external_dirt_generation=3,
+        captured_at=NOW,
+    )
+    decoded = RefreshCutToken.from_dict(json.loads(json.dumps(cut.to_dict())))
+    assert decoded == cut
+
+
+def test_refresh_claim_roundtrip_and_terminal(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _fake_claim(paths)
+    decoded = RefreshPublicationClaim.from_dict(json.loads(json.dumps(claim.to_dict())))
+    assert decoded == claim
+    assert not decoded.is_terminal
+    terminal = RefreshPublicationClaim.from_dict(
+        {**claim.to_dict(), "status": "completed"}
+    )
+    assert terminal.is_terminal
+
+
+def test_refresh_claim_rejects_unknown_keys_and_bad_enums(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _fake_claim(paths)
+    with pytest.raises(CoherenceSchemaError):
+        RefreshPublicationClaim.from_dict({**claim.to_dict(), "surprise": 1})
+    # S04 widened the enum: "checkpoint" is now a VALID claim kind (S02
+    # ledger item 13); a genuinely unknown kind still fails closed.  (CF-S04-H4
+    # cross-field legality, Waypoint A Stage2-17: a checkpoint claim must
+    # ALSO carry basis_head_seq — supplied here.)
+    checkpoint_claim = RefreshPublicationClaim.from_dict(
+        {
+            **claim.to_dict(),
+            "refresh_kind": "checkpoint",
+            "cut_token": None,
+            "basis_head_seq": 0,
+        }
+    )
+    assert checkpoint_claim.refresh_kind == "checkpoint"
+    with pytest.raises(CoherenceSchemaError):
+        RefreshPublicationClaim.from_dict({**claim.to_dict(), "refresh_kind": "warp_drive"})
+    with pytest.raises(CoherenceSchemaError):
+        RefreshPublicationClaim.from_dict({**claim.to_dict(), "status": "exploded"})
+
+
+# ---------------------------------------------------------------------------
+# Acquisition / dedupe / successor semantics
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_single_full_refresh_publishes_epoch_and_terminal_claim(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    calls: list[int] = []
+    sleep = RecordedSleep()
+    payload = s02_make_export([s02_node("a"), s02_node("b", parent_id="a")])
+    outcome = await run_full_refresh(
+        paths=paths,
+        fetch=s02_fetch(payload, calls),
+        refresh_kind="system",
+        settle_seconds=0,
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=sleep,
+    )
+    assert outcome.status == "published"
+    assert calls == [1]
+    assert outcome.epoch_number == 1
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 1
+    assert manifest.previous_epoch_id is not None
+    assert manifest.epoch_id != manifest.previous_epoch_id
+    claim = read_refresh_claim(paths)
+    assert claim is not None and claim.status == "completed"
+    assert claim.result and claim.result.get("epoch_id") == manifest.epoch_id
+    # Local adoption payload is fully materialized and canonical.
+    assert {n["id"] for n in outcome.nodes_export["nodes"]} == {"a", "b"}
+
+
+@async_test
+async def test_join_covered_active_claim_dedupes(tmp_path):
+    """A request whose generations are covered by the ACTIVE claim joins it:
+    no second fetch, both callers succeed (in-process deterministic join)."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    # The active claim pretends its publication completed the CURRENT epoch.
+    manifest = read_manifest(paths, required=True)
+    active = _fake_claim(
+        paths,
+        status="completed",
+        target_epoch_number=manifest.epoch_number,
+        target_epoch_id=manifest.epoch_id,
+    )
+    calls: list[int] = []
+    # Pretend a base exists for the joiner's local adoption: write the base
+    # the fake claim 'published'.  The manifest base is None here (epoch 0
+    # bootstrap), so point it at a real wrapped base first.
+    from workflowy_mcp.coherence import manifest_with_updates, write_manifest
+    from workflowy_mcp.coherence.snapshot_store import (
+        new_snapshot_candidate_path,
+        write_snapshot_candidate,
+    )
+
+    base_path = write_snapshot_candidate(
+        new_snapshot_candidate_path(_snapshot_dir(tmp_path)),
+        {"nodes": [s02_node("root")]},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=base_path, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=manifest.journal_head_seq,
+    )
+    # The active claim is already terminal-completed; a fresh request JOINS
+    # only while it is ACTIVE, so re-mark it active without touching lineage.
+    write_refresh_claim(
+        paths,
+        RefreshPublicationClaim.from_dict({**active.to_dict(), "status": "downloading"}),
+    )
+    claim = read_refresh_claim(paths)
+    assert claim is not None and not claim.is_terminal
+
+    async def complete_later() -> None:
+        await asyncio.sleep(0.2)
+        current = read_refresh_claim(paths)
+        assert current is not None
+        write_refresh_claim(
+            paths,
+            RefreshPublicationClaim.from_dict(
+                {**current.to_dict(), "status": "completed"}
+            ),
+            expected_claim_id=claim.claim_id,
+        )
+
+    completer = asyncio.create_task(complete_later())
+    outcome = await run_full_refresh(
+        paths=paths,
+        fetch=s02_fetch(s02_make_export([]), calls),
+        refresh_kind="widget",
+        settle_seconds=0,
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=RecordedSleep(),
+        poll_seconds=0.02,
+    )
+    await completer
+    assert outcome.status == "joined"
+    assert outcome.deduplicated is True
+    assert calls == []  # no second download
+    assert outcome.node_count == 1
+
+
+@async_test
+async def test_newer_generation_serializes_exactly_one_successor(tmp_path):
+    """A request requiring a generation NEWER than the active cut waits for
+    the active publisher, then acquires exactly one successor refresh."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    s02_set_barrier(paths, 1, active=True)
+    # Active full-refresh claim whose cut (0,0) does NOT cover required gen 1.
+    active = _fake_claim(paths, status="downloading", cut_hard=0, cut_external=0)
+    calls: list[int] = []
+
+    async def fail_later() -> None:
+        await asyncio.sleep(0.2)
+        write_refresh_claim(
+            paths,
+            RefreshPublicationClaim.from_dict({**active.to_dict(), "status": "failed"}),
+            expected_claim_id=active.claim_id,
+        )
+
+    completer = asyncio.create_task(fail_later())
+    outcome = await run_full_refresh(
+        paths=paths,
+        fetch=s02_fetch(s02_make_export([s02_node("x")]), calls),
+        refresh_kind="recovery",
+        settle_seconds=0,
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=RecordedSleep(),
+        poll_seconds=0.02,
+    )
+    await completer
+    assert outcome.status == "published"
+    assert outcome.successor_refresh_performed is True
+    assert calls == [1]  # exactly one successor download
+    # The successor's cut covered barrier gen 1 and cleared it.
+    manifest = read_manifest(paths, required=True)
+    assert manifest.dirty_status.active is False
+    assert outcome.hard_barrier_cleared is True
+
+
+@async_test
+async def test_compat_patch_never_dedupes_with_full_refresh(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _fake_claim(paths, status="downloading")  # active full-refresh claim
+    from workflowy_mcp.coherence import run_compat_patch
+
+    with pytest.raises(RefreshClaimError):
+        await run_compat_patch(
+            paths=paths,
+            patches=[{"id": "a", "note": "x"}],
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+            max_wait_seconds=0.2,
+        )
+
+
+@async_test
+async def test_full_refresh_waits_for_active_compat_patch(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _fake_claim(paths, status="publishing", refresh_kind=COMPAT_PATCH_KIND)
+    calls: list[int] = []
+    with pytest.raises(RefreshClaimError):
+        await run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([]), calls),
+            settle_seconds=0,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+            max_wait_seconds=0.2,
+        )
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Dead-owner recovery and fail-closed behavior
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_dead_owner_before_publish_recovers_and_new_owner_succeeds(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    dead_pid = 2**22  # certainly not a live process
+    _fake_claim(paths, status="downloading", owner_pid=dead_pid)
+    calls: list[int] = []
+    outcome = await run_full_refresh(
+        paths=paths,
+        fetch=s02_fetch(s02_make_export([s02_node("z")]), calls),
+        settle_seconds=0,
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=RecordedSleep(),
+        poll_seconds=0.02,
+    )
+    assert outcome.status == "published"
+    assert outcome.successor_refresh_performed is True
+    assert calls == [1]
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 1
+
+
+@async_test
+async def test_dead_owner_after_publication_classifies_completed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    # Publish one real epoch first.
+    await run_full_refresh(
+        paths=paths,
+        fetch=s02_fetch(s02_make_export([s02_node("a")])),
+        settle_seconds=0,
+        snapshot_dir=_snapshot_dir(tmp_path),
+        sleep=RecordedSleep(),
+        poll_seconds=0.02,
+    )
+    manifest = read_manifest(paths, required=True)
+    # A dead-owner claim left ACTIVE whose target epoch IS the current one.
+    fake = _fake_claim(
+        paths,
+        status="publishing",
+        owner_pid=2**22,
+        target_epoch_number=manifest.epoch_number,
+        target_epoch_id=manifest.epoch_id,
+    )
+    async with coherence_lock_async(paths):
+        recovered = _recover_dead_owner_locked(paths, fake, manifest)
+    assert recovered.status == "completed"
+    assert (recovered.result or {}).get("recovered_dead_owner") is True
+
+
+@async_test
+async def test_unknown_pid_state_stays_blocking(tmp_path, monkeypatch):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _fake_claim(paths, status="downloading")  # live owner
+    # Force the one liveness classifier to report "unknown" (a psutil-level
+    # anomaly that cannot be constructed through schema-valid claim data).
+    monkeypatch.setattr(
+        "workflowy_mcp.coherence.refresh_authority.gov.classify_owner_liveness",
+        lambda *_args, **_kwargs: "unknown",
+    )
+    calls: list[int] = []
+    with pytest.raises(RefreshClaimError):
+        await run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([]), calls),
+            settle_seconds=0,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+            max_wait_seconds=0.2,
+        )
+    assert calls == []
+    # The claim remains active (blocking), never recovered as dead.
+    claim = read_refresh_claim(paths)
+    assert claim is not None and claim.status == "downloading"
+
+
+@async_test
+async def test_malformed_claim_fails_closed(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    paths.refresh_publication_path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(CoherenceSchemaError):
+        await run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([])),
+            settle_seconds=0,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+        )
+
+
+@async_test
+async def test_no_cooldown_between_refreshes(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    for expected_epoch in (1, 2):
+        outcome = await run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([s02_node("n")])),
+            settle_seconds=0,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+        )
+        assert outcome.epoch_number == expected_epoch
+        assert outcome.status == "published"
+
+
+@async_test
+async def test_identity_read_failure_writes_no_claim(tmp_path, monkeypatch):
+    """A3: an owner-identity read failure refuses acquisition BEFORE any
+    claim is persisted — never a fabricated create-time that could later be
+    classified as a dead owner."""
+    from workflowy_mcp import carto_job_governance as gov
+
+    def _failing_identity():
+        raise RuntimeError("psutil unavailable")
+
+    monkeypatch.setattr(gov, "current_process_identity", _failing_identity)
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    calls: list[int] = []
+    with pytest.raises(RefreshClaimError):
+        await run_full_refresh(
+            paths=paths,
+            fetch=s02_fetch(s02_make_export([s02_node("a")]), calls),
+            settle_seconds=0,
+            snapshot_dir=_snapshot_dir(tmp_path),
+            sleep=RecordedSleep(),
+            poll_seconds=0.02,
+        )
+    assert calls == []
+    # No claim was persisted at all.
+    assert read_refresh_claim(paths) is None
+
+
+@async_test
+async def test_exact_token_guard_rejects_foreign_phase_write(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _fake_claim(paths, status="downloading")
+    from workflowy_mcp.coherence import claim_with_updates
+    from workflowy_mcp.coherence.errors import ManifestConflictError
+
+    with pytest.raises(ManifestConflictError):
+        write_refresh_claim(
+            paths,
+            claim_with_updates(claim, status="settling"),
+            expected_claim_id="not-the-claim",
+        )
+
+
+@async_test
+async def test_final_new_fetch_waits_older_download_and_owns_successor(tmp_path, monkeypatch):
+    """The real second caller lands AFTER old download, BEFORE old publication."""
+    import workflowy_mcp.coherence.refresh_authority as authority
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    downloaded, release = asyncio.Event(), asyncio.Event()
+    events = []
+    real_publish = authority.publish_epoch
+
+    async def paused_publish(**kwargs):
+        if not downloaded.is_set():
+            downloaded.set()
+            await release.wait()
+        events.append("publish")
+        return await real_publish(**kwargs)
+    monkeypatch.setattr(authority, "publish_epoch", paused_publish)
+    async def old_fetch():
+        events.append("old_fetch")
+        return s02_make_export([s02_node("old")])
+    async def final_fetch():
+        events.append("final_fetch")
+        return s02_make_export([s02_node("last")])
+    old = asyncio.create_task(run_full_refresh(paths=paths, fetch=old_fetch,
+        settle_seconds=0, snapshot_dir=_snapshot_dir(tmp_path), poll_seconds=0.001))
+    await downloaded.wait()
+    events.append("positive_stop")
+    final = asyncio.create_task(run_full_refresh(paths=paths, fetch=final_fetch,
+        require_new_fetch=True, settle_seconds=0, snapshot_dir=_snapshot_dir(tmp_path), poll_seconds=0.001))
+    await asyncio.sleep(0.02)
+    assert "final_fetch" not in events
+    release.set()
+    previous, outcome = await asyncio.gather(old, final)
+    assert outcome.status == "published" and not outcome.deduplicated
+    assert outcome.claim_id != previous.claim_id
+    assert events == ["old_fetch", "positive_stop", "publish", "final_fetch", "publish"]
+    assert set(n["id"] for n in outcome.nodes_export["nodes"]) == {"last"}
+
+
+@async_test
+async def test_final_demand_still_obeys_wait_bound_and_cancel(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _fake_claim(paths)
+    calls = []
+    with pytest.raises(RefreshClaimError):
+        await run_full_refresh(paths=paths, fetch=s02_fetch(s02_make_export([]), calls),
+            require_new_fetch=True, settle_seconds=0, snapshot_dir=_snapshot_dir(tmp_path),
+            poll_seconds=0.001, max_wait_seconds=0.01)
+    def cancelled():
+        raise asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await run_full_refresh(paths=paths, fetch=s02_fetch(s02_make_export([]), calls),
+            require_new_fetch=True, settle_seconds=0, snapshot_dir=_snapshot_dir(tmp_path),
+            cancel_check=cancelled)
+    assert calls == []

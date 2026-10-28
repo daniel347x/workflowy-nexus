@@ -1,0 +1,83 @@
+# @beacon[
+#   id=package-loading@main-module-bootstrap,
+#   role=__main__.py import-and-run bootstrap,
+#   slice_labels=nexus-loading-flow,
+#   kind=span,
+#   show_span=true,
+#   comment=Package entrypoint for `python -m workflowy_mcp` / `workflowy-mcp`: parse --transport (stdio default | http daemon), import the FastMCP app from server.py and run it,
+# ]
+"""Main entry point for WorkFlowy MCP Server.
+
+Two transports, one server:
+
+* ``workflowy-mcp``                      -> stdio (default; unchanged behaviour)
+* ``workflowy-mcp --transport http``     -> the single Streamable-HTTP **daemon**
+  (also selectable via ``WORKFLOWY_MCP_TRANSPORT=http``); see ``daemon.py``.
+
+stdio-only hosts should launch ``workflowy-mcp-shim`` (``shim.py``) instead,
+which finds-or-boots the daemon and proxies to it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="workflowy-mcp",
+        description="NEXUS Workflowy MCP server (stdio by default; --transport http runs the single daemon).",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default=None,
+        help="stdio (default) or http (Streamable-HTTP daemon). Env: WORKFLOWY_MCP_TRANSPORT.",
+    )
+    parser.add_argument("--host", default=None, help="HTTP bind host (env WORKFLOWY_MCP_HTTP_HOST, default 0.0.0.0).")
+    parser.add_argument("--port", type=int, default=None, help="HTTP port (env WORKFLOWY_MCP_HTTP_PORT, default 8766).")
+    parser.add_argument("--path", default=None, help="HTTP path (env WORKFLOWY_MCP_HTTP_PATH, default /mcp).")
+    return parser.parse_args(argv)
+
+
+# @beacon[
+#   id=package-loading@main-entrypoint,
+#   role=main,
+#   slice_labels=nexus-loading-flow,nexus--daemon,
+#   kind=ast,
+#   comment=Exact package entrypoint reached by `python -m workflowy_mcp`: stdio unless --transport http / WORKFLOWY_MCP_TRANSPORT=http selects the daemon,
+# ]
+def main(argv: list[str] | None = None) -> None:
+    """Run the MCP server over stdio (default) or as the HTTP daemon."""
+    import os
+
+    from workflowy_mcp import daemon as _daemon
+
+    args = _parse_args(argv)
+    # CLI flags win over env; push them into env so daemon.py's resolvers
+    # (shared with the shim) see one consistent configuration.
+    if args.host is not None:
+        os.environ[_daemon.HTTP_HOST_ENV_VAR] = args.host
+    if args.port is not None:
+        os.environ[_daemon.HTTP_PORT_ENV_VAR] = str(args.port)
+    if args.path is not None:
+        os.environ[_daemon.HTTP_PATH_ENV_VAR] = args.path
+    transport = _daemon.resolve_transport(args.transport)
+
+    # Import here (not at module top) so `--help` and argument errors never
+    # pay for building the whole FastMCP app.
+    from workflowy_mcp.server import mcp
+
+    if transport == "http":
+        _daemon.run_http_daemon(mcp)
+        return
+
+    mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+# @beacon-close[
+#   id=package-loading@main-module-bootstrap,
+# ]

@@ -1,0 +1,43 @@
+def _parse_disk_beacons_for_language(
+    language: str, source_path: str, *, diagnostics: list | None = None
+) -> tuple[list[str], list[dict]]:
+    """Read + parse a file's beacon blocks PURELY (no writes, no mutating parsers).
+
+    Returns ``(lines, beacons)``. The Markdown control-char sanitize is
+    IN-MEMORY ONLY on this path (SPEC v5 §7 zero-preliminary-writes), and
+    ``parse_markdown_structure`` is not called here.
+
+    ``diagnostics``, when a list, is passed to the language's block parser.
+    A Vue file is parsed whole by two parsers here, so a sink is refused for
+    ``vue`` with ``ValueError``: per-block facts of a Vue file come from
+    ``_vue_section_beacons``.
+    """
+    if language == "vue" and diagnostics is not None:
+        raise ValueError(
+            "_parse_disk_beacons_for_language('vue') parses the whole file with two "
+            "parsers; take per-block diagnostics from _vue_section_beacons"
+        )
+    if language == "markdown":
+        with open(source_path, "r", encoding="utf-8") as f:
+            raw_text = f.read()
+        safe_text = _strip_disallowed_markdown_control_chars(raw_text)
+        lines = _markdown_source_lines(safe_text)
+        return lines, parse_markdown_beacon_blocks(lines, diagnostics=diagnostics)
+    with open(source_path, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    if language == "python":
+        return lines, parse_python_beacon_blocks(lines, diagnostics=diagnostics)
+    if language == "js_ts":
+        return lines, parse_js_beacon_blocks(lines, diagnostics=diagnostics)
+    if language == "vue":
+        # Script beacons (// style) + style blocks (/* */ style) via the JS
+        # parser; template beacons (<!-- --> style) via the Markdown parser,
+        # so id-cardinality checks see every beacon in the file.
+        return lines, parse_js_beacon_blocks(lines) + parse_markdown_beacon_blocks(lines)
+    if language == "sql":
+        return lines, parse_sql_beacon_blocks(lines, diagnostics=diagnostics)
+    if language == "shell":
+        return lines, parse_sh_beacon_blocks(lines, diagnostics=diagnostics)
+    if language == "yaml":
+        return lines, parse_yaml_beacon_blocks(lines, diagnostics=diagnostics)
+    raise ValueError(f"unknown beacon language {language!r}")

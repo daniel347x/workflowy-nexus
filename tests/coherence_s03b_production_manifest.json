@@ -1,0 +1,405 @@
+{
+  "manifest": "S03-B production-touch manifest (H6 gate 2)",
+  "baseline_commit": "06cd024",
+  "frozen_from": "post-S06 tree at 06cd024 (S06 sealed, amendment round 1), before S03-B edits",
+  "scope_rule": "Entries marked for modification MUST show diffs in S03-B commits. Anything beyond this manifest + the S03 spec's prescribed seams requires STOP-and-approval. New coherence modules, tests, fences, beacon blocks, and mechanically necessary imports are not scope expansion.",
+  "inputs": [
+    "tests/s06_s03b_consumer_inventory.json (S06 post-cleanup discovery inventory — textual idiom presence, NOT a semantic call graph; S06 carry-forward ledger item 1)",
+    "S03 spec §8 printed consumer baseline (floors, never ceilings)",
+    "S03-A result §8 carry-forward ledger (B1.1 atomic view+dirty read capture; client/publisher-bound snapshots; complete operation-front migration; H5 task-spawn classification; §11 permanent fences; Gate-c worker bootstrap; gate-2 manifest regeneration; conftest temp-dir rmtree)"
+  ],
+  "entries": [
+    {
+      "file": "src/workflowy_mcp/coherence/operation_cache.py",
+      "symbols": [
+        "OperationCacheSnapshot (+ dirty_ids: frozenset[str] — B1.1 welded view+dirty capture; + owner — B1.2 originating client/publisher authority identity)",
+        "_snapshot_for_view (carries dirty_ids/owner on advance)",
+        "_advance_task_snapshot (+ dirty_ids parameter; welded same-generation advance)",
+        "capture_operation_cache (welded (view, dirty_ids) capture via the client _capture_view_and_dirty hook when present; owner binding)",
+        "cache_operation_boundary (nested reuse ONLY when the existing snapshot's owner is this boundary's cache authority — B1.2; a cross-client nested boundary captures a fresh snapshot for its own client, shadowing + resetting)",
+        "publish_local_cache_view (+ snapshot_dirty_ids kwarg threading the welded dirty capture into the task-snapshot advance, §6.3)"
+      ],
+      "disposition": "modified",
+      "why": "S03-B1 deliverables B1.1 (atomic view+dirty READ capture) and B1.2 (client/publisher-bound operation snapshots) per the S03-A carry-forward ledger items 1-2"
+    },
+    {
+      "file": "src/workflowy_mcp/coherence/errors.py",
+      "symbols": [
+        "(no new error classes expected; CacheViewError dialect reused for the loud-boundary failure)"
+      ],
+      "disposition": "unchanged",
+      "why": "recorded for completeness — the §6.4 loud-boundary failure uses the existing CacheViewError dialect"
+    },
+    {
+      "file": "src/workflowy_mcp/coherence/__init__.py",
+      "symbols": ["package exports for any new S03-B public primitives"],
+      "disposition": "modified",
+      "why": "export S03-B primitives"
+    },
+    {
+      "file": "src/workflowy_mcp/client/api_client_core.py",
+      "symbols": [
+        "WorkFlowyClientCore._capture_view_and_dirty (NEW: ONE publisher-synchronized welded (current view, frozenset(dirty_ids)) read — B1.1)",
+        "WorkFlowyClientCore._get_nodes_export_cache_nodes (§6.4 loud-boundary tightening: explicit view= or task-local operation snapshot ONLY; the publisher-current compatibility fallback is REMOVED — ledger item 3)",
+        "WorkFlowyClientCore.publish_local_cache_view (passes snapshot_dirty_ids= welded dirty capture into the COW bridge)",
+        "CRUD cache-presence guards (create_node/update_node/delete_node/complete_node/uncomplete_node/move_node + update_cached_node_name/update_cached_node_note): 'self._nodes_export_cache is (not) None' property reads replaced by is_unpopulated_view(publisher.capture()) checks — zero '._nodes_export_cache' reads remain outside the H2-b property definition",
+        "WorkFlowyClientCore._adopt_coherence_head (unchanged adapter — disposition recorded)"
+      ],
+      "disposition": "modified",
+      "why": "S03-B1: welded dirty capture (B1.1), loud-boundary accessor (ledger item 3), COW welded advance, H3 property-read excision inside client core"
+    },
+    {
+      "file": "src/workflowy_mcp/client/api_client_etch.py",
+      "symbols": [
+        "export_nodes_impl (§9 alias+mutation contract: use_cache=True hit consumes the explicit/task-local OperationCacheSnapshot — welded view + dirty_ids (B1.1) — never the publisher-live property + separate dirty set; subtree filtering never mutates view nodes; the _allow_api_refresh refresh branch is retained for the cache-free refresh-authority path)",
+        "WorkFlowyClientEtch.export_nodes (disposition recorded: delegates to export_nodes_impl inside caller boundaries)"
+      ],
+      "disposition": "modified",
+      "why": "S03 §9 export alias contract + B1.1 welded dirty migration of the subtree staleness check"
+    },
+    {
+      "file": "src/workflowy_mcp/client/api_client_nexus.py",
+      "symbols": [
+        "load_nodes_by_id_from_cache (§8.1: accepts OperationCacheSnapshot | CacheView | nodes_by_id mapping | client; never independently reacquires when the caller already owns a map; client form funnels through the §6.4 accessor — task-local snapshot or loud)",
+        "_modal_cache_nodes_by_id (fail-soft wrapper over the task-local/current view; disposition recorded)",
+        "handle resolvers resolve_uuid_like_node_handle / resolve_uuid_from_anchor_point / resolve_uuid_or_anchor_point_handle / WorkFlowyClientNexus.resolve_node_handle (hybrid map-or-client forms retained; self-load path funnels through the migrated loader — disposition: already-clean once the loader is snapshot-funneled, pending fence proof)",
+        "remaining direct _get_nodes_export_cache_nodes() / export_nodes_impl() consumer sites (per the S06 inventory lines 1558, 1573, 6928 and the nexus export_nodes_impl call sites): thread explicit snapshot/map where the caller already owns one; otherwise already-clean via the task-local accessor preference + the family-front boundary",
+        "workflowy_scry / beacon_get_code_snippet / read_text_snippet_by_symbol / refresh_file_node_beacons / refresh_folder_cartographer_sync / update_beacon_from_node / preflight_beacon_write_from_node / plan_beacon_write_from_node / commit_beacon_write_plan (disposition: migrated-or-already-clean with named boundary evidence per H1)"
+      ],
+      "disposition": "modified",
+      "why": "S03 §8.1/§8.2 shared loader migration + nexus consumer dispositions"
+    },
+    {
+      "file": "src/workflowy_mcp/mcp_api_registry.py",
+      "symbols": [
+        "OperationSpec (+ cache_backed: bool — REQUIRED keyword, validated, frozen; the §7.2 classification lives on the one registry contract)",
+        "dispatch_operation (+ operation_boundary hook: an injected async-context-manager factory invoked with spec.canonical_name; wraps ONLY the handler invocation of cache-backed specs — describe/unknown/validation-failure paths never adopt; kernel stays client-agnostic)"
+      ],
+      "disposition": "modified",
+      "why": "S03 §7.2 one internal registry classification + §7.1 exact boundary rule at the one public dispatch funnel"
+    },
+    {
+      "file": "src/workflowy_mcp/server.py",
+      "symbols": [
+        "_mcp_operation_boundary (NEW: server-side boundary factory — cache_operation_boundary(get_client(), canonical_name))",
+        "the 8 family fronts (system/node/tag/anchor/beacon/slice_group fronts + glimpse_family_tool + lightning_rod_family_tool): pass operation_boundary=_mcp_operation_boundary",
+        "all 57 OperationSpec registrations across build_system_registry / build_node_registry / build_tag_registry / build_anchor_registry / build_slice_group_registry / build_beacon_registry / build_glimpse_registry / build_lightning_rod_registry: explicit cache_backed= classification — 46 cache-backed / 11 cache-free (system.ping, system.broker.status, system.cache.refresh, system.config.get, system.job.status, system.job.cancel + slice_group.list/get/create/update/delete = False; audit A7.4 count correction) with named evidence in the S03-B registry artifact",
+        "websocket_handler: inline cache-backed actions wrapped in cache_operation_boundary (ws:<action> labels); inline-bodied cache-backed logic (bulk_apply_visible_nodes) wrapped at the dispatch site; cache-free actions (hello/ping/refresh_nodes_export_cache/set_cache_refresh_skip/save_nodes_export_cache/notify_node_mutated/carto_list_jobs/carto_clear_job_history/carto_cancel_job) recorded cache_free",
+        "task-dispatched WS handlers (_handle_list_anchors_for_widget, _handle_compile_slice_search, _handle_f8_expansion_plan, _handle_render_slice_modal, _handle_render_lightning_dom_capture, _handle_mutate_node_tags, _handle_merge_slice_groups): spawned via create_isolated_context_task (H5 new_operation_fresh_context) and own their boundary at the top of the handler body",
+        "spawn sites: _nodes_export_cache_refresh_worker startup spawn (944), connect_to_broker (8900), _carto_jobs_watcher_loop (8904) — create_isolated_context_task (new long-lived operations)",
+        "_start_job runner (9044): create_isolated_context_task + the runner establishes its own operation boundary (async job = NEW operation)",
+        "in-process CARTO bulk runner (11130): create_isolated_context_task + boundary inside the runner",
+        "_resolve_uuid_path_and_respond (B1.1/F3: cache view from the captured operation snapshot; the legacy _nodes_export_dirty_ids advisory read is RETAINED until S16)",
+        "_current_cache_by_id / _anchor_cache_by_id / _build_lens_stage0_snapshot_from_config / _modal_cache_nodes_by_id callers (explicit captured-map threading per §8.1)",
+        "the ~30 server.py _get_nodes_export_cache_nodes() consumer sites (S06 inventory): dispositions recorded per H1 — most are already-clean via the task-local accessor preference + the front boundary; explicit-view threading applied where §8.3-§8.6 demand a captured snapshot from the caller",
+        "_handle_refresh_file_node / _handle_materialize_markdown_file / _classify_bulk_materialize_eligibility / _resolve_enclosing_markdown_file_via_cache / _classify_bulk_f12p3_eligibility / _handle_bulk_materialize_markdown / _run_carto_bulk_visible_apply_job / _maybe_create_ast_beacon_from_tags / bulk walkers / job admission helpers (dispositions recorded per H1)"
+      ],
+      "disposition": "modified",
+      "why": "S03-B1 gate (b): operation-front migration (the true outer operations), WS action boundaries, H5 task-spawn rewiring, §8.3-§8.6 server consumer dispositions"
+    },
+    {
+      "file": "src/workflowy_mcp/markdown_generate_pipeline.py",
+      "symbols": [
+        "run_markdown_generate_pipeline cache access (line ~509 _get_nodes_export_cache_nodes site)"
+      ],
+      "disposition": "already-clean",
+      "why": "S03 §8.6 bulk/pipeline consumer disposition — CORRECTED (audit A7.1): the file carries NO S03-B diff. Boundary evidence: the pipeline runs ONLY inside the detached worker's Gate-(c) operation pin (weave_worker.main -> pin_worker_operation_cache -> run_markdown_generate_pipeline), so its cache reads flow through the task-local snapshot accessor with zero file-level changes — detached worker pin -> task-local accessor -> pipeline cache read."
+    },
+    {
+      "file": "src/workflowy_mcp/weave_worker.py",
+      "symbols": [
+        "main (Gate c — §10 detached-worker manifest bootstrap, post-A3 single-adoption ordering: exact claim adoption FIRST → startup cancellation → client init → job-basis lineage VALIDATION retained (job-premise integrity) → pin_worker_operation_cache (the pin's own _adopt_coherence_head call performs the SINGLE current manifest-head adoption before its adoption-free capture: base + contiguous journal through head; the job-basis snapshot remains preparation/diagnostic lineage per §10.2) → persistent worker operation snapshot → mutation work; mismatch/gap/corruption fails before mutation with existing job-failure + claim finalization; no /nodes-export call; no newest-timestamp search)",
+        "_resolve_carto_file_relpath_for_progress (worker progress path resolver: uses the worker operation snapshot — disposition recorded)"
+      ],
+      "disposition": "modified",
+      "why": "S03-B2 gate (c): detached-worker current-head manifest bootstrap after exact claim adoption; audit R3.1 wording correction (the pre-A3 two-call sequence was stale)"
+    },
+    {
+      "file": "src/workflowy_mcp/carto_job_governance.py",
+      "symbols": [
+        "_schedule_cleanup_obligation (loop.create_task → create_isolated_context_task for the long-lived cleanup supervisor — H5 new_operation_fresh_context)",
+        "launch_carto_refresh_job task_factory default (prepared-runner spawn at line ~4241 → isolated-context spawner; injectable test seam preserved; S03B Chain-3 W1: the prepared callback's ONE execution-site cache operation boundary is established by the server._start_carto_refresh_job wrapper before the callback runs)"
+      ],
+      "disposition": "modified",
+      "why": "H5 task-spawn classification: long-lived/background spawns must not pin a spawner's operation generation"
+    },
+    {
+      "file": "tests/coherence_s03b_registry.json",
+      "symbols": [
+        "the ONE H1/H2 machine inventory + allowlist data source: MCP fronts (cache_backed), WS actions (owns_boundary/delegates_to_boundary/cache_free), task-spawn sites (same_operation_inherit/new_operation_fresh_context/cache_free), consumer dispositions (migrated/already-clean/deleted-by-S06/allowlisted with named evidence), and the FROZEN function-scoped H2 allowlist ((file, function, access_kind, reason, retirement_session) tuples)"
+      ],
+      "disposition": "created",
+      "why": "H1 recorded dispositions + H2 one-exception-set-one-data-source + §11 machine inventory"
+    },
+    {
+      "file": "tests/test_coherence_s03_alias_fences.py",
+      "symbols": [
+        "the permanent §11 AST bypass/alias fence: '._nodes_export_cache' / '._nodes_export_cache_timestamp' access outside the H2 allowlist; direct _cache_view_publisher access outside the allowlist; _get_nodes_export_cache_nodes() without explicit/current snapshot outside boundary-owners/adapters; load_nodes_by_id_from_cache(client) old self-loading form outside boundary-owners/adapters; export_nodes_impl(use_cache=True) without a threaded snapshot outside boundary-owners/adapters; mutable-alias member/subscript writes on cache-originated names; newest-timestamp snapshot selection / direct snapshot writes outside the S02 authority (retained S02 fences); unclassified task-spawn forms (H5); injected-violation fixtures per category"
+      ],
+      "disposition": "created",
+      "why": "S03 §11 permanent fences + H5 spawn closure fence"
+    },
+    {
+      "file": "tests/test_coherence_s03_operation_boundary.py",
+      "symbols": [
+        "S03-B additions: welded view+dirty capture; cross-client nested boundary isolation; owner-bound nested reuse; cache-free operations perform zero coherence reads; dispatch-hook boundary wiring"
+      ],
+      "disposition": "modified",
+      "why": "§14.3 operation-boundary tests (S03-B gate b additions)"
+    },
+    {
+      "file": "tests/test_coherence_s03_consumer_migration.py",
+      "symbols": [
+        "three coverage tiers (audit A6/R3.2 corrected prose): (1) GENERIC STRUCTURAL PROOFS — one-adoption-per-operation across nested helpers, the §9 export alias contract, same-operation read-your-writes for repeated plan/commit loops, concurrent operations holding different generations; (2) REPRESENTATIVE REAL-PATH PROOFS — four head-advance-mid-operation pinning shapes over real seams: resolution → planning, render Stage 0 → Stage 1, mutation planning → eager-patch verification, bulk/path classification (the R2-corrected unseen-UUID + accessor-counter form); (3) ORDINARY BEHAVIOR REGRESSION — boundary-capable retrofitted feature suites with fixed-fixture parity"
+      ],
+      "disposition": "created",
+      "why": "§14.4 consumer parity tests; audit R3.2 wording correction (replaces the overbroad exhaustive-parity description)"
+    },
+    {
+      "file": "tests/test_coherence_s03_worker_bootstrap.py",
+      "symbols": [
+        "claim adoption precedes coherence adoption; manifest-head replay before first mutation/path operation; job-basis selection does not bypass current-head adoption; mismatch/gap fails with zero mutation + correct claim finalization; no API refresh/newest timestamp; one view for the entire worker operation"
+      ],
+      "disposition": "created",
+      "why": "§14.5 worker tests (Gate c)"
+    },
+    {
+      "file": "tests/test_coherence_s03_multiprocess.py",
+      "symbols": [
+        "S03-B additions as required by the gate-(c)/(b) multi-process checks",
+        "test_s03b_cross_process_generation_pinning (audit A7.1: the genuinely-required S03-B multiprocess proof — process A pins a view at sequence 0; a second writer appends a record; process B adopts the tail; A never re-adopts mid-operation and its pinned view is byte-stable)"
+      ],
+      "disposition": "modified",
+      "why": "§14 regression commands; the A7.1 amendment added the genuine S03-B multiprocess generation-pinning coverage this entry was frozen for"
+    },
+    {
+      "file": "tests/conftest.py",
+      "symbols": [
+        "S02-ledger item 10c fold-in: optional rmtree of the per-run workflowy-mcp-test-runtime-* temp dir at session teardown (first test-infrastructure touch)"
+      ],
+      "disposition": "modified",
+      "why": "S02 forward-ledger item 10c (deferred to S03-B by the S03-A carry-forward ledger item 8)"
+    },
+    {
+      "file": "tests/coherence_harness.py",
+      "symbols": [
+        "S03-B harness helpers as required (worker bootstrap fixtures, boundary fixtures)"
+      ],
+      "disposition": "modified",
+      "why": "test infrastructure for Gate (c)"
+    }
+  ],
+  "post_closure_amendments": [
+    {
+      "amendment": "S03-CR post-closure one-off repairs (work order S03-CR-01..04; NOT a remediation chain)",
+      "baseline_commit": "7a72a77",
+      "entries": [
+        {
+          "finding": "S03-CR-01",
+          "file": "src/workflowy_mcp/server.py",
+          "symbols": ["_start_carto_markdown_generate_job"],
+          "disposition": "modified",
+          "why": "F12+3 jobs (single and bulk) now persist snapshot_lineage so the detached worker's manifest-lineage validation accepts them. RECORD-HONESTY AMENDMENT: this separate MARKDOWN_GENERATE worker-launch path was not identified in the S03-B worker/job-entry closure record above (the manifest named _start_carto_refresh_job / launch_carto_refresh_job and the weave_worker Gate-c bootstrap but not this launcher); this entry closes that inventory gap."
+        },
+        {
+          "finding": "S03-CR-02",
+          "file": "src/workflowy_mcp/coherence/operation_cache.py + src/workflowy_mcp/client/api_client_core.py",
+          "symbols": [
+            "publish_local_cache_view (touched-aware commit + forward-movement task-snapshot advance)",
+            "_touched_node_ids",
+            "_advance_task_snapshot",
+            "WorkFlowyClientCore._transition_cow_overlay_ids",
+            "WorkFlowyClientCore.publish_local_cache_view (overlay accumulation)",
+            "WorkFlowyClientCore._publish_lineage_view (strict-newer overlay rebase)",
+            "WorkFlowyClientCore._rebase_transition_cow_overlay",
+            "_reflection_semantic_equal"
+          ],
+          "disposition": "modified",
+          "why": "a strict-newer lineage publication now rebases the transition-COW overlay (verified local writes) instead of silently erasing them, with semantic (codec-projected) reflection trimming; the operation's own rebased publication advances its task snapshot across the generation boundary (read-your-writes amendment to the sealed §6.3 equal-marker advance rule)"
+        },
+        {
+          "finding": "S03-CR-03",
+          "file": "src/workflowy_mcp/server.py + src/workflowy_mcp/client/api_client_nexus.py",
+          "symbols": [
+            "_legacy_tool (registration-time boundary migration)",
+            "_wrap_legacy_cache_operation_boundary",
+            "_LEGACY_CACHE_FREE_TOOLS",
+            "WorkFlowyClientNexus._modal_cache_nodes_by_id (fail-closed on missing boundary)"
+          ],
+          "disposition": "modified",
+          "why": "the selectable legacy MCP profile is a first-class migrated surface: every cache-backed legacy tool owns ONE operation boundary at FastMCP registration (never boundaryless-loud, never fail-soft); the registry legacy_profile_note is corrected (supersedes the CF-S03CR-01 fail-closed disposition)"
+        },
+        {
+          "finding": "S03-CR-04",
+          "file": "src/workflowy_mcp/server.py",
+          "symbols": ["_carto_footprint_from_selection"],
+          "disposition": "modified",
+          "why": "CARTO launch admission footprints derive from the operation's pinned view when a boundary is active (one operation, one generation, end to end); the freshness selection's newer cache_by_id is the no-boundary fallback only"
+        }
+      ]
+    },
+    {
+      "amendment": "S03-CR-02 complete sparse repair + CF-S03CR-10 closure (one-shot work order; NOT a remediation chain)",
+      "baseline_commit": "4fb06a1",
+      "entries": [
+        {
+          "finding": "S03-CR-02 (WO-2/WO-3 sparse representation)",
+          "file": "src/workflowy_mcp/coherence/transition_effects.py (NEW)",
+          "symbols": [
+            "FieldWrite",
+            "TransitionEffect",
+            "TransitionMerge",
+            "TRANSITION_OWNED_FIELDS",
+            "derive_transition_effects",
+            "compose_transition_effect",
+            "merge_offer_with_transition_effects",
+            "apply_transition_effects_to_nodes",
+            "TransitionEffectPolicy"
+          ],
+          "disposition": "created",
+          "why": "the ONE sparse, field-authoritative transition-effect authority (Contract C/D): a before/after field mask over the owned vocabulary per touched node, canonical created records, and tombstones — replacing the 4fb06a1 ID-only overlay wholesale. The pure three-way merge (reflect / stale-carry / conflict-offer-wins + legacy-dirty evidence) is consumed by EVERY epoch/lineage publication route; the per-publisher policy carries the store so the adoption engine (which never sees the client) applies the identical policy."
+        },
+        {
+          "finding": "S03-CR-02 (WO-1 Contract D) + CF-S03CR-10 (WO-4)",
+          "file": "src/workflowy_mcp/coherence/adoption.py + src/workflowy_mcp/coherence/cache_view.py",
+          "symbols": [
+            "_publish_epoch_view (policy-consulting sparse merge + atomic commit)",
+            "_cas_publish ((candidate, commit) tuple support)",
+            "CacheViewPublisher.__init__ (optional transition_policy kwarg)"
+          ],
+          "disposition": "modified",
+          "why": "ordinary cross-process epoch reload (adopt_manifest_head -> _reload_from_manifest -> _publish_epoch_view) and clean-base recovery (_recover_from_base) now rebase through the SAME sparse merge authority as the client lineage adapter — the overlay can no longer be bypassed by cross-process adoption (WO-1), and recovery converges with a racing COW patch instead of erasing it (CF-S03CR-10, forced-interleave tested)."
+        },
+        {
+          "finding": "S03-CR-02 (WO-3 Contracts A/B)",
+          "file": "src/workflowy_mcp/coherence/operation_cache.py",
+          "symbols": [
+            "publish_local_cache_view (effect-aware commit; per-attempt sparse derivation)",
+            "_advance_task_snapshot (two-path rule)",
+            "_touched_node_ids REMOVED"
+          ],
+          "disposition": "modified",
+          "why": "the bridge derives sparse transition effects per attempt; the task-snapshot advance is a two-path rule — sealed §6.3 equal-marker successor advance for same-generation races, and pinned-markers + own-sparse-effect overlay for cross-generation races (SUPERSEDES the 4fb06a1 forward-movement amendment, which imported the complete newer publisher generation into a running operation)."
+        },
+        {
+          "finding": "S03-CR-02 (client integration)",
+          "file": "src/workflowy_mcp/client/api_client_core.py",
+          "symbols": [
+            "WorkFlowyClientCore._transition_effect_policy (replaces _transition_cow_overlay_ids)",
+            "WorkFlowyClientCore._transition_cow_effects (read-only introspection property)",
+            "WorkFlowyClientCore._publish_lineage_view (shared sparse merge path)",
+            "WorkFlowyClientCore.publish_local_cache_view (effect-aware overlay accumulation)",
+            "WorkFlowyClientCore._rebase_transition_cow_overlay REMOVED",
+            "_reflection_semantic_equal REMOVED",
+            "_REFLECTION_COMPARE_KEYS REMOVED"
+          ],
+          "disposition": "modified",
+          "why": "the client accumulates sparse effects under the publisher mutex and routes its lineage adapter through the one shared merge; the 4fb06a1 ID-only overlay symbols are removed, never grandfathered."
+        }
+      ]
+    },
+    {
+      "amendment": "S03 compound transition-effect and subtree-delete closure (one-shot work order; NOT a remediation chain)",
+      "baseline_commit": "7d8e7cd",
+      "correction": "The prior amendment closed simple field-write adoption/recovery but overclaimed complete S03-CR-02 and CF-S03CR-10 coverage. Compound create-plus-write and complete subtree-delete interactions remained open at 7d8e7cd; this entry records their implementation while CF-S03CR-10 remains open pending independent audit.",
+      "entries": [
+        {
+          "finding": "Family-5 F-1 — delayed intermediate offers after create/repeated writes",
+          "file": "src/workflowy_mcp/coherence/transition_effects.py",
+          "symbols": [
+            "FieldWrite (intermediate causal predecessor values)",
+            "TransitionEffect (creation authority plus separate post-create fields; subtree-delete semantics)",
+            "compose_transition_effect",
+            "merge_offer_with_transition_effects",
+            "apply_transition_effects_to_nodes",
+            "TransitionEffectPolicy beacon/contract",
+            "_compose_field_write",
+            "_compose_field_maps",
+            "_materialize_created_record"
+          ],
+          "disposition": "modified",
+          "why": "creation/existence reflection no longer retires later sparse writes; repeated local field values remain causally distinguishable so a delayed intermediate offer carries the latest verified value with dirty evidence, while unrelated offered metadata survives"
+        },
+        {
+          "finding": "Family-5 F-2 / CF-S03CR-10 — complete subtree deletion over newer offers/recovery",
+          "file": "src/workflowy_mcp/coherence/transition_effects.py",
+          "symbols": [
+            "merge_offer_with_transition_effects",
+            "apply_transition_effects_to_nodes",
+            "_subtree_ids_present"
+          ],
+          "disposition": "modified",
+          "why": "each delete tombstone owns subtree absence against the offered topology; cycle-safe traversal removes descendants unknown to the stale local basis in ordinary epoch publication and clean-base recovery without touching nodes outside the subtree"
+        },
+        {
+          "finding": "Required Family-5 interaction and failure-atomicity evidence",
+          "file": "tests/test_coherence_s03_cr02_sparse_effects.py",
+          "symbols": [
+            "post-create content/structural/completion matrix",
+            "actual manifest epoch-adoption test",
+            "Apple-to-Orange-to-Oranges intermediate-offer test",
+            "unknown-descendant cycle-safe subtree-delete test",
+            "exhausted-CAS failure-atomicity test",
+            "CF-S03CR-10 field/move/create-plus-update/subtree-delete recovery matrix"
+          ],
+          "disposition": "modified",
+          "why": "the mandatory recovery interleaving now introduces D beneath B at N+1, publishes pinned-N delete(B) during recovery materialization, and proves markers N+1 plus unrelated journal state survive while B/C/D are absent; the fix-sensitive cases fail against 7d8e7cd"
+        }
+      ]
+    },
+    {
+      "amendment": "S03 root-authoritative subtree tombstones — escaped-descendant delete closure (F-3; one-shot work order; NOT a remediation chain)",
+      "baseline_commit": "3360c43",
+      "mechanism_correction_appended_at_dc08c17_followup": "RECORD-ONLY CORRECTION (Family 4, LOW): this block's symbol note 'removed-cycle self-root fallback' and the original _local_delete_effects docstring described the fallback as PER-MEMBER self-root tombstones. The bytes implement (and always implemented at dc08c17): the FIRST uncovered member of a removed ring component (before-list order) becomes the component's root tombstone and claims its removed-descendant chain; LATER ring members become descendant markers naming that root. The two variants differ observably for an offered-alive ring member; the shipped (weaker, F-3-consistent) form is CANONICAL. Locked by test_removed_cycle_fallback_roots_component_once (fails under a per-member self-root mutation). Zero production-behavior change.",
+      "correction": "The prior amendment's claim 'without touching nodes outside the subtree' (and the matching work-order postcondition claim) was FALSIFIED at 3360c43: derive_transition_effects emitted an independent delete tombstone for every locally-removed id, so a descendant that had escaped the subtree before the delete committed was matched by its own tombstone, removed from every future offer, and its tombstone never retired — permanent, refresh-immune removal of a live node. Delete authority is now ROOT-SCOPED: root tombstones own exactly the offered subtree beneath their root; descendant markers are compositional only (they retire the descendant's earlier create/fields effects) and never remove or pin an offered node. RECORD CORRECTION carried with this amendment: the 3360c43 result's pre-fix mutation evidence stated eight failing tests; the correct count is nine — test_overlay_composition_rules also fails against 7d8e7cd. CF-S03CR-10 remains OPEN pending independent audit.",
+      "entries": [
+        {
+          "finding": "Family-5 F-3 — escaped descendants removed and permanently pinned by independent per-id tombstones",
+          "file": "src/workflowy_mcp/coherence/transition_effects.py",
+          "symbols": [
+            "TransitionEffect (new subtree_root field: root tombstone vs compositional descendant marker)",
+            "_is_root_tombstone (NEW)",
+            "_local_delete_effects (NEW — before-topology root computation with removed-cycle self-root fallback)",
+            "derive_transition_effects (root-scoped delete derivation)",
+            "merge_offer_with_transition_effects (descendant markers carry no absence authority; roots scope against the OFFERED topology)",
+            "apply_transition_effects_to_nodes (pinned-view expansion from root tombstones only)",
+            "TransitionEffectPolicy beacon/contract wording"
+          ],
+          "disposition": "modified",
+          "why": "a local delete's absence authority is exactly 'the deleted root plus whatever the offered topology places beneath it': unknown added descendants and orphans naming an absent root are still removed (F-2 preserved), while an offered-alive node whose offered parentage lies outside every tombstoned root's offered subtree provably escaped before the delete (deleted UUIDs never reappear) and is never removed or pinned; a root tombstone retires when no offered member remains beneath it"
+        },
+        {
+          "finding": "F-3 interaction evidence",
+          "file": "tests/test_coherence_s03_cr02_sparse_effects.py",
+          "symbols": [
+            "test_escaped_descendant_survives_delete_and_tombstone_retires",
+            "test_escaped_descendant_with_added_unknown_descendant",
+            "test_cf_s03cr10_recovery_escaped_descendant_shape",
+            "root-scoped representation assertions updated in the two existing subtree-delete tests (semantic outcomes unchanged)"
+          ],
+          "disposition": "modified",
+          "why": "each new test fails against 3360c43 on its load-bearing assertion (escaped C removed); the CF shape moves C out via a journal N+1 parentage effect, publishes the pinned-N delete during recovery materialization, and proves markers N+1, surviving U and C (under A), absent B, and coherent effect/dirty evidence"
+        }
+      ]
+    }
+  ],
+  "explicitly_out_of_scope": [
+    "no checkpoint rotation or hard-barrier read policy (S04)",
+    "no mutation leases (S05)",
+    "no CRUD no-blind-retry restructure or journal publication (S07+)",
+    "no browser external-dirt provenance wire (S16)",
+    "no removal of legacy dirty IDs or eager patchers (wrap only)",
+    "no terminal-refresh removal or refresh-elision claim",
+    "no public MCP parameter/schema changes",
+    "no broad server/client inheritance refactor",
+    "no migration of S06-deleted consumers (deleted, never grandfathered)"
+  ],
+  "named_failure_modes_to_avoid": [
+    "allowlist inflation (H2 frozen set)",
+    "helper-level defensive boundary wrapping (boundaries at true outer fronts only)",
+    "the fresh-context helper built but left unused at new-operation spawn sites",
+    "a shadow current-cache mirror (H3: the publisher is the sole root)",
+    "a copied patcher transform body (H4: exactly one transform body per legacy patcher — already satisfied by S03-A; do not regress)",
+    "two divergent exception lists (the §6.4 loud-failure exception set and the §11 allowlist are ONE set in ONE place: tests/coherence_s03b_registry.json)"
+  ]
+}

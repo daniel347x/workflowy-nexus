@@ -1,0 +1,490 @@
+"""Stage2-06 (Locked Work Order §6.6) — REAL full-refresh↔compat-patch
+contention on the single RefreshPublicationClaim authority (PAIR-012).
+
+REAL OS processes on one coherence root, both claim-first orders:
+
+  ORDER A (refresh first): the full-refresh owner parks inside its fetch
+  holding the claim; the compat-patch actor NEVER dedupes or borrows that
+  claim — it waits through the contended acquisition path (acknowledged by
+  its injected sleep seam), then acquires a FRESH claim of its own kind
+  and publishes E+2 after the refresh's E+1.  The compat patch really
+  lands (its renamed node is in the final lineage — never a join).
+
+  ORDER B (compat first): the compat owner parks at its candidate write
+  holding the claim; the full-refresh actor CANNOT join (a compat claim is
+  never joinable) — it waits (acknowledged), then publishes E+2 after the
+  compat's E+1.
+
+  STALE CANDIDATE: a compat owner parked pre-publish; its claim is
+  terminalized (an aborted owner); a full refresh publishes E+1; the
+  parked publisher's stale candidate CANNOT publish — the layered guards
+  of the single authority (terminal-claim check, then basis-epoch check,
+  then target-epoch check) reject it loudly with ManifestConflictError and
+  the manifest stays exactly at the refresh's lineage.  The claim-turnover
+  shape is the reachable one under the single-claim authority (a live
+  claim makes any basis change impossible, so the terminal guard fires
+  first); the pure basis guard remains covered in-process by S02's
+  epoch-publication suite.
+
+Every actor logs its real PID; the parent asserts pairwise distinctness.
+"""
+
+from __future__ import annotations
+
+from coherence_harness import (
+    ACCOUNT_A,
+    make_coherence_root,
+    s02_node,
+    s04_append_n,
+    s04_install_base_manifest,
+    s04_write_base_snapshot,
+)
+from stage2_harness import (
+    REPO,
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp.coherence import (
+    materialize_current_payload,
+    read_manifest,
+    read_refresh_claim,
+)
+from workflowy_mcp.coherence.schema import claim_with_updates, write_refresh_claim
+
+
+def _based_root(root, *, records: int = 0):
+    paths = make_coherence_root(root, ACCOUNT_A)
+    snapshot_dir = root / "nodes_export_cache"
+    base = s04_write_base_snapshot(
+        paths,
+        snapshot_dir,
+        [s02_node("base")],
+        epoch_number=0,
+        epoch_id="b" * 32,
+    )
+    s04_install_base_manifest(paths, base_snapshot_path=base, epoch_id="b" * 32)
+    if records:
+        s04_append_n(paths, records)
+    return paths, snapshot_dir
+
+
+_COMMON = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import ACCOUNT_A, make_coherence_root, touch, wait_for_file\n"
+    "root = Path(sys.argv[1])\n"
+    "paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)\n"
+)
+
+# ---------------------------------------------------------------------------
+# ORDER A — refresh owner parked inside its fetch (claim held)
+# ---------------------------------------------------------------------------
+
+_REFRESH_HOLDER = (
+    _COMMON
+    + """
+from coherence_harness import s02_node
+from workflowy_mcp.coherence import run_full_refresh
+
+touch(root / "pid_refresh", str(os.getpid()))
+
+async def fetch():
+    touch(root / "refresh_in_fetch")
+    assert wait_for_file(root / "release_fr", timeout=120)
+    return {"nodes": [s02_node("base")]}
+
+outcome = asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind="system", settle_seconds=0,
+    snapshot_dir=root / "nodes_export_cache", poll_seconds=0.05,
+))
+from stage2_harness import write_result
+write_result(root / "refresh_result.json", {
+    "status": outcome.status,
+    "epoch_number": outcome.epoch_number,
+    "claim_id": outcome.claim_id,
+    "deduplicated": outcome.deduplicated,
+})
+"""
+)
+
+_COMPAT_WAITER = (
+    _COMMON
+    + """
+import asyncio as _asyncio
+from workflowy_mcp.coherence import run_compat_patch
+
+touch(root / "pid_compat", str(os.getpid()))
+
+if os.environ.get("STAGE2_NEUTRALIZE_COMPAT_DEDUPE"):
+    # SENSITIVITY-ONLY (never set in the shipped test): simulate the pre-fix
+    # acquisition that let a compat patch JOIN a full-refresh claim — the
+    # compat then "dedupes" instead of waiting (run_compat_patch's own
+    # owner-assertion rejects the joined acquisition, so the actor crashes
+    # and no E+2 is ever published — the shipped assertions fail).
+    import workflowy_mcp.coherence.refresh_authority as ra
+    from workflowy_mcp.coherence import read_refresh_claim as _rrc
+    _real_acquire = ra._acquire_or_join
+    async def _deduping_acquire(paths, *, refresh_kind, snapshot_dir, sleep,
+                                poll_seconds, max_wait_seconds, cancel_check, fs_ops):
+        if refresh_kind == "compat_patch":
+            claim = _rrc(paths)
+            if claim is not None and not claim.is_terminal and claim.refresh_kind != "compat_patch":
+                return ra._Acquisition("joined", claim, 0, 0, False)
+        return await _real_acquire(
+            paths, refresh_kind=refresh_kind, snapshot_dir=snapshot_dir,
+            sleep=sleep, poll_seconds=poll_seconds,
+            max_wait_seconds=max_wait_seconds, cancel_check=cancel_check,
+            fs_ops=fs_ops)
+    ra._acquire_or_join = _deduping_acquire
+
+_contended = {"done": False}
+async def ack_sleep(seconds):
+    # The first acquisition-loop POLL sleep (seconds > 0) acknowledges the
+    # contended path: this actor observed the active refresh claim and
+    # could NOT join it (compat never dedupes).
+    if seconds > 0 and not _contended["done"]:
+        _contended["done"] = True
+        touch(root / "compat_contending")
+    await _asyncio.sleep(seconds)
+
+outcome = asyncio.run(run_compat_patch(
+    paths=paths,
+    patches=[{"id": "base", "name": "patched-by-compat"}],
+    snapshot_dir=root / "nodes_export_cache",
+    sleep=ack_sleep,
+    poll_seconds=0.05,
+    max_wait_seconds=120,
+))
+from stage2_harness import write_result
+write_result(root / "compat_result.json", {
+    "status": outcome.status,
+    "epoch_number": outcome.epoch_number,
+    "claim_id": outcome.claim_id,
+})
+"""
+)
+
+
+# @beacon[
+#   id=auto-beacon@test_refresh_first_compat_never_dedupes_or_borrows_then_publishes-4l2l,
+#   role=test_refresh_first_compat_never_dedupes_or_borrows_then_publishes,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_refresh_first_compat_never_dedupes_or_borrows_then_publishes(tmp_path):
+    """ORDER A: refresh wins the claim; the compat patch waits through the
+    contended path (never dedupes, never borrows), then acquires a FRESH
+    compat claim and publishes E+2 — its patch really lands in the final
+    lineage."""
+    root = tmp_path / "share"
+    paths, _sd = _based_root(root)
+
+    refresh = launch_actor(_REFRESH_HOLDER, str(root), str(REPO))
+    compat = None
+    try:
+        # The refresh provably holds the claim (parked inside its fetch)
+        # BEFORE the compat launches — its first acquisition read then
+        # necessarily observes the active refresh claim (never a startup
+        # race for the initial claim mint).
+        assert wait_for_file(root / "refresh_in_fetch", timeout=120)
+        compat = launch_actor(_COMPAT_WAITER, str(root), str(REPO))
+        # The compat is in the contended path.
+        assert wait_for_file(root / "compat_contending", timeout=120)
+        claim = read_refresh_claim(paths)
+        assert claim is not None and not claim.is_terminal
+        assert claim.refresh_kind != "compat_patch"
+        touch(root / "release_fr")
+
+        r_fr = read_result(root / "refresh_result.json", timeout=120)
+        assert r_fr == {
+            "status": "published",
+            "epoch_number": 1,
+            "claim_id": r_fr["claim_id"],
+            "deduplicated": False,
+        }, r_fr
+        r_compat = read_result(root / "compat_result.json", timeout=180)
+        assert r_compat["status"] == "published"
+        assert r_compat["epoch_number"] == 2
+        # The compat NEVER borrowed the refresh's claim: a FRESH claim id.
+        assert r_compat["claim_id"] != r_fr["claim_id"]
+
+        manifest = read_manifest(paths, required=True)
+        assert manifest.epoch_number == 2
+        claim = read_refresh_claim(paths)
+        assert claim is not None and claim.refresh_kind == "compat_patch"
+        # The compat patch really landed (never a join): the renamed node
+        # is in the final lineage.
+        payload = materialize_current_payload(paths, manifest).payload
+        by_id = {n["id"]: n for n in payload["nodes"]}
+        assert by_id["base"]["name"] == "patched-by-compat"
+
+        pids = collect_distinct_pids(root, ["refresh", "compat"])
+        assert len(set(pids.values())) == 2
+    finally:
+        finish_actor(refresh, label="refresh holder")
+        if compat is not None:
+            finish_actor(compat, label="compat waiter")
+
+
+# ---------------------------------------------------------------------------
+# ORDER B — compat owner parked at its candidate write (claim held)
+# ---------------------------------------------------------------------------
+
+_COMPAT_HOLDER = (
+    _COMMON
+    + """
+from workflowy_mcp.carto_job_governance import (
+    _default_mkdir,
+    _default_replace,
+    _default_tmp_name,
+    _default_unlink,
+    _default_write_fsync,
+)
+from workflowy_mcp.coherence import DurableFileOps, run_compat_patch
+
+touch(root / "pid_compat", str(os.getpid()))
+
+def write_fsync(path, text):
+    # Pause INSIDE the compat patch at its candidate write, claim held.
+    if "nodes_export_snapshot" in path.name:
+        touch(root / "compat_holding", str(os.getpid()))
+        assert wait_for_file(root / "release_compat", timeout=120)
+    _default_write_fsync(path, text)
+
+fs_ops = DurableFileOps(
+    write_fsync=write_fsync,
+    replace=_default_replace,
+    mkdir=_default_mkdir,
+    unlink=_default_unlink,
+    tmp_name=_default_tmp_name,
+)
+outcome = asyncio.run(run_compat_patch(
+    paths=paths,
+    patches=[{"id": "base", "name": "patched-by-compat"}],
+    snapshot_dir=root / "nodes_export_cache",
+    fs_ops=fs_ops,
+))
+from stage2_harness import write_result
+write_result(root / "compat_result.json", {
+    "status": outcome.status,
+    "epoch_number": outcome.epoch_number,
+    "claim_id": outcome.claim_id,
+})
+"""
+)
+
+_REFRESH_WAITER = (
+    _COMMON
+    + """
+import asyncio as _asyncio
+from coherence_harness import s02_node
+from workflowy_mcp.coherence import run_full_refresh
+
+touch(root / "pid_refresh", str(os.getpid()))
+
+_contended = {"done": False}
+_fetched = {"done": False}
+async def ack_sleep(seconds):
+    # Acknowledges the contended acquisition path (a compat claim is never
+    # joinable — the refresh must wait, not join).
+    if seconds > 0 and not _contended["done"]:
+        _contended["done"] = True
+        touch(root / "fr_contending")
+    await _asyncio.sleep(seconds)
+
+async def fetch():
+    _fetched["done"] = True
+    touch(root / "fr_fetched")
+    return {"nodes": [s02_node("base")]}
+
+outcome = asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind="system", settle_seconds=0,
+    snapshot_dir=root / "nodes_export_cache", sleep=ack_sleep,
+    poll_seconds=0.05, max_wait_seconds=120,
+))
+from stage2_harness import write_result
+write_result(root / "refresh_result.json", {
+    "status": outcome.status,
+    "epoch_number": outcome.epoch_number,
+    "deduplicated": outcome.deduplicated,
+})
+"""
+)
+
+
+def test_compat_first_refresh_cannot_join_waits_then_publishes(tmp_path):
+    """ORDER B: the compat owner holds the claim; the full refresh CANNOT
+    join (a compat claim is never joinable) — it waits through the
+    contended path and publishes E+2 only after the compat's E+1."""
+    root = tmp_path / "share"
+    paths, _sd = _based_root(root)
+
+    compat = launch_actor(_COMPAT_HOLDER, str(root), str(REPO))
+    refresh = None
+    try:
+        # The compat provably holds the claim (parked at its candidate
+        # write) BEFORE the refresh launches — its first acquisition read
+        # then necessarily observes the active compat claim (never a
+        # startup race for the initial claim mint).
+        assert wait_for_file(root / "compat_holding", timeout=120)
+        refresh = launch_actor(_REFRESH_WAITER, str(root), str(REPO))
+        # The refresh observes the active compat claim and cannot join.
+        assert wait_for_file(root / "fr_contending", timeout=120)
+        claim = read_refresh_claim(paths)
+        assert claim is not None and not claim.is_terminal
+        assert claim.refresh_kind == "compat_patch"
+        assert claim.owner_pid == int((root / "compat_holding").read_text().strip())
+        touch(root / "release_compat")
+
+        r_compat = read_result(root / "compat_result.json", timeout=120)
+        assert r_compat["status"] == "published"
+        assert r_compat["epoch_number"] == 1
+        r_fr = read_result(root / "refresh_result.json", timeout=180)
+        assert r_fr["status"] == "published"
+        assert r_fr["epoch_number"] == 2
+        assert r_fr["deduplicated"] is False
+        # The refresh really fetched for itself (never joined the compat).
+        assert (root / "fr_fetched").exists()
+
+        manifest = read_manifest(paths, required=True)
+        assert manifest.epoch_number == 2
+        pids = collect_distinct_pids(root, ["compat", "refresh"])
+        assert len(set(pids.values())) == 2
+    finally:
+        finish_actor(compat, label="compat holder")
+        if refresh is not None:
+            finish_actor(refresh, label="refresh waiter")
+
+
+# ---------------------------------------------------------------------------
+# STALE CANDIDATE — a parked publisher can never publish after turnover
+# ---------------------------------------------------------------------------
+
+_STALE_COMPAT = (
+    _COMMON
+    + """
+from stage2_harness import write_result
+from workflowy_mcp.carto_job_governance import (
+    _default_mkdir,
+    _default_replace,
+    _default_tmp_name,
+    _default_unlink,
+    _default_write_fsync,
+)
+from workflowy_mcp.coherence import DurableFileOps, run_compat_patch
+
+touch(root / "pid_compat", str(os.getpid()))
+
+def write_fsync(path, text):
+    # Park pre-publish at the candidate write (claim held, basis E0
+    # materialized) until the parent resumes this actor.
+    if "nodes_export_snapshot" in path.name:
+        touch(root / "compat_at_candidate", str(os.getpid()))
+        assert wait_for_file(root / "resume_compat", timeout=120)
+    _default_write_fsync(path, text)
+
+fs_ops = DurableFileOps(
+    write_fsync=write_fsync,
+    replace=_default_replace,
+    mkdir=_default_mkdir,
+    unlink=_default_unlink,
+    tmp_name=_default_tmp_name,
+)
+result = {"published": True, "error_type": None}
+try:
+    outcome = asyncio.run(run_compat_patch(
+        paths=paths,
+        patches=[{"id": "base", "name": "patched-by-compat"}],
+        snapshot_dir=root / "nodes_export_cache",
+        fs_ops=fs_ops,
+    ))
+    result["epoch_number"] = outcome.epoch_number
+except Exception as exc:
+    result["published"] = False
+    result["error_type"] = type(exc).__name__
+write_result(root / "stale_result.json", result)
+"""
+)
+
+_QUICK_REFRESH = (
+    _COMMON
+    + """
+from coherence_harness import s02_node
+from workflowy_mcp.coherence import run_full_refresh
+
+touch(root / "pid_refresh", str(os.getpid()))
+
+async def fetch():
+    return {"nodes": [s02_node("base")]}
+
+outcome = asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind="system", settle_seconds=0,
+    snapshot_dir=root / "nodes_export_cache", poll_seconds=0.05,
+))
+from stage2_harness import write_result
+write_result(root / "refresh_result.json", {
+    "status": outcome.status, "epoch_number": outcome.epoch_number,
+})
+"""
+)
+
+
+def test_stale_candidate_cannot_publish_after_claim_turnover(tmp_path):
+    """STALE CANDIDATE: the parked compat publisher's claim is terminalized
+    (aborted owner); a full refresh publishes E+1; the parked publisher's
+    stale candidate CANNOT publish — the single authority's layered guards
+    reject it loudly with ManifestConflictError and the manifest stays at
+    the refresh's exact lineage."""
+    root = tmp_path / "share"
+    paths, _sd = _based_root(root)
+
+    stale = launch_actor(_STALE_COMPAT, str(root), str(REPO))
+    try:
+        assert wait_for_file(root / "compat_at_candidate", timeout=120)
+        # The parked compat holds an active claim with a materialized
+        # candidate (basis E0).  Terminalize it: the owner is aborted.
+        claim = read_refresh_claim(paths)
+        assert claim is not None and not claim.is_terminal
+        assert claim.refresh_kind == "compat_patch"
+        write_refresh_claim(
+            paths,
+            claim_with_updates(
+                claim,
+                status="failed",
+                result={"error": "aborted owner (test-terminalized)"},
+            ),
+            expected_claim_id=claim.claim_id,
+        )
+
+        # A full refresh publishes E+1 over the now-free authority.
+        refresh = launch_actor(_QUICK_REFRESH, str(root), str(REPO))
+        try:
+            r_fr = read_result(root / "refresh_result.json", timeout=120)
+            assert r_fr == {"status": "published", "epoch_number": 1}, r_fr
+        finally:
+            finish_actor(refresh, label="quick refresh")
+
+        # The parked publisher resumes: its stale candidate CANNOT publish.
+        touch(root / "resume_compat")
+        r_stale = read_result(root / "stale_result.json", timeout=120)
+        assert r_stale["published"] is False
+        assert r_stale["error_type"] == "ManifestConflictError"
+
+        # The manifest is exactly the refresh's lineage: epoch 1, and the
+        # stale patch never landed.
+        manifest = read_manifest(paths, required=True)
+        assert manifest.epoch_number == 1
+        payload = materialize_current_payload(paths, manifest).payload
+        by_id = {n["id"]: n for n in payload["nodes"]}
+        assert by_id["base"]["name"] == "node-base"  # never "patched-by-compat"
+
+        pids = collect_distinct_pids(root, ["compat", "refresh"])
+        assert len(set(pids.values())) == 2
+    finally:
+        finish_actor(stale, label="stale compat publisher")

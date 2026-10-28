@@ -1,0 +1,8 @@
+.git
+*.wav
+*.png
+.cache
+__pycache__
+deprecated
+attachments
+archived

@@ -1,0 +1,261 @@
+"""Neutral isolated coherence/owner fixtures retained under a historical name.
+
+Real adoption, journal setup and process lock holders use isolated roots.
+The retired on-disk mutation-lease plane has no fixture carrier here.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import time
+from collections.abc import Iterable, Mapping
+from functools import wraps
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp.coherence.adoption import adopt_manifest_head, unpopulated_cache_view
+from workflowy_mcp.coherence.cache_view import CacheViewPublisher
+from workflowy_mcp.coherence.effects import SemanticEffect
+from workflowy_mcp.coherence.journal_store import append_journal_transaction
+from workflowy_mcp.coherence.paths import coherence_paths
+from workflowy_mcp.coherence.schema import (
+    JournalProducer,
+    initialize_manifest_if_absent,
+    manifest_with_updates,
+    new_bootstrap_manifest,
+    write_manifest,
+)
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+NOW = "2026-11-01T00:00:00+00:00"
+ACCOUNT_A = "a" * 32
+ACCOUNT_B = "b" * 32
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio_run(function(*args, **kwargs))
+
+    return wrapper
+
+
+def asyncio_run(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+# ---------------------------------------------------------------------------
+# Node/cache builders
+# ---------------------------------------------------------------------------
+
+
+def node(node_id: str, parent_id: str | None = None, name: str | None = None, **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": node_id,
+        "name": name if name is not None else f"node-{node_id}",
+        "note": "",
+        "parent_id": parent_id,
+        "priority": 0,
+        "createdAt": 1,
+        "modifiedAt": 1,
+        "completed": None,
+        "data": None,
+    }
+    payload.update(extra)
+    return payload
+
+
+def cache_of(*specs: tuple[str, str | None]) -> dict[str, dict[str, Any]]:
+    """nodes_by_id from (id, parent_id) pairs."""
+
+    return {node_id: node(node_id, parent) for node_id, parent in specs}
+
+
+def producer() -> JournalProducer:
+    return JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The S05 client double — REAL adoption engine over the isolated lineage
+# ---------------------------------------------------------------------------
+
+
+class S05Client:
+    """A client-shaped double whose `_adopt_coherence_head` runs the REAL
+    adoption engine against the isolated manifest/snapshot lineage."""
+
+    def __init__(self, paths, publisher: CacheViewPublisher, snapshot_dir: Path):
+        self._paths = paths
+        self._cache_view_publisher = publisher
+        self._snapshot_dir = str(snapshot_dir)
+
+    def _coherence_paths(self):
+        return self._paths
+
+    async def _adopt_coherence_head(self, *, cancel_check: Any = None):
+        return await adopt_manifest_head(
+            paths=self._paths,
+            publisher=self._cache_view_publisher,
+            snapshot_dir=self._snapshot_dir,
+            cancel_check=cancel_check,
+        )
+
+    def _capture_view_and_dirty(self):
+        return self._cache_view_publisher.capture(), frozenset()
+
+    def _coherence_boundary_status(self):
+        from workflowy_mcp.coherence.barrier import read_coherence_boundary_status
+
+        return read_coherence_boundary_status(self._paths, required=False)
+
+    @property
+    def _safe_account_scope_id(self) -> str:
+        return self._paths.account_root.name
+
+
+def make_lease_env(
+    tmp_path: Path,
+    account: str = ACCOUNT_A,
+    *,
+    nodes: Iterable[Mapping[str, Any]] = (),
+) -> SimpleNamespace:
+    """Isolated jobs root + coherence root + transition manifest + base snapshot
+    + a real-adoption S05Client."""
+
+    jobs_root = tmp_path / "cartographer_jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    paths = coherence_paths(account, jobs_root=jobs_root)
+    manifest = initialize_manifest_if_absent(paths, new_bootstrap_manifest(account, now=NOW))
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": [dict(n) for n in nodes]},
+        account_scope_id=account,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    manifest = write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest, base_snapshot_path=candidate, coherence_mode="transition"
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=0,
+    )
+    publisher = CacheViewPublisher(unpopulated_cache_view())
+    client = S05Client(paths, publisher, snapshot_dir)
+    return SimpleNamespace(
+        paths=paths,
+        jobs_root=jobs_root,
+        snapshot_dir=snapshot_dir,
+        account=account,
+        manifest=manifest,
+        client=client,
+        publisher=publisher,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Owner identities
+# ---------------------------------------------------------------------------
+
+
+def live_identity() -> gov.ProcessIdentity:
+    return gov.current_process_identity()
+
+
+def dead_identity() -> gov.ProcessIdentity:
+    """Full clock-independent identity of a provably dead process (captured
+    while alive; the pid is gone by classification time)."""
+
+    process = subprocess.Popen([sys.executable, "-c", "pass"])
+    assert process.pid is not None
+    identity = gov.read_process_identity(process.pid)
+    process.wait(timeout=10)
+    # Give the OS a beat to reap the handle before classification.
+    time.sleep(0.05)
+    return identity
+
+
+# ---------------------------------------------------------------------------
+# Real-process OS-lock holder (A1 contention tests — the gov02 shape)
+# ---------------------------------------------------------------------------
+
+def admission_lock_holder(lock_path: Path, tmp_path: Path) -> tuple[subprocess.Popen, Path, Path]:
+    """Park one REAL subprocess inside an OS lock until released."""
+
+    ready = tmp_path / "lock-ready"
+    release = tmp_path / "lock-release"
+    code = r"""
+import sys, time
+from pathlib import Path
+from workflowy_mcp.carto_job_governance import acquire_os_lock
+lock_path, ready, release = map(Path, sys.argv[1:])
+held = acquire_os_lock(lock_path, timeout_seconds=5.0, poll_seconds=0.01)
+ready.write_text("ready", encoding="utf-8")
+try:
+    deadline = time.monotonic() + 10.0
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+finally:
+    held.release()
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", code, str(lock_path), str(ready), str(release)],
+        cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 5.0
+    while not ready.exists() and time.monotonic() < deadline:
+        if process.poll() is not None:
+            out, err = process.communicate()
+            raise AssertionError(f"lock holder exited early: {out}\n{err}")
+        time.sleep(0.01)
+    assert ready.exists()
+    return process, ready, release
+
+
+def finish_lock_holder(process: subprocess.Popen, release: Path) -> None:
+    """Release the parked holder and assert a clean exit."""
+
+    release.write_text("release", encoding="utf-8")
+    out, err = process.communicate(timeout=5)
+    assert process.returncode == 0, f"{out}\n{err}"
+
+
+def append_tx(
+    env: SimpleNamespace,
+    transaction_id: str,
+    effects: list[SemanticEffect],
+    *,
+    operation_kind: str = "test_op",
+):
+    """Append one journal transaction carrying an EXPLICIT transaction id."""
+
+    return append_journal_transaction(
+        env.paths,
+        operation_kind=operation_kind,
+        effects=effects,
+        producer=producer(),
+        transaction_id=transaction_id,
+    )
+
+
+def effects_create(node_dict: Mapping[str, Any]) -> list[SemanticEffect]:
+    return [SemanticEffect.node_create(node_dict)]

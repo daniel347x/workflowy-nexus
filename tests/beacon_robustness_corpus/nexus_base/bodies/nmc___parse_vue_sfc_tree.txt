@@ -1,0 +1,7 @@
+def _parse_vue_sfc_tree(source_bytes: bytes) -> Any:
+    """Parse a Vue SFC with tree-sitter and return its root node (raises on
+    failure; the caller decides what a failure becomes)."""
+    parser = Parser()
+    parser.language = get_language("vue")  # type: ignore[operator]
+    tree = parser.parse(source_bytes)
+    return tree.root_node

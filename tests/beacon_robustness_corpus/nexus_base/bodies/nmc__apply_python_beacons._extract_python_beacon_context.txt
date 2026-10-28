@@ -1,0 +1,131 @@
+    def _extract_python_beacon_context(
+        comment_line: int,
+        decor_start: Optional[int] = None,
+        beacon_id: Optional[str] = None,
+    ) -> List[str]:
+        """Extract nearby comment-like lines around a Python beacon.
+
+        Includes:
+        - # comments above/below the beacon block (stripped of leading '#')
+        - triple-quoted blocks (triple quotes) treated as comment-like
+
+        Skips:
+        - blank lines
+        - decorator lines starting with '@'
+        """
+        context: List[str] = []
+        seen_spans: set[tuple[int, int]] = set()
+
+        # Determine end of the beacon metadata block
+        j = comment_line
+        block_end = comment_line
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+            else:
+                body = stripped
+            if body.strip().startswith("]"):
+                block_end = j
+                break
+            j += 1
+
+        # Above: walk past decorators to reach true leading comments, and
+        # skip any decorator region attached to the enclosing AST node
+        # (when known) so multiline decorators do not block comment capture.
+        j = comment_line - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j -= 1
+                continue
+            if decor_start is not None and decor_start <= j <= block_end:
+                j -= 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.insert(0, body)
+                j -= 1
+                continue
+            span = _find_triple_span_for_line(j)
+            if span and span not in seen_spans:
+                s, e = span
+                # IMPORTANT: preserve original order when prepending a multi-line
+                # triple-quoted block. Using insert(0, ...) in a forward loop
+                # reverses the block.
+                for k in range(e, s - 1, -1):
+                    context.insert(0, lines[k - 1])
+                seen_spans.add(span)
+                j = s - 1
+                continue
+            if stripped.startswith("@"):
+                # Skip decorator lines but keep walking upward so that
+                # comments above a decorator are still captured as
+                # CONTEXT COMMENTS (PYTHON).
+                j -= 1
+                continue
+            break
+
+        # Below
+        j = block_end + 1
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j += 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                # Never include beacon delimiter blocks as "context comments".
+                # Also support overlapping span beacons by only stopping on a
+                # matching @beacon-close id (when beacon_id is provided).
+                if body.startswith("@beacon["):
+                    # Skip nested opener metadata block.
+                    j += 1
+                    while j <= len(lines):
+                        nxt = lines[j - 1].lstrip()
+                        nb = nxt.lstrip("#").lstrip() if nxt.startswith("#") else nxt
+                        if nb.strip().startswith("]"):
+                            j += 1
+                            break
+                        j += 1
+                    continue
+                if body.startswith("@beacon-close["):
+                    close_id: Optional[str] = None
+                    j += 1
+                    while j <= len(lines):
+                        nxt = lines[j - 1].lstrip()
+                        nb = nxt.lstrip("#").lstrip() if nxt.startswith("#") else nxt
+                        nb_strip = nb.strip()
+                        if nb_strip.startswith("id=") and close_id is None:
+                            close_id = nb_strip.split("=", 1)[1].strip().strip(",").strip("]")
+                        if nb_strip.startswith("]"):
+                            break
+                        j += 1
+                    # Ignore close blocks for other beacon ids (supports overlap).
+                    if beacon_id and close_id and close_id != beacon_id:
+                        j += 1
+                        continue
+                    break
+                if body.startswith("@beacon"):
+                    break
+                if body:
+                    context.append(body)
+                j += 1
+                continue
+            span = _find_triple_span_for_line(j)
+            if span and span not in seen_spans:
+                s, e = span
+                for k in range(s, e + 1):
+                    context.append(lines[k - 1])
+                seen_spans.add(span)
+                j = e + 1
+                continue
+            if stripped.startswith("@"):
+                break
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)

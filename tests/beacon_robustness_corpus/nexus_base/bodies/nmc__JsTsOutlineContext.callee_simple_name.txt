@@ -1,0 +1,6 @@
+    def callee_simple_name(self, v: Any) -> str:
+        """Return the trailing identifier of a ``call_expression``'s callee.
+
+        Wrapper around the Phase A module-level ``_js_callee_simple_name``.
+        """
+        return _js_callee_simple_name(v, self.source_bytes)

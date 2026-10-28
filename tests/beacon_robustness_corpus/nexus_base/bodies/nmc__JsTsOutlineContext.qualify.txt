@@ -1,0 +1,17 @@
+    def qualify(self, inner_qual: str) -> str:
+        """Compose the externally-visible AST_QUALNAME from a recursive inner name.
+
+        For whole-file JS/TS (``qual_prefix=None`` or empty) this is the
+        identity. For Vue script blocks this prepends ``qual_prefix:`` (a
+        colon separator is auto-appended if not already present) so
+        AST_QUALNAMEs from multiple ``<script>`` blocks in the same .vue
+        file don't collide.
+
+        The ``inner_qual`` should still be used as the ``qual_prefix=``
+        argument when recursing into child scopes; only the externally
+        emitted ``ast_qualname`` field uses ``qualify(inner_qual)``.
+        """
+        pref = (self.qual_prefix or "").strip()
+        if pref and not pref.endswith(":"):
+            pref = pref + ":"
+        return f"{pref}{inner_qual}" if pref else inner_qual

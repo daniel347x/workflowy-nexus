@@ -1,0 +1,12 @@
+    def _js_next_anchor_line_after(line_no: int) -> Optional[int]:
+        for idx in range(line_no + 1, n + 1):
+            raw = lines[idx - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                continue
+            if stripped.startswith("//"):
+                continue
+            if stripped.startswith("/*") or stripped.startswith("*") or stripped.startswith("*/"):
+                continue
+            return idx
+        return None

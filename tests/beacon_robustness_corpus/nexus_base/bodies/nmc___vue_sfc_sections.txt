@@ -1,0 +1,49 @@
+def _vue_sfc_sections(source_bytes: bytes, root: Any) -> list[dict[str, Any]]:
+    """Return the top-level SFC sections of a Vue file, in order of appearance.
+
+    ``root`` is ``_parse_vue_sfc_tree(source_bytes)``. Each section is
+    ``{"type", "start_tag", "content_row0", "raw_text"}``: the element type,
+    the compacted start tag, the 0-based file row of the content's first line
+    and the content text.
+    """
+    blocks: list[dict[str, Any]] = []
+    for ch in root.children:
+        if ch.type not in {"template_element", "script_element", "style_element"}:
+            continue
+
+        start_tag = None
+        raw_text = None
+        end_tag = None
+        for c2 in ch.children:
+            if c2.type == "start_tag":
+                start_tag = c2
+            elif c2.type == "raw_text":
+                raw_text = c2
+            elif c2.type == "end_tag":
+                end_tag = c2
+
+        if start_tag is None:
+            continue
+
+        start_tag_text = source_bytes[start_tag.start_byte:start_tag.end_byte].decode("utf-8", errors="ignore")
+        start_tag_compact = _vue_compact_start_tag_text(start_tag_text)
+
+        # Extract content bytes.
+        if raw_text is not None:
+            # script/style blocks: raw_text is present.
+            content_row0 = int(raw_text.start_point[0])
+            content_text = source_bytes[raw_text.start_byte:raw_text.end_byte].decode("utf-8", errors="ignore")
+        else:
+            # template blocks: Vue grammar expands inner HTML into child nodes.
+            if end_tag is None:
+                continue
+            content_row0 = int(start_tag.end_point[0])
+            content_text = source_bytes[start_tag.end_byte:end_tag.start_byte].decode("utf-8", errors="ignore")
+
+        blocks.append({
+            "type": ch.type,
+            "start_tag": start_tag_compact,
+            "content_row0": content_row0,
+            "raw_text": content_text,
+        })
+    return blocks

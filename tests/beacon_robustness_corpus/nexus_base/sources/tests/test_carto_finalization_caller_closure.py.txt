@@ -1,0 +1,714 @@
+import ast
+from collections import Counter, defaultdict
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+ROOT_RUNTIME_MODULES = (
+    "beacon_mutation_contract.py",
+    "beacon_obtain_code_snippet.py",
+    "glimpse_deploy_trampoline.py",
+    "markdown_roundtrip.py",
+    "nexus_map_codebase.py",
+)
+RUNTIME_EXCLUDED_PARTS = {
+    ".edit_files_tracking",
+    ".venv",
+    "__pycache__",
+    "archive",
+    "fixtures",
+    "generated",
+    "scripts",
+    "tests",
+}
+FINALIZATION_SINK = "workflowy_mcp.carto_job_governance:_finalize_claim_locked_outcome"
+
+LIVE_MCP_OWNER = 1
+DEAD_OWNER_SWEEP = 2
+DETACHED_WORKER_EXIT = 3
+COMPATIBILITY_WRAPPER = 4
+
+# Ruling-167 lifecycle boundaries. Category-4 functions are traversed
+# transitively; categories 1/2/3 are real lifecycle boundaries where the
+# caller's cleanup policy is enforced and the graph intentionally stops.
+FINALIZATION_LIFECYCLE_REGISTRY = {
+    "workflowy_mcp.carto_job_governance:admit_carto_job_locked": LIVE_MCP_OWNER,
+    "workflowy_mcp.carto_job_governance:_rollback_spawn_failure_if_launcher_owned": LIVE_MCP_OWNER,
+    "workflowy_mcp.carto_job_governance:finalize_claim_locked": COMPATIBILITY_WRAPPER,
+    "workflowy_mcp.carto_job_governance:finalize_claim": COMPATIBILITY_WRAPPER,
+    "workflowy_mcp.carto_job_governance:finalize_claim_async": COMPATIBILITY_WRAPPER,
+    "workflowy_mcp.carto_job_governance:finalize_cancelled_job_claim": COMPATIBILITY_WRAPPER,
+    "workflowy_mcp.carto_job_governance:finalize_cancelled_job_claim_async": COMPATIBILITY_WRAPPER,
+    "workflowy_mcp.carto_job_governance:retry_cleanup_obligations_async": LIVE_MCP_OWNER,
+    "workflowy_mcp.carto_job_governance:launch_carto_refresh_job.prepared_runner": LIVE_MCP_OWNER,
+    "workflowy_mcp.carto_job_governance:launch_carto_refresh_job": LIVE_MCP_OWNER,
+    "workflowy_mcp.carto_job_governance:sweep_region_governance_locked": DEAD_OWNER_SWEEP,
+    "workflowy_mcp.server:_start_carto_bulk_visible_apply_job.runner": LIVE_MCP_OWNER,
+    "workflowy_mcp.server:_start_carto_bulk_visible_apply_job": LIVE_MCP_OWNER,
+    "workflowy_mcp.weave_worker:main": DETACHED_WORKER_EXIT,
+}
+
+# Exact transitive graph from the one token-safe sink through every
+# compatibility wrapper to a classified lifecycle boundary.
+EXPECTED_FINALIZATION_EDGES = Counter(
+    {
+        (
+            "workflowy_mcp.carto_job_governance:admit_carto_job_locked",
+            FINALIZATION_SINK,
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:_rollback_spawn_failure_if_launcher_owned",
+            FINALIZATION_SINK,
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:finalize_claim_locked",
+            FINALIZATION_SINK,
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:finalize_claim_async",
+            FINALIZATION_SINK,
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:finalize_claim",
+            "workflowy_mcp.carto_job_governance:finalize_claim_locked",
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:sweep_region_governance_locked",
+            "workflowy_mcp.carto_job_governance:finalize_claim_locked",
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:finalize_cancelled_job_claim",
+            "workflowy_mcp.carto_job_governance:finalize_claim",
+        ): 1,
+        (
+            "workflowy_mcp.weave_worker:main",
+            "workflowy_mcp.carto_job_governance:finalize_claim",
+        ): 5,
+        (
+            "workflowy_mcp.carto_job_governance:finalize_cancelled_job_claim_async",
+            "workflowy_mcp.carto_job_governance:finalize_claim_async",
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:retry_cleanup_obligations_async",
+            "workflowy_mcp.carto_job_governance:finalize_claim_async",
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:launch_carto_refresh_job.prepared_runner",
+            "workflowy_mcp.carto_job_governance:finalize_claim_async",
+        ): 2,
+        (
+            "workflowy_mcp.carto_job_governance:launch_carto_refresh_job",
+            "workflowy_mcp.carto_job_governance:finalize_claim_async",
+        ): 1,
+        (
+            "workflowy_mcp.server:_start_carto_bulk_visible_apply_job.runner",
+            "workflowy_mcp.carto_job_governance:finalize_claim_async",
+        ): 1,
+        (
+            "workflowy_mcp.server:_start_carto_bulk_visible_apply_job",
+            "workflowy_mcp.carto_job_governance:finalize_claim_async",
+        ): 1,
+        (
+            "workflowy_mcp.carto_job_governance:launch_carto_refresh_job.prepared_runner",
+            "workflowy_mcp.carto_job_governance:finalize_cancelled_job_claim_async",
+        ): 1,
+        (
+            "workflowy_mcp.server:_start_carto_bulk_visible_apply_job.runner",
+            "workflowy_mcp.carto_job_governance:finalize_cancelled_job_claim_async",
+        ): 2,
+        (
+            "workflowy_mcp.weave_worker:main",
+            "workflowy_mcp.carto_job_governance:finalize_cancelled_job_claim",
+        ): 5,
+    }
+)
+
+# Closed deletion-shape registry. The key is module-qualified caller,
+# syntactic deletion kind, and normalized target expression. Values classify
+# the artifact and pin the exact call-site count. This deliberately inventories
+# every runtime deletion shape rather than pretending receiver types can be
+# inferred generally from Python AST.
+DELETION_CALLSITE_REGISTRY = {
+    ("workflowy_mcp.broker_protocol:gc_logs", "os.remove", "path"): (
+        "expired_auxiliary_state",
+        1,
+    ),
+    (
+        "workflowy_mcp.carto_job_governance:_default_unlink",
+        "attribute.unlink",
+        "path",
+    ): ("temporary_file", 1),
+    # node.read(output_file=...) artifact delivery: a same-directory
+    # NamedTemporaryFile this frame created itself, removed in `finally` with
+    # missing_ok=True after os.replace has normally already consumed it (so
+    # this is the failure-path cleanup). Touches NO governance artifact --
+    # no claim, lease, tombstone, sentinel, heartbeat, journal record, or
+    # snapshot -- and publishes nothing to the manifest/journal authority.
+    # Same artifact class as _default_unlink above.
+    (
+        "workflowy_mcp.server:_node_read_impl",
+        "attribute.unlink",
+        "temporary",
+    ): ("temporary_file", 1),
+    (
+        "workflowy_mcp.carto_job_governance:delete_cancellation_sentinel",
+        "attribute.unlink",
+        "cancellation_sentinel_path(job_id, jobs_root)",
+    ): ("sentinel", 1),
+    (
+        FINALIZATION_SINK,
+        "attribute.unlink",
+        "path",
+    ): ("claim", 1),
+    (
+        FINALIZATION_SINK,
+        "callback.remover",
+        "claim_path",
+    ): ("claim", 1),
+    (
+        "workflowy_mcp.carto_job_governance:sweep_region_governance_locked",
+        "attribute.unlink",
+        "lease_path",
+    ): ("q3_lease", 1),
+    (
+        "workflowy_mcp.carto_job_governance:sweep_region_governance_locked",
+        "attribute.unlink",
+        "tombstone_path",
+    ): ("tombstone", 1),
+    (
+        "workflowy_mcp.carto_job_governance:cleanup_carto_auxiliary_artifacts_locked",
+        "attribute.unlink",
+        "artifact",
+    ): ("sentinel_or_heartbeat", 1),
+    (
+        "workflowy_mcp.carto_job_governance:_acquire_q3_leases_impl",
+        "attribute.unlink",
+        "path",
+    ): ("q3_lease", 1),
+    (
+        "workflowy_mcp.carto_job_governance:_acquire_q3_leases_impl",
+        "callback.remover",
+        "path",
+    ): ("q3_lease", 1),
+    (
+        "workflowy_mcp.carto_job_governance:_release_q3_leases_locked_outcomes",
+        "attribute.unlink",
+        "path",
+    ): ("q3_lease", 1),
+    (
+        "workflowy_mcp.carto_job_governance:_release_q3_leases_locked_outcomes",
+        "callback.remover",
+        "path",
+    ): ("q3_lease", 1),
+    (
+        "workflowy_mcp.config:merge_write_carto_job_status",
+        "attribute.unlink",
+        "tmp_path",
+    ): ("temporary_file", 1),
+    (
+        "workflowy_mcp.config:merge_write_carto_job_status",
+        "attribute.unlink",
+        "corrective_tmp",
+    ): ("temporary_file", 1),
+    (
+        "workflowy_mcp.server:_cache_refresh_should_skip",
+        "attribute.unlink",
+        "_cache_refresh_skip_file()",
+    ): ("expired_auxiliary_state", 1),
+    (
+        "workflowy_mcp.server:_set_cache_refresh_skip",
+        "attribute.unlink",
+        "path",
+    ): ("auxiliary_state", 1),
+    (
+        "workflowy_mcp.server:_delete_carto_job_json_if_unclaimed_locked",
+        "attribute.unlink",
+        "job_path",
+    ): ("terminal_job_json", 1),
+    (
+        "workflowy_mcp.server:_delete_carto_job_artifacts._unlink",
+        "attribute.unlink",
+        "path",
+    ): ("terminal_job_log", 1),
+    (
+        "workflowy_mcp.server:_delete_carto_job_artifacts",
+        "attribute.unlink",
+        "job_path",
+    ): ("terminal_job_json", 1),
+    (
+        "workflowy_mcp.server:_delete_carto_job_artifacts",
+        "shutil.rmtree",
+        "job_dir",
+    ): ("terminal_job_directory", 1),
+    (
+        "workflowy_mcp.server:_delete_carto_final_marker_if_discharged",
+        "attribute.unlink",
+        "marker",
+    ): ("terminal_refresh_obligation_disposition", 1),
+    (
+        "workflowy_mcp.server:_gc_carto_jobs",
+        "attribute.unlink",
+        "Path(str(logs_path))",
+    ): ("terminal_job_log", 1),
+    (
+        "workflowy_mcp.server:_gc_carto_jobs",
+        "shutil.rmtree",
+        "job_dir",
+    ): ("terminal_job_directory", 1),
+    (
+        "workflowy_mcp.server:_gc_carto_jobs",
+        "attribute.unlink",
+        "path",
+    ): ("expired_f12_auxiliary", 1),
+    (
+        "workflowy_mcp.weave_worker:main",
+        "os.remove",
+        "_source_path_override",
+    ): ("temporary_source_file", 1),
+    (
+        "workflowy_mcp.client.api_client_core:WorkFlowyClientCore._gc_nodes_export_snapshots_diagnostic",
+        "os.remove",
+        "path",
+    ): ("expired_snapshot", 1),
+    (
+        "workflowy_mcp.coherence.journal_store:retire_incorporated_journal_records",
+        "attribute.unlink",
+        "fs_ops",
+    ): ("journal_record_residue", 1),
+    (
+        "workflowy_mcp.coherence.journal_store:retire_incorporated_journal_records",
+        "attribute.unlink",
+        "path",
+    ): ("journal_record_residue", 1),
+    (
+        "workflowy_mcp.client.api_client_core:WorkFlowyClientCore._nodes_export_snapshot_lock",
+        "os.unlink",
+        "lock_path",
+    ): ("auxiliary_lock", 2),
+    (
+        "glimpse_deploy_trampoline:main",
+        "shutil.rmtree",
+        "staging_dir",
+    ): ("deployment_staging", 1),
+    (
+        "glimpse_deploy_trampoline:main",
+        "shutil.rmtree",
+        "cache_dir",
+    ): ("deployment_cache", 1),
+    (
+        "nexus_map_codebase:repair_markdown_c0_controls_on_disk",
+        "os.unlink",
+        "temp_path",
+    ): ("temporary_file", 1),
+    (
+        "nexus_map_codebase:_write_markdown_lines_sanitized",
+        "os.unlink",
+        "tmp_path",
+    ): ("temporary_file", 1),
+}
+
+
+@dataclass(frozen=True)
+class _CallSite:
+    caller: str
+    terminal: str
+    expression: str
+    line: int
+    callback_parameters: frozenset[str]
+    node: ast.Call
+
+
+@dataclass
+class _Scan:
+    definitions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
+    calls: list[_CallSite]
+    by_basename: dict[str, list[str]]
+
+
+def _runtime_paths() -> list[Path]:
+    paths = [path for path in (REPO / "src").rglob("*.py") if path.is_file()]
+    paths.extend(REPO / name for name in ROOT_RUNTIME_MODULES)
+    result = []
+    for path in paths:
+        relative = path.relative_to(REPO)
+        lowered = path.name.lower()
+        if any(part in RUNTIME_EXCLUDED_PARTS for part in relative.parts):
+            continue
+        if ".stage2-" in lowered or lowered.endswith((".bak.py", ".backup.py")):
+            continue
+        if "corrupt" in lowered or "corruption" in lowered:
+            continue
+        result.append(path)
+    return sorted(result)
+
+
+def _runtime_sources() -> dict[str, str]:
+    return {
+        path.relative_to(REPO).as_posix(): path.read_text(encoding="utf-8")
+        for path in _runtime_paths()
+    }
+
+
+def _module_name(relative: str) -> str:
+    normalized = relative.replace("\\", "/")
+    if normalized.startswith("src/"):
+        normalized = normalized[4:]
+    assert normalized.endswith(".py")
+    return normalized[:-3].replace("/", ".")
+
+
+class _RuntimeVisitor(ast.NodeVisitor):
+    def __init__(self, module: str):
+        self.module = module
+        self.stack: list[str] = []
+        self.callback_parameter_stack: list[frozenset[str]] = []
+        self.definitions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        self.calls: list[_CallSite] = []
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self.stack.append(node.name)
+        parameters = {
+            argument.arg
+            for argument in (
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            )
+        }
+        if node.args.vararg is not None:
+            parameters.add(node.args.vararg.arg)
+        if node.args.kwarg is not None:
+            parameters.add(node.args.kwarg.arg)
+        self.callback_parameter_stack.append(frozenset(parameters))
+        self.definitions[self._identity()] = node
+        self.generic_visit(node)
+        self.callback_parameter_stack.pop()
+        self.stack.pop()
+
+    visit_FunctionDef = _visit_function
+    visit_AsyncFunctionDef = _visit_function
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.stack.append(node.name)
+        self.generic_visit(node)
+        self.stack.pop()
+
+    def _identity(self) -> str:
+        return f"{self.module}:{'.'.join(self.stack)}"
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if self.stack:
+            if isinstance(node.func, ast.Name):
+                terminal = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                terminal = node.func.attr
+            else:
+                terminal = ""
+            if terminal:
+                self.calls.append(
+                    _CallSite(
+                        caller=self._identity(),
+                        terminal=terminal,
+                        expression=ast.unparse(node.func),
+                        line=node.lineno,
+                        callback_parameters=(
+                            self.callback_parameter_stack[-1]
+                            if self.callback_parameter_stack
+                            else frozenset()
+                        ),
+                        node=node,
+                    )
+                )
+        self.generic_visit(node)
+
+
+def _scan_sources(sources: Mapping[str, str]) -> _Scan:
+    definitions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    calls: list[_CallSite] = []
+    for relative, source in sorted(sources.items()):
+        tree = ast.parse(source, filename=relative)
+        visitor = _RuntimeVisitor(_module_name(relative))
+        visitor.visit(tree)
+        overlap = definitions.keys() & visitor.definitions.keys()
+        assert not overlap, f"Duplicate runtime qualnames: {sorted(overlap)}"
+        definitions.update(visitor.definitions)
+        calls.extend(visitor.calls)
+    by_basename: dict[str, list[str]] = defaultdict(list)
+    for identity in definitions:
+        by_basename[identity.rsplit(".", 1)[-1].split(":")[-1]].append(identity)
+    return _Scan(definitions, calls, dict(by_basename))
+
+
+def _resolve_call(scan: _Scan, call: _CallSite) -> str | None:
+    module = call.caller.split(":", 1)[0]
+    same_module_top_level = f"{module}:{call.terminal}"
+    if same_module_top_level in scan.definitions:
+        return same_module_top_level
+    candidates = scan.by_basename.get(call.terminal, [])
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _finalization_inventory(
+    sources: Mapping[str, str],
+) -> tuple[Counter[tuple[str, str]], list[str], set[str]]:
+    scan = _scan_sources(sources)
+    assert FINALIZATION_SINK in scan.definitions
+    resolved = [(call, _resolve_call(scan, call)) for call in scan.calls]
+    edges: Counter[tuple[str, str]] = Counter()
+    targets = {FINALIZATION_SINK}
+    pending = [FINALIZATION_SINK]
+    while pending:
+        target = pending.pop()
+        for call, callee in resolved:
+            if callee != target or call.caller == target:
+                continue
+            edges[(call.caller, target)] += 1
+            category = FINALIZATION_LIFECYCLE_REGISTRY.get(call.caller)
+            if category == COMPATIBILITY_WRAPPER or category is None:
+                if call.caller not in targets:
+                    targets.add(call.caller)
+                    pending.append(call.caller)
+
+    relevant_names = {identity.rsplit(".", 1)[-1].split(":")[-1] for identity in targets}
+    unresolved = [
+        (
+            f"{call.caller}:{call.line} calls {call.expression!r}; "
+            f"candidates={scan.by_basename.get(call.terminal, [])}"
+        )
+        for call, callee in resolved
+        if callee is None and call.terminal in relevant_names
+    ]
+    return edges, unresolved, targets
+
+
+def _assert_finalization_fence(sources: Mapping[str, str]) -> None:
+    edges, unresolved, _targets = _finalization_inventory(sources)
+    callers = {caller for caller, _callee in edges}
+    missing_categories = sorted(callers - FINALIZATION_LIFECYCLE_REGISTRY.keys())
+    stale_categories = sorted(FINALIZATION_LIFECYCLE_REGISTRY.keys() - callers)
+    new_edges = edges - EXPECTED_FINALIZATION_EDGES
+    missing_edges = EXPECTED_FINALIZATION_EDGES - edges
+    problems = []
+    if new_edges:
+        problems.append(f"new finalization edges: {dict(new_edges)}")
+    if missing_edges:
+        problems.append(f"missing finalization edges: {dict(missing_edges)}")
+    if missing_categories:
+        problems.append(f"missing lifecycle classifications: {missing_categories}")
+    if stale_categories:
+        problems.append(f"stale lifecycle classifications: {stale_categories}")
+    if unresolved:
+        problems.append(f"unresolved finalization-shaped calls: {unresolved}")
+    assert not problems, "Finalization caller fence drifted. " + " | ".join(problems)
+
+
+def _deletion_shape(call: _CallSite) -> tuple[str, str] | None:
+    node = call.node
+    if isinstance(node.func, ast.Attribute):
+        owner = node.func.value
+        if node.func.attr == "unlink":
+            if isinstance(owner, ast.Name) and owner.id == "os":
+                target = ast.unparse(node.args[0]) if node.args else "<missing>"
+                return "os.unlink", target
+            return "attribute.unlink", ast.unparse(owner)
+        if node.func.attr == "remove" and isinstance(owner, ast.Name) and owner.id == "os":
+            target = ast.unparse(node.args[0]) if node.args else "<missing>"
+            return "os.remove", target
+        if node.func.attr == "rmtree":
+            target = ast.unparse(node.args[0]) if node.args else "<missing>"
+            return "shutil.rmtree", target
+        if node.func.attr == "rmdir":
+            return "attribute.rmdir", ast.unparse(owner)
+    if isinstance(node.func, ast.Name):
+        name = node.func.id
+        callback_like = name == "remover" or (
+            name in call.callback_parameters
+            and any(token in name.lower() for token in ("remove", "unlink"))
+        )
+        if callback_like:
+            target = ast.unparse(node.args[0]) if node.args else "<missing>"
+            return f"callback.{name}", target
+    return None
+
+
+def _deletion_inventory(sources: Mapping[str, str]) -> Counter[tuple[str, str, str]]:
+    scan = _scan_sources(sources)
+    inventory: Counter[tuple[str, str, str]] = Counter()
+    for call in scan.calls:
+        shape = _deletion_shape(call)
+        if shape is not None:
+            kind, target = shape
+            inventory[(call.caller, kind, target)] += 1
+    return inventory
+
+
+def _assert_deletion_fence(sources: Mapping[str, str]) -> None:
+    actual = _deletion_inventory(sources)
+    expected = Counter(
+        {key: count for key, (_artifact, count) in DELETION_CALLSITE_REGISTRY.items()}
+    )
+    new_calls = actual - expected
+    missing_calls = expected - actual
+    claim_authorities = {
+        caller
+        for (caller, _kind, _target), (artifact, _count) in DELETION_CALLSITE_REGISTRY.items()
+        if artifact == "claim"
+    }
+    problems = []
+    if new_calls:
+        problems.append(f"unclassified runtime deletions: {dict(new_calls)}")
+    if missing_calls:
+        problems.append(f"missing classified runtime deletions: {dict(missing_calls)}")
+    if claim_authorities != {FINALIZATION_SINK}:
+        problems.append(f"claim deletion authority escaped one exit door: {claim_authorities}")
+    assert not problems, "Governance deletion fence drifted. " + " | ".join(problems)
+
+
+def _mutated_sources(relative: str, addition: str) -> dict[str, str]:
+    sources = _runtime_sources()
+    sources[relative] += "\n\n" + addition
+    return sources
+
+
+def test_finalization_runtime_caller_graph_is_transitively_closed_and_classified():
+    sources = _runtime_sources()
+    _assert_finalization_fence(sources)
+    edges, unresolved, _targets = _finalization_inventory(sources)
+    assert edges == EXPECTED_FINALIZATION_EDGES
+    assert not unresolved
+    assert {FINALIZATION_LIFECYCLE_REGISTRY[caller] for caller, _callee in edges} == {
+        LIVE_MCP_OWNER,
+        DEAD_OWNER_SWEEP,
+        DETACHED_WORKER_EXIT,
+        COMPATIBILITY_WRAPPER,
+    }
+
+
+def test_runtime_deletion_inventory_is_closed_and_claim_deletion_has_one_authority():
+    _assert_deletion_fence(_runtime_sources())
+    artifacts = {artifact for artifact, _count in DELETION_CALLSITE_REGISTRY.values()}
+    assert {
+        "claim",
+        "q3_lease",
+        "tombstone",
+        "sentinel",
+        "sentinel_or_heartbeat",
+        "temporary_file",
+    }.issubset(artifacts)
+
+
+@pytest.mark.parametrize(
+    ("addition", "diagnostic"),
+    [
+        (
+            "def audit_live_sync(job_file, claim_id):\n"
+            "    return finalize_cancelled_job_claim(job_file, claim_id)\n",
+            "audit_live_sync",
+        ),
+        (
+            "async def audit_live_async(job_file, claim_id):\n"
+            "    return await finalize_cancelled_job_claim_async(job_file, claim_id)\n",
+            "audit_live_async",
+        ),
+        (
+            "def audit_cancel_wrapper(job_file, claim_id):\n"
+            "    return finalize_cancelled_job_claim(job_file, claim_id)\n\n"
+            "def audit_cancel_live(job_file, claim_id):\n"
+            "    return audit_cancel_wrapper(job_file, claim_id)\n",
+            "audit_cancel_live",
+        ),
+        (
+            "def audit_finalize_wrapper(claim_id, jobs_root):\n"
+            "    return finalize_claim(claim_id, jobs_root)\n\n"
+            "def audit_finalize_live(claim_id, jobs_root):\n"
+            "    return audit_finalize_wrapper(claim_id, jobs_root)\n",
+            "audit_finalize_live",
+        ),
+        (
+            "def audit_unclassified_wrapper(claim_id, jobs_root):\n"
+            "    return finalize_claim(claim_id, jobs_root)\n",
+            "audit_unclassified_wrapper",
+        ),
+        (
+            "def audit_detached_worker(claim_id, jobs_root):\n"
+            "    return finalize_claim(claim_id, jobs_root)\n",
+            "audit_detached_worker",
+        ),
+    ],
+)
+def test_finalization_mutations_reject_new_callers_wrappers_and_workers(
+    addition: str, diagnostic: str
+):
+    sources = _mutated_sources("src/workflowy_mcp/server.py", addition)
+    with pytest.raises(AssertionError, match=diagnostic):
+        _assert_finalization_fence(sources)
+
+
+@pytest.mark.parametrize(
+    ("addition", "diagnostic"),
+    [
+        (
+            "def audit_direct_claim_delete(claim_path):\n" "    claim_path.unlink()\n",
+            "audit_direct_claim_delete",
+        ),
+        (
+            "def audit_os_claim_delete(claim_path):\n" "    os.unlink(claim_path)\n",
+            "audit_os_claim_delete",
+        ),
+        (
+            "def audit_injected_claim_delete(claim_path, remover):\n" "    remover(claim_path)\n",
+            "audit_injected_claim_delete",
+        ),
+    ],
+)
+def test_deletion_mutations_reject_direct_and_injected_claim_deletion(
+    addition: str, diagnostic: str
+):
+    sources = _mutated_sources("src/workflowy_mcp/carto_job_governance.py", addition)
+    with pytest.raises(AssertionError, match=diagnostic):
+        _assert_deletion_fence(sources)
+
+
+def _called_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    names = []
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.append(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.append(node.func.attr)
+    return names
+
+
+def test_live_launcher_locked_outcomes_are_bound_and_queued_only_after_lock_scope():
+    scan = _scan_sources(_runtime_sources())
+    module = "workflowy_mcp.carto_job_governance"
+    for seam in ("admit_carto_job_locked", "_rollback_spawn_failure_if_launcher_owned"):
+        function = scan.definitions[f"{module}:{seam}"]
+        structured_calls = [
+            node
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_finalize_claim_locked_outcome"
+        ]
+        assert len(structured_calls) == 1
+        assert not any(
+            isinstance(node, ast.Expr) and node.value is structured_calls[0]
+            for node in ast.walk(function)
+        )
+        assert "_queue_claim_finalize_obligation" not in _called_names(function)
+        assert "_schedule_cleanup_obligation" not in _called_names(function)
+
+    admission_wrapper = scan.definitions[f"{module}:admit_carto_job"]
+    spawn_wrapper = scan.definitions[f"{module}:_spawn_governed_worker"]
+    assert "_queue_claim_finalize_obligation" in _called_names(admission_wrapper)
+    assert "_queue_claim_finalize_obligation" in _called_names(spawn_wrapper)
+    assert "_finalize_claim_locked_outcome" not in _called_names(admission_wrapper)
+    assert "_finalize_claim_locked_outcome" not in _called_names(spawn_wrapper)

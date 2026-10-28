@@ -1,0 +1,379 @@
+"""Regression lock: ETCH forest preflight rejects unknown/malformed node fields
+with ZERO writes (the `content`-vs-`note` silent-drop incident, 2026).
+
+Background: ``workflowy_etch`` read known keys off each node dict with
+``.get(...)`` and ignored everything else, so ``{"name": "x", "content": "..."}``
+created a name-only node and reported success -- data silently swallowed.
+The recursive preflight inside ``workflowy_etch`` is the ONE ETCH-forest
+grammar authority (every ingress -- node.etch sync/async, point.capture's
+``nodes`` form, nodes_file -- reaches it), so unknown-key rejection lives
+there. These tests lock: index-precise messages, the teaching hint for
+``content``, all five legal keys accepted, and NO create_node call on any
+rejection, including a malformed node deep in the forest AFTER valid siblings.
+
+Also locks the sibling closure in node.edit ``note_edits``: an unknown key
+(e.g. ``replacement``) is rejected instead of being ignored -- which
+previously turned into a silent DELETION because omitted ``replace`` means
+delete by contract.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from workflowy_mcp import server  # noqa: E402
+from workflowy_mcp.client import api_client_etch as etch_mod  # noqa: E402
+from workflowy_mcp.client.api_client_etch import (  # noqa: E402
+    ETCH_LAYOUT_MODES,
+    ETCH_NODE_ALLOWED_KEYS,
+    ETCH_POSITIONS,
+    WorkFlowyClientEtch,
+)
+from workflowy_mcp.models.node import WorkFlowyNode  # noqa: E402
+from workflowy_mcp.models.requests import NodeCreateRequest  # noqa: E402
+
+_PARENT = "11111111-2222-3333-4444-555555555555"
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+def _make_client():
+    """Real WorkFlowyClientEtch via __new__ with create_node counted."""
+    c = WorkFlowyClientEtch.__new__(WorkFlowyClientEtch)
+    calls: list[dict] = []
+
+    async def _fake_create_node(request, _internal_call=False, **kw):
+        calls.append(request.model_dump())
+        return WorkFlowyNode(
+            id=f"created-{len(calls)}", name=request.name, note=request.note
+        )
+
+    c.create_node = _fake_create_node  # type: ignore[assignment]
+    c._log_to_file = lambda *a, **k: None  # type: ignore[assignment]
+    c._mark_nodes_export_dirty = lambda ids: None  # type: ignore[assignment]
+    return c, calls
+
+
+# ---------------------------------------------------------------------------
+# Grammar constants are the single authority and match create_tree's reads
+# ---------------------------------------------------------------------------
+
+def _literal_values(annotation) -> frozenset:
+    """Unwrap `Literal[...] | None` (or bare Literal) into its value set."""
+    import typing
+
+    args = typing.get_args(annotation)
+    for arg in args:
+        if typing.get_origin(arg) is typing.Literal:
+            return frozenset(typing.get_args(arg))
+    if typing.get_origin(annotation) is typing.Literal:
+        return frozenset(args)
+    raise AssertionError(f"no Literal found in {annotation!r}")
+
+
+def test_allowed_keys_match_create_tree_consumption():
+    assert ETCH_NODE_ALLOWED_KEYS == frozenset(
+        {"name", "note", "children", "layout_mode", "position"}
+    )
+
+
+def test_enum_constants_are_derived_from_the_creation_model_not_hardcoded_twice():
+    """REAL drift detector: the preflight enums must equal the Literal types on
+    NodeCreateRequest (the authority create_tree hands each node to). If someone
+    adds 'h4' to the model, this fails until ETCH_LAYOUT_MODES follows."""
+    fields = NodeCreateRequest.model_fields
+    assert ETCH_LAYOUT_MODES == _literal_values(fields["layoutMode"].annotation)
+    assert ETCH_POSITIONS == _literal_values(fields["position"].annotation)
+
+
+# ---------------------------------------------------------------------------
+# The incident: `content` instead of `note`
+# ---------------------------------------------------------------------------
+
+def test_content_key_is_rejected_with_teaching_hint_and_zero_writes():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(
+        _PARENT, [{"name": "RENDER TEST", "content": "Test note body."}]
+    ))
+    assert result["success"] is False
+    assert result["nodes_created"] == 0
+    assert result["root_node_ids"] == []
+    assert calls == []  # ZERO create_node calls
+    msg = result["errors"][0]
+    assert "nodes[0] has unknown field(s): ['content']" in msg
+    assert "'note'" in msg
+    assert "point.capture" in msg
+    assert "NO nodes were created" in msg
+
+
+def test_unknown_key_deep_in_forest_after_valid_siblings_means_zero_writes():
+    """A bad child at depth 2, AFTER two perfectly valid roots: nothing is created."""
+    c, calls = _make_client()
+    forest = [
+        {"name": "Root A", "note": "fine"},
+        {"name": "Root B", "children": [
+            {"name": "B.1"},
+            {"name": "B.2", "children": [
+                {"name": "B.2.a", "body": "wrong key"},
+            ]},
+        ]},
+    ]
+    result = _run(c.workflowy_etch(_PARENT, forest))
+    assert result["success"] is False
+    assert calls == []
+    assert "nodes[1].children[1].children[0] has unknown field(s): ['body']" in result["errors"][0]
+
+
+def test_unknown_key_via_json_string_payload_is_rejected():
+    c, calls = _make_client()
+    payload = json.dumps([{"name": "x", "title": "dup"}])
+    result = _run(c.workflowy_etch(_PARENT, payload))
+    assert result["success"] is False
+    assert calls == []
+    assert "['title']" in result["errors"][0]
+    assert "'name'" in result["errors"][0]
+
+
+def test_multiple_unknown_keys_are_all_listed_sorted():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(
+        _PARENT, [{"name": "x", "uuid": "abc", "content": "y", "tags": ["t"]}]
+    ))
+    assert calls == []
+    assert "['content', 'tags', 'uuid']" in result["errors"][0]
+
+
+# ---------------------------------------------------------------------------
+# Structural completeness: shape / required / enums / children container
+# ---------------------------------------------------------------------------
+
+def test_non_dict_node_is_rejected():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "ok"}, "just a string"]))
+    assert result["success"] is False
+    assert calls == []
+    assert "nodes[1] must be an object" in result["errors"][0]
+
+
+def test_missing_name_is_rejected_at_preflight():
+    """Previously passed preflight (validate_name(None) is OK) and blew up per-node
+    in create_tree AFTER earlier siblings were created."""
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "first"}, {"note": "orphan"}]))
+    assert result["success"] is False
+    assert calls == []
+    assert "nodes[1].name is required" in result["errors"][0]
+
+
+def test_explicit_null_name_after_valid_sibling_means_zero_writes():
+    """Audit finding (Astra): `name: null` is PRESENT so the key check passed,
+    _validate_name(None) returned OK, and the first sibling was created before
+    NodeCreateRequest rejected the null. Must be caught at preflight."""
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(
+        _PARENT, [{"name": "Valid first node"}, {"name": None, "note": "Body"}]
+    ))
+    assert result["success"] is False
+    assert result["nodes_created"] == 0
+    assert calls == []
+    assert "nodes[1].name is required" in result["errors"][0]
+    assert "null is not allowed" in result["errors"][0]
+
+
+def test_explicit_null_name_in_descendant_means_zero_writes():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(
+        _PARENT, [{"name": "Valid parent", "children": [{"name": None}]}]
+    ))
+    assert result["success"] is False
+    assert calls == []
+    assert "nodes[0].children[0].name is required" in result["errors"][0]
+
+
+def test_blank_name_is_rejected():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "   "}]))
+    assert calls == []
+    assert "nodes[0].name:" in result["errors"][0]
+
+
+def test_non_string_note_is_rejected():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "x", "note": {"nested": 1}}]))
+    assert calls == []
+    assert "nodes[0].note:" in result["errors"][0]
+
+
+@pytest.mark.parametrize("bad", ["heading", "H1", "todo-list", 3])
+def test_invalid_layout_mode_rejected_at_preflight(bad):
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "x", "layout_mode": bad}]))
+    assert calls == []
+    assert "nodes[0].layout_mode must be one of" in result["errors"][0]
+
+
+@pytest.mark.parametrize("bad", ["middle", "first", "TOP", 0])
+def test_invalid_position_rejected_at_preflight(bad):
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "x", "position": bad}]))
+    assert calls == []
+    assert "nodes[0].position must be one of" in result["errors"][0]
+
+
+@pytest.mark.parametrize("field", ["layout_mode", "position"])
+@pytest.mark.parametrize("unhashable", [[], {}, ["todo"], {"v": "top"}])
+def test_unhashable_enum_values_yield_path_error_not_typeerror(field, unhashable):
+    """Audit finding (Astra): a list/dict enum value hit `x not in frozenset` and
+    raised TypeError out of the preflight (zero writes, but no usable error)."""
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(
+        _PARENT, [{"name": "valid first"}, {"name": "bad", field: unhashable}]
+    ))
+    assert result["success"] is False
+    assert calls == []
+    assert f"nodes[1].{field} must be one of" in result["errors"][0]
+
+
+def test_children_must_be_a_list():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "x", "children": {"name": "y"}}]))
+    assert calls == []
+    assert "nodes[0].children must be a list" in result["errors"][0]
+
+
+# ---------------------------------------------------------------------------
+# All five legal keys still accepted; null optionals tolerated
+# ---------------------------------------------------------------------------
+
+def test_full_legal_grammar_is_accepted_and_forwarded():
+    c, calls = _make_client()
+    forest = [{
+        "name": "Root",
+        "note": "# Body\n\nMarkdown in 'note'.",
+        "layout_mode": "h1",
+        "position": "top",
+        "children": [
+            {"name": "Child", "layout_mode": "todo"},
+            {"name": "Leaf", "note": None, "children": None},
+        ],
+    }]
+    result = _run(c.workflowy_etch(_PARENT, forest))
+    assert result["success"] is True, result
+    assert result["nodes_created"] == 3
+    assert len(calls) == 3
+    assert calls[0]["name"] == "Root"
+    assert calls[0]["note"] == "# Body\n\nMarkdown in 'note'."
+    assert calls[0]["layoutMode"] == "h1"
+    assert calls[0]["position"] == "top"
+    assert calls[1]["layoutMode"] == "todo"
+    assert calls[2]["name"] == "Leaf"
+
+
+def test_name_only_node_is_still_legal():
+    c, calls = _make_client()
+    result = _run(c.workflowy_etch(_PARENT, [{"name": "Just a title"}]))
+    assert result["success"] is True
+    assert len(calls) == 1
+    assert calls[0]["note"] is None
+
+
+# ---------------------------------------------------------------------------
+# The message helper is the one text authority
+# ---------------------------------------------------------------------------
+
+def test_unknown_key_message_hints_only_for_known_confusions():
+    msg = etch_mod._etch_unknown_keys_message("nodes[3]", ["content", "zzz_novel"])
+    assert msg.startswith("nodes[3] has unknown field(s): ['content', 'zzz_novel']")
+    assert "'content':" in msg
+    assert "'zzz_novel':" not in msg  # no fabricated hint for a truly novel key
+
+
+# ---------------------------------------------------------------------------
+# note_edits sibling closure (node.edit): unknown key rejected, not ignored
+# ---------------------------------------------------------------------------
+
+def _patch_edit_boundary(monkeypatch):
+    calls: list = []
+
+    class _Client:
+        async def get_node(self, node_id):
+            calls.append(("get", node_id))
+            return WorkFlowyNode(id=node_id, name="T", note="keep important text here")
+
+        async def update_node(self, *a, **k):
+            calls.append(("update", a, k))
+            raise AssertionError("update_node must not be reached")
+
+    monkeypatch.setattr(server, "get_client", lambda: _Client())
+    monkeypatch.setattr(server, "_rate_limiter", None)
+
+    async def _resolve(node_id, *, label, required=True):
+        return node_id
+
+    monkeypatch.setattr(server, "_resolve_mutator_node_id", _resolve)
+    monkeypatch.setattr(server, "_resolve_generic_node_handle", _resolve)
+    return calls
+
+
+def test_note_edits_replacement_key_is_rejected_not_treated_as_deletion(monkeypatch):
+    """`replacement` used to be ignored => omitted `replace` => DELETE the match."""
+    calls = _patch_edit_boundary(monkeypatch)
+    with pytest.raises(ValueError, match=r"note_edits\[0\] has unknown field\(s\): \['replacement'\]") as ei:
+        _run(server.edit_node(
+            "uuid-1",
+            note_edits=[{"search": "important text", "replacement": "new text"}],
+        ))
+    assert "'replace'" in str(ei.value)
+    assert "NO edit was applied" in str(ei.value)
+    assert calls == []  # raised before any client interaction
+
+
+def test_note_edits_unknown_key_in_second_item_rejects_whole_batch(monkeypatch):
+    calls = _patch_edit_boundary(monkeypatch)
+    with pytest.raises(ValueError, match=r"note_edits\[1\] has unknown field\(s\): \['find'\]") as ei:
+        _run(server.edit_node(
+            "uuid-1",
+            note_edits=[
+                {"search": "a", "replace": "b"},
+                {"find": "c", "replace": "d"},
+            ],
+        ))
+    assert "'search'" in str(ei.value)
+    assert calls == []
+
+
+def test_note_edits_legal_grammar_still_accepted_including_omitted_replace(monkeypatch):
+    """Omitted replace == deletion remains the contract; only unknown keys are new errors."""
+    seen: dict = {}
+
+    class _Client:
+        async def get_node(self, node_id):
+            return WorkFlowyNode(id=node_id, name="T", note="alpha beta gamma")
+
+        async def update_node(self, node_id, request, *a, **k):
+            seen["note"] = request.note
+            return WorkFlowyNode(id=node_id, name="T", note=request.note)
+
+    monkeypatch.setattr(server, "get_client", lambda: _Client())
+    monkeypatch.setattr(server, "_rate_limiter", None)
+
+    async def _resolve(node_id, *, label, required=True):
+        return node_id
+
+    monkeypatch.setattr(server, "_resolve_mutator_node_id", _resolve)
+    monkeypatch.setattr(server, "_resolve_generic_node_handle", _resolve)
+
+    _run(server.edit_node(
+        "uuid-1",
+        note_edits=[{"search": "alpha ", "replace": "ALPHA "}, {"search": " gamma"}],
+    ))
+    assert seen["note"] == "ALPHA beta"

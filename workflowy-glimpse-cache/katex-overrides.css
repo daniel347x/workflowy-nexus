@@ -1,0 +1,14 @@
+/*
+ * KaTeX overrides for the docked Markdown modal (Dan, 2026).
+ * Injected alongside katex/katex.min.css via manifest.json (MAIN-world
+ * content script css). Only display-mode layout lives here; KaTeX's own
+ * error styling (raw TeX in red, throwOnError:false) covers broken math.
+ */
+
+/* Keep wide display equations inside the dock's render region: scroll
+   horizontally instead of blowing out the panel width. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}

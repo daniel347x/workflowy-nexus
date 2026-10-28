@@ -1,0 +1,6 @@
+    def key_text(self, n: Any) -> str:
+        """Return the text of an object-literal property key.
+
+        Wrapper around the Phase B.1 module-level ``_js_key_text``.
+        """
+        return _js_key_text(n, self.source_bytes)

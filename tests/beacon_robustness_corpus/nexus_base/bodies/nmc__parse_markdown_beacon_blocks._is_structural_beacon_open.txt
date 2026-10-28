@@ -1,0 +1,12 @@
+    def _is_structural_beacon_open(raw_line: str) -> bool:
+        text = raw_line.strip()
+        # Strip an HTML-comment opener if the marker shares its line.
+        if text.startswith("<!--"):
+            text = text[4:].lstrip()
+        # Strip a leading comment prefix used by non-MD languages reusing this
+        # parser pattern (harmless for MD): '#' or '//'.
+        if text.startswith("#"):
+            text = text.lstrip("#").lstrip()
+        elif text.startswith("//"):
+            text = text[2:].lstrip()
+        return text.startswith("@beacon[")

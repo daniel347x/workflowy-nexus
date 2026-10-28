@@ -1,0 +1,763 @@
+"""S03-A §14.1/§12 — multi-process adoption convergence tests."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+from coherence_harness import (
+    ACCOUNT_A,
+    NOW,
+    launch_subprocess,
+    make_coherence_root,
+    run_subprocess,
+    s02_node,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp.coherence import (
+    JournalProducer,
+    SemanticEffect,
+    append_journal_transaction,
+    journal_record_filename,
+    manifest_with_updates,
+    read_manifest,
+    write_manifest,
+)
+from workflowy_mcp.coherence.durable_io import atomic_write_json_durable
+from workflowy_mcp.coherence.schema import JournalTransaction
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+TESTS_DIR = Path(__file__).resolve().parent
+
+BASE_NODES = [s02_node("A", name="alpha"), s02_node("B", name="beta")]
+
+
+def _producer() -> JournalProducer:
+    return JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+    )
+
+
+def _append(paths, effects):
+    return append_journal_transaction(
+        paths, operation_kind="test", effects=effects, producer=_producer()
+    )
+
+
+def _setup_base(paths, tmp_path: Path, nodes, *, watermark: int = 0):
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    manifest = read_manifest(paths, required=True)
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": nodes},
+        account_scope_id=paths.account_root.name,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        incorporated_through_seq=watermark,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            manifest,
+            base_snapshot_path=candidate,
+            coherence_mode="transition",
+            base_incorporated_through_seq=watermark,
+            journal_floor_seq=watermark + 1,
+        ),
+        expected_epoch_id=manifest.epoch_id,
+        expected_head_seq=manifest.journal_head_seq,
+    )
+    return read_manifest(paths, required=True)
+
+
+_ADOPT_AND_DUMP = """
+import asyncio, json, sys
+from pathlib import Path
+sys.path.insert(0, {tests_dir!r})
+from workflowy_mcp.coherence import (
+    CacheViewPublisher, adopt_manifest_head, coherence_paths, unpopulated_cache_view,
+)
+
+account, jobs_root, snapshot_dir, out_file = sys.argv[1:5]
+paths = coherence_paths(account, jobs_root=jobs_root)
+
+async def main():
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=account))
+    result = await adopt_manifest_head(
+        paths=paths, publisher=publisher, snapshot_dir=snapshot_dir,
+    )
+    view = result.view
+    payload = {
+        "disposition": result.disposition,
+        "epoch_number": view.epoch_number,
+        "epoch_id": view.epoch_id,
+        "adopted_sequence": view.adopted_sequence,
+        "records_applied": result.records_applied,
+        "nodes": {
+            str(n.get("id")): n
+            for n in view.nodes_export.get("nodes", [])
+            if isinstance(n, dict) and n.get("id")
+        },
+    }
+    Path(out_file).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+asyncio.run(main())
+""".replace("{tests_dir!r}", repr(str(TESTS_DIR)))
+
+
+def _adopt_in_subprocess(paths, tmp_path: Path, out_name: str) -> dict:
+    out_file = tmp_path / out_name
+    result = run_subprocess(
+        _ADOPT_AND_DUMP,
+        ACCOUNT_A,
+        str(tmp_path / "cartographer_jobs"),
+        str(tmp_path / "snapshots"),
+        str(out_file),
+        timeout=60.0,
+    )
+    assert result.returncode == 0, (
+        f"subprocess adoption failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+    return json.loads(out_file.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Cross-process convergence
+# ---------------------------------------------------------------------------
+
+
+def test_two_processes_replay_same_tail_and_converge(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    _append(paths, [SemanticEffect.node_fields("A", ["name"], {"name": "alpha-2"})])
+
+    first = _adopt_in_subprocess(paths, tmp_path, "first.json")
+    second = _adopt_in_subprocess(paths, tmp_path, "second.json")
+
+    # Both processes converged on the identical adopted state.
+    assert first["epoch_id"] == manifest.epoch_id == second["epoch_id"]
+    assert first["adopted_sequence"] == 2 == second["adopted_sequence"]
+    assert first["nodes"] == second["nodes"]
+    assert first["nodes"]["C"]["name"] == "gamma"
+    assert first["nodes"]["A"]["name"] == "alpha-2"
+    assert first["disposition"] == "epoch_reloaded" == second["disposition"]
+
+
+def test_process_appends_then_another_adopts_incrementally(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+
+    # Process 1 adopts the base lineage.
+    before = _adopt_in_subprocess(paths, tmp_path, "before.json")
+    assert before["adopted_sequence"] == 0
+
+    # This process appends two records; process 2 must adopt the tail.
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    _append(paths, [SemanticEffect.node_create(s02_node("D", name="delta"))])
+
+    after = _adopt_in_subprocess(paths, tmp_path, "after.json")
+    assert after["adopted_sequence"] == 2
+    assert after["nodes"]["C"]["name"] == "gamma"
+    assert after["nodes"]["D"]["name"] == "delta"
+    # The earlier process's state is a strict prefix subset of the new one.
+    assert set(before["nodes"]) <= set(after["nodes"])
+
+
+def test_epoch_cut_in_one_process_then_reload_in_another(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+
+    before = _adopt_in_subprocess(paths, tmp_path, "before.json")
+    assert before["epoch_id"] == manifest.epoch_id
+
+    # Simulate the S02 epoch cut (new base incorporating through seq 1).
+    snapshot_dir = tmp_path / "snapshots"
+    current = read_manifest(paths, required=True)
+    new_id = "f" * 32
+    candidate = write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": BASE_NODES + [s02_node("C", name="gamma")]},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=current.epoch_number + 1,
+        epoch_id=new_id,
+        incorporated_through_seq=1,
+        publication_kind="full_refresh",
+    )
+    write_manifest(
+        paths,
+        manifest_with_updates(
+            current,
+            epoch_number=current.epoch_number + 1,
+            epoch_id=new_id,
+            previous_epoch_id=current.epoch_id,
+            base_snapshot_path=candidate,
+            base_incorporated_through_seq=1,
+            journal_floor_seq=2,
+        ),
+        expected_epoch_id=current.epoch_id,
+        expected_head_seq=1,
+    )
+    # A post-cut record in the NEW epoch lineage.
+    record = JournalTransaction(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        sequence=2,
+        previous_sequence=1,
+        transaction_id="postcut" + "0" * 24,
+        published_epoch_id=new_id,
+        operation_kind="test",
+        committed_at=NOW,
+        producer=_producer(),
+        verification=(),
+        effects=(SemanticEffect.node_create(s02_node("E", name="echo")),),
+    )
+    atomic_write_json_durable(
+        paths.journal_dir / journal_record_filename(2), record.to_dict()
+    )
+    cut_manifest = read_manifest(paths, required=True)
+    write_manifest(
+        paths,
+        manifest_with_updates(cut_manifest, journal_head_seq=2),
+        expected_epoch_id=new_id,
+        expected_head_seq=1,
+    )
+
+    after = _adopt_in_subprocess(paths, tmp_path, "after.json")
+    assert after["epoch_id"] == new_id
+    assert after["epoch_number"] == current.epoch_number + 1
+    assert after["adopted_sequence"] == 2
+    assert after["nodes"]["C"]["name"] == "gamma"  # from the new base
+    assert after["nodes"]["E"]["name"] == "echo"  # from the post-cut tail
+
+
+_HOLD_AND_REDUMP = """
+import asyncio, json, sys, time
+from pathlib import Path
+sys.path.insert(0, {tests_dir!r})
+from workflowy_mcp.coherence import (
+    CacheViewPublisher, adopt_manifest_head, coherence_paths, unpopulated_cache_view,
+)
+
+account, jobs_root, snapshot_dir, out_file, ready_file, go_file = sys.argv[1:7]
+paths = coherence_paths(account, jobs_root=jobs_root)
+
+
+def dump(view, path):
+    payload = {
+        "adopted_sequence": view.adopted_sequence,
+        "ids": sorted(
+            str(n.get("id"))
+            for n in view.nodes_export.get("nodes", [])
+            if isinstance(n, dict) and n.get("id")
+        ),
+    }
+    Path(path).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+async def main():
+    publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=account))
+    result = await adopt_manifest_head(
+        paths=paths, publisher=publisher, snapshot_dir=snapshot_dir,
+    )
+    first = publisher.capture()
+    dump(first, out_file)
+    Path(ready_file).write_text("ready", encoding="utf-8")
+    deadline = time.monotonic() + 60
+    while not Path(go_file).exists():
+        if time.monotonic() > deadline:
+            raise SystemExit("timeout waiting for go sentinel")
+        await asyncio.sleep(0.05)
+    # NO re-adoption: the pinned view is the whole operation's view.
+    second = publisher.capture()
+    assert second is first
+    dump(second, out_file + ".second")
+
+
+asyncio.run(main())
+""".replace("{tests_dir!r}", repr(str(TESTS_DIR)))
+
+
+# ---------------------------------------------------------------------------
+# S03-B (audit A7.1) — cross-process generation pinning
+# ---------------------------------------------------------------------------
+
+
+def test_s03b_cross_process_generation_pinning(tmp_path):
+    """S03-B multiprocess dimension of the one-generation invariant: process
+    A pins a view at sequence 0; the PARENT appends a journal record;
+    process B adopts and sees sequence 1; process A — still inside its
+    operation — never re-adopts and its pinned view is byte-stable.
+    """
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    _setup_base(paths, tmp_path, BASE_NODES)
+
+    holder_out = tmp_path / "holder.json"
+    ready = tmp_path / "ready.sentinel"
+    go = tmp_path / "go.sentinel"
+    proc = launch_subprocess(
+        _HOLD_AND_REDUMP,
+        ACCOUNT_A,
+        str(tmp_path / "cartographer_jobs"),
+        str(tmp_path / "snapshots"),
+        str(holder_out),
+        str(ready),
+        str(go),
+    )
+    try:
+        assert wait_for_file(ready, timeout=30.0), "holder process never signaled ready"
+        assert wait_for_file(holder_out, timeout=10.0)
+
+        # The parent (a second writer) appends a record; process B adopts it.
+        _append(paths, [SemanticEffect.node_create(s02_node("D", name="delta"))])
+        adopted_b = _adopt_in_subprocess(paths, tmp_path, "b.json")
+        assert adopted_b["adopted_sequence"] == 1
+        assert "D" in adopted_b["nodes"]
+
+        # Release the holder; it re-dumps WITHOUT re-adopting.
+        touch(go)
+        assert wait_for_file(Path(str(holder_out) + ".second"), timeout=30.0)
+    finally:
+        proc.wait(timeout=30)
+    assert proc.returncode == 0
+
+    first = json.loads(holder_out.read_text(encoding="utf-8"))
+    second = json.loads(
+        Path(str(holder_out) + ".second").read_text(encoding="utf-8")
+    )
+    assert first["adopted_sequence"] == 0
+    # The pinned operation view is byte-stable across the external advance.
+    assert second == first
+    assert "D" not in second["ids"]
+
+
+def test_orphan_record_adopted_across_processes(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+
+    # Simulate a cross-process crash: durable record at head+1, head not
+    # advanced (record written, manifest write lost).
+    orphan = JournalTransaction(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        sequence=2,
+        previous_sequence=1,
+        transaction_id="orphan" + "0" * 26,
+        published_epoch_id=manifest.epoch_id,
+        operation_kind="test",
+        committed_at=NOW,
+        producer=_producer(),
+        verification=(),
+        effects=(SemanticEffect.node_create(s02_node("D", name="delta")),),
+    )
+    atomic_write_json_durable(
+        paths.journal_dir / journal_record_filename(2), orphan.to_dict()
+    )
+
+    adopted = _adopt_in_subprocess(paths, tmp_path, "adopted.json")
+
+    # The orphan was adopted (manifest head advanced) and applied.
+    final_manifest = read_manifest(paths, required=True)
+    assert final_manifest.journal_head_seq == 2
+    assert adopted["adopted_sequence"] == 2
+    assert adopted["nodes"]["D"]["name"] == "delta"
+
+
+# ---------------------------------------------------------------------------
+# Seal-2 item 4 — TRUE concurrent multi-process races with a ready/go rendezvous
+# ---------------------------------------------------------------------------
+
+
+_ADOPT_AND_DUMP_BARRIER = """
+import asyncio, json, sys, time
+from pathlib import Path
+sys.path.insert(0, {tests_dir!r})
+from workflowy_mcp.coherence import (
+    CacheViewPublisher, adopt_manifest_head, coherence_paths, unpopulated_cache_view,
+)
+
+account, jobs_root, snapshot_dir, out_file, ready_file, go_file = sys.argv[1:7]
+paths = coherence_paths(account, jobs_root=jobs_root)
+publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=account))
+
+# Rendezvous: announce readiness IMMEDIATELY before the contested adoption,
+# then wait for the shared go marker.
+Path(ready_file).write_text("1", encoding="utf-8")
+deadline = time.monotonic() + 60
+while not Path(go_file).exists():
+    if time.monotonic() > deadline:
+        raise RuntimeError("go-marker timeout")
+    time.sleep(0.02)
+
+async def main():
+    result = await adopt_manifest_head(
+        paths=paths, publisher=publisher, snapshot_dir=snapshot_dir,
+    )
+    view = result.view
+    payload = {
+        "disposition": result.disposition,
+        "epoch_number": view.epoch_number,
+        "epoch_id": view.epoch_id,
+        "adopted_sequence": view.adopted_sequence,
+        "records_applied": result.records_applied,
+        "nodes": {
+            str(n.get("id")): n
+            for n in view.nodes_export.get("nodes", [])
+            if isinstance(n, dict) and n.get("id")
+        },
+    }
+    Path(out_file).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+asyncio.run(main())
+""".replace("{tests_dir!r}", repr(str(TESTS_DIR)))
+
+
+def _launch_barriered_adopter(tmp_path: Path, name: str):
+    out_file = tmp_path / f"{name}.json"
+    ready_file = tmp_path / f"ready-{name}"
+    proc = launch_subprocess(
+        _ADOPT_AND_DUMP_BARRIER,
+        ACCOUNT_A,
+        str(tmp_path / "cartographer_jobs"),
+        str(tmp_path / "snapshots"),
+        str(out_file),
+        str(ready_file),
+        str(tmp_path / "go"),
+    )
+    return proc, out_file, ready_file
+
+
+def _collect_barriered(proc, out_file: Path) -> dict:
+    stdout, stderr = proc.communicate(timeout=90)
+    assert proc.returncode == 0, (
+        f"concurrent adopter failed:\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+    )
+    return json.loads(out_file.read_text(encoding="utf-8"))
+
+
+def _run_two_barriered_adopters(tmp_path: Path):
+    """Launch two adopters that can ONLY proceed once BOTH are staged
+    immediately before the contested adoption."""
+
+    proc_a, out_a, ready_a = _launch_barriered_adopter(tmp_path, "A")
+    try:
+        proc_b, out_b, ready_b = _launch_barriered_adopter(tmp_path, "B")
+        try:
+            assert wait_for_file(ready_a, timeout=30), "adopter A never became ready"
+            assert wait_for_file(ready_b, timeout=30), "adopter B never became ready"
+            touch(tmp_path / "go")
+            return _collect_barriered(proc_a, out_a), _collect_barriered(proc_b, out_b)
+        finally:
+            if proc_b.poll() is None:
+                proc_b.kill()
+    finally:
+        if proc_a.poll() is None:
+            proc_a.kill()
+
+
+def test_concurrent_processes_orphan_recovery_exactly_once(tmp_path):
+    """Two real subprocesses, released simultaneously against one orphaned
+    head: the coherence mutex serializes recovery, the head advances
+    EXACTLY once, and both converge on identical state."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    orphan = JournalTransaction(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        sequence=2,
+        previous_sequence=1,
+        transaction_id="orphanrace" + "0" * 23,
+        published_epoch_id=manifest.epoch_id,
+        operation_kind="test",
+        committed_at=NOW,
+        producer=_producer(),
+        verification=(),
+        effects=(SemanticEffect.node_create(s02_node("D", name="delta")),),
+    )
+    atomic_write_json_durable(
+        paths.journal_dir / journal_record_filename(2), orphan.to_dict()
+    )
+
+    result_a, result_b = _run_two_barriered_adopters(tmp_path)
+
+    final_manifest = read_manifest(paths, required=True)
+    assert final_manifest.journal_head_seq == 2  # advanced exactly once
+    assert result_a["adopted_sequence"] == 2 == result_b["adopted_sequence"]
+    assert result_a["epoch_id"] == result_b["epoch_id"] == manifest.epoch_id
+    assert result_a["nodes"] == result_b["nodes"]
+    assert result_a["nodes"]["D"]["name"] == "delta"
+    # Both processes adopted through the same recovery (dispositions visible).
+    assert result_a["disposition"] in ("epoch_reloaded", "tail_replayed", "already_current")
+    assert result_b["disposition"] in ("epoch_reloaded", "tail_replayed", "already_current")
+
+
+# ---------------------------------------------------------------------------
+# Seal-3 item 1 — orphan recovery PROVEN to serialize on the coherence mutex
+# ---------------------------------------------------------------------------
+
+
+_BARRIER_RECOVERY_SCRIPT = """
+import asyncio, contextlib, json, os, sys, time
+from pathlib import Path
+sys.path.insert(0, {tests_dir!r})
+
+account, jobs_root, snapshot_dir, out_file, role, work_dir = sys.argv[1:7]
+work = Path(work_dir)
+
+import workflowy_mcp.coherence.adoption as adoption_module
+import workflowy_mcp.coherence.journal_store as journal_store_module
+from workflowy_mcp.coherence import (
+    CacheViewPublisher, adopt_manifest_head, coherence_paths, unpopulated_cache_view,
+)
+
+if os.environ.get("S03_MUTATE_NO_MUTEX") == "1":
+    @contextlib.asynccontextmanager
+    async def _noop_lock(paths_arg, **kwargs):
+        yield None
+    adoption_module.coherence_lock_async = _noop_lock
+
+# Record THIS child's own orphan head-advance (the recovery write) —
+# AFTER a successful durable write only (a CAS-losing attempt never
+# produces a marker).
+real_write_manifest = journal_store_module.write_manifest
+def _recording_write_manifest(paths_arg, manifest_arg, **kwargs):
+    result = real_write_manifest(paths_arg, manifest_arg, **kwargs)
+    if manifest_arg.journal_head_seq > 0:
+        (work / f"advance-{role}").write_text(
+            str(manifest_arg.journal_head_seq), encoding="utf-8"
+        )
+    return result
+journal_store_module.write_manifest = _recording_write_manifest
+
+paths = coherence_paths(account, jobs_root=jobs_root)
+publisher = CacheViewPublisher(unpopulated_cache_view(account_scope_id=account))
+
+if role == "A":
+    # A parks INSIDE the held coherence mutex (its recovery wrapper runs
+    # under the lock) until the parent releases it.
+    real_recover = adoption_module._recover_orphans_locked
+    def _parked_recover(paths_arg, manifest_arg, *, fs_ops=None):
+        (work / "a-entered-recovery").write_text("1", encoding="utf-8")
+        deadline = time.monotonic() + 90
+        while not (work / "release-a").exists():
+            if time.monotonic() > deadline:
+                raise RuntimeError("release-a timeout")
+            time.sleep(0.02)
+        return real_recover(paths_arg, manifest_arg, fs_ops=fs_ops)
+    adoption_module._recover_orphans_locked = _parked_recover
+    cancel_check = None
+else:
+    # FOOTNOTE 2: generous lock timeout so a parked A can never spuriously
+    # fail B on slow CI scheduling.
+    real_lock_async = adoption_module.coherence_lock_async
+    def _patient_lock(paths_arg, **kwargs):
+        kwargs.setdefault("timeout_seconds", 60.0)
+        return real_lock_async(paths_arg, **kwargs)
+    adoption_module.coherence_lock_async = _patient_lock
+
+    # FOOTNOTE 1: invocation 1 fires before B's first lock attempt;
+    # invocation 2 fires only after an attempt found A's mutex busy.
+    # Returns None every time (a truthy return would CANCEL B's adoption).
+    calls = {"n": 0}
+    def cancel_check():
+        calls["n"] += 1
+        if calls["n"] == 2:
+            (work / "b-contended").write_text("1", encoding="utf-8")
+        return None
+
+async def main():
+    kwargs = {"cancel_check": cancel_check} if cancel_check is not None else {}
+    result = await adopt_manifest_head(
+        paths=paths, publisher=publisher, snapshot_dir=snapshot_dir, **kwargs
+    )
+    view = result.view
+    payload = {
+        "disposition": result.disposition,
+        "epoch_number": view.epoch_number,
+        "epoch_id": view.epoch_id,
+        "adopted_sequence": view.adopted_sequence,
+        "nodes": {
+            str(n.get("id")): n
+            for n in view.nodes_export.get("nodes", [])
+            if isinstance(n, dict) and n.get("id")
+        },
+    }
+    Path(out_file).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+asyncio.run(main())
+""".replace("{tests_dir!r}", repr(str(TESTS_DIR)))
+
+
+def _launch_recovery_child(tmp_path: Path, role: str, *, mutate_no_mutex: bool = False):
+    out_file = tmp_path / f"{role}.json"
+    env = {"S03_MUTATE_NO_MUTEX": "1"} if mutate_no_mutex else None
+    proc = launch_subprocess(
+        _BARRIER_RECOVERY_SCRIPT,
+        ACCOUNT_A,
+        str(tmp_path / "cartographer_jobs"),
+        str(tmp_path / "snapshots"),
+        str(out_file),
+        role,
+        str(tmp_path),
+        env=env,
+    )
+    return proc, out_file
+
+
+def _orphan_race_fixture(tmp_path: Path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    orphan = JournalTransaction(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        sequence=2,
+        previous_sequence=1,
+        transaction_id="mutexproof" + "0" * 23,
+        published_epoch_id=manifest.epoch_id,
+        operation_kind="test",
+        committed_at=NOW,
+        producer=_producer(),
+        verification=(),
+        effects=(SemanticEffect.node_create(s02_node("D", name="delta")),),
+    )
+    atomic_write_json_durable(
+        paths.journal_dir / journal_record_filename(2), orphan.to_dict()
+    )
+    return paths
+
+
+def test_orphan_recovery_serializes_on_the_coherence_mutex(tmp_path):
+    """POSITIVE mutex proof (seal-3 item 1): child A parks INSIDE the held
+    coherence mutex mid-recovery; child B's cancel_check fires its SECOND
+    invocation (which only happens after a lock attempt found the mutex
+    busy) before the parent releases A.  B's contention on A's held mutex
+    is therefore witnessed directly, never inferred from timing.
+
+    This test guards SUCCESSFUL exclusion/serialization: with the mutex
+    working, BOTH processes adopt cleanly.  An independent second wall
+    survives its removal: the recovery head advance is a CAS-guarded
+    write_manifest(expected_head_seq=...), so a real double recovery
+    would produce one winner and one loud manifest conflict — never a
+    silent double-advance.  Both walls are intentional.
+    """
+
+    paths = _orphan_race_fixture(tmp_path)
+
+    proc_a, out_a = _launch_recovery_child(tmp_path, "A")
+    try:
+        assert wait_for_file(tmp_path / "a-entered-recovery", timeout=30), (
+            "A never entered its parked recovery"
+        )
+        proc_b, out_b = _launch_recovery_child(tmp_path, "B")
+        try:
+            # THE positive proof: B's second cancel_check invocation only
+            # fires after a lock attempt found A's mutex busy.
+            assert wait_for_file(tmp_path / "b-contended", timeout=30), (
+                "B never contended on A's held coherence mutex"
+            )
+            touch(tmp_path / "release-a")
+            result_a = _collect_barriered(proc_a, out_a)
+            result_b = _collect_barriered(proc_b, out_b)
+        finally:
+            if proc_b.poll() is None:
+                proc_b.kill()
+    finally:
+        if proc_a.poll() is None:
+            proc_a.kill()
+
+    # Exactly one head advance, and it is A's.
+    assert (tmp_path / "advance-A").exists()
+    assert not (tmp_path / "advance-B").exists()
+    final_manifest = read_manifest(paths, required=True)
+    assert final_manifest.journal_head_seq == 2  # advanced exactly once
+    # The valid orphan was adopted, never quarantined.
+    assert not any(paths.quarantine_dir.iterdir())
+    # Both processes converge on identical epoch/head/state.
+    assert result_a["adopted_sequence"] == 2 == result_b["adopted_sequence"]
+    assert result_a["epoch_id"] == result_b["epoch_id"]
+    assert result_a["nodes"] == result_b["nodes"]
+    assert result_a["nodes"]["D"]["name"] == "delta"
+
+
+def test_orphan_recovery_mutex_proof_fails_when_mutex_disabled(tmp_path):
+    """MUTATION-SENSITIVITY of the positive proof (seal-3 item 1): with the
+    adoption slow-path coherence mutex replaced by a no-op async context
+    (injected by env inside the child scripts — no production hook), B's
+    lock attempts succeed immediately, its cancel_check never reaches the
+    contention-witnessing second invocation, and the b-contended marker is
+    NEVER produced.  The parked-A protocol therefore proves the repaired
+    serialization test above cannot pass vacuously: without the mutex, the
+    evidence it requires cannot exist.  In this mutation world B recovers
+    the orphan WITHOUT ever contending (advance-B, no advance-A) — and in a
+    genuine simultaneous double-recovery the CAS-guarded manifest write
+    remains the independent second wall against a silent double-advance.
+    """
+
+    paths = _orphan_race_fixture(tmp_path)
+
+    proc_a, out_a = _launch_recovery_child(tmp_path, "A", mutate_no_mutex=True)
+    try:
+        assert wait_for_file(tmp_path / "a-entered-recovery", timeout=30)
+        proc_b, out_b = _launch_recovery_child(tmp_path, "B", mutate_no_mutex=True)
+        try:
+            # The marker the serialization test REQUIRES can never appear.
+            assert not wait_for_file(tmp_path / "b-contended", timeout=8), (
+                "B contended even with the coherence mutex disabled — the "
+                "serialization test would be vacuous"
+            )
+            touch(tmp_path / "release-a")
+            _collect_barriered(proc_b, out_b)
+            # A's late double-recovery either completes as a no-op or loses
+            # loudly via the CAS second wall (ManifestConflictError) — both
+            # are documented no-mutex outcomes; the marker assertions below
+            # are the point.
+            a_stdout, a_stderr = proc_a.communicate(timeout=90)
+            if proc_a.returncode != 0:
+                assert "ManifestConflict" in a_stderr, (
+                    f"A failed for an unexpected reason:\n{a_stderr}"
+                )
+        finally:
+            if proc_b.poll() is None:
+                proc_b.kill()
+    finally:
+        if proc_a.poll() is None:
+            proc_a.kill()
+
+    # B recovered WITHOUT contending (and A consequently advanced nothing).
+    assert (tmp_path / "advance-B").exists()
+    assert not (tmp_path / "advance-A").exists()
+    final_manifest = read_manifest(paths, required=True)
+    assert final_manifest.journal_head_seq == 2
+
+
+def test_concurrent_processes_same_tail_converge(tmp_path):
+    """Two real subprocesses, released simultaneously (ready/go rendezvous),
+    replay the same two-record tail and converge on byte-identical adopted
+    state.  This test proves independent two-process CONVERGENCE under
+    concurrent release; it deliberately does NOT claim mutex-serialization
+    evidence (that contract belongs to the orphan-recovery proof above)."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = _setup_base(paths, tmp_path, BASE_NODES)
+    _append(paths, [SemanticEffect.node_create(s02_node("C", name="gamma"))])
+    _append(paths, [SemanticEffect.node_fields("A", ["name"], {"name": "alpha-2"})])
+
+    result_a, result_b = _run_two_barriered_adopters(tmp_path)
+
+    assert result_a["adopted_sequence"] == 2 == result_b["adopted_sequence"]
+    assert result_a["epoch_id"] == result_b["epoch_id"] == manifest.epoch_id
+    assert result_a["nodes"] == result_b["nodes"]
+    assert result_a["nodes"]["A"]["name"] == "alpha-2"

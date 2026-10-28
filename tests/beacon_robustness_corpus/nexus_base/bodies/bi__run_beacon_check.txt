@@ -1,0 +1,57 @@
+def run_beacon_check(
+    files: Sequence[Mapping[str, Any]],
+    *,
+    repo_root: str | None = None,
+    missing: Sequence[Mapping[str, Any]] = (),
+    skipped: int = 0,
+    min_severity: str = "warning",
+    max_rows: int = 300,
+) -> dict:
+    """Check every file entry and return ``{"summary_line", "counts",
+    "rows", "rows_truncated", "min_severity"}``. A ``min_severity`` outside
+    ``SEVERITY_ORDER`` or ``max_rows < 1`` raises ``ValueError``."""
+    if min_severity not in SEVERITY_ORDER:
+        raise ValueError(f"min_severity must be one of {SEVERITY_ORDER}, not {min_severity!r}")
+    if isinstance(max_rows, bool) or not isinstance(max_rows, int) or max_rows < 1:
+        raise ValueError(f"max_rows must be an integer >= 1, not {max_rows!r}")
+
+    all_rows: list[dict] = []
+    for m in missing:
+        where = m.get("abs_path") or m.get("display_path")
+        all_rows.append(_row(str(m.get("display_path") or m.get("abs_path") or ""), 0, "file_missing", None,
+                             f"The map lists this file but nothing usable is on disk at {where} ({m.get('reason')}); refresh the map or restore the file.",
+                             {"node_id": m.get("node_id"), "reason": m.get("reason")}))
+    for f in files:
+        all_rows.extend(check_beacon_file(f["abs_path"], display_path=f.get("display_path"), repo_root=repo_root))
+    all_rows.sort(key=_sort_key)
+
+    by_severity = {s: 0 for s in SEVERITY_ORDER}
+    by_code: dict[str, int] = {}
+    for row in all_rows:
+        by_severity[row["severity"]] += 1
+        by_code[row["code"]] = by_code.get(row["code"], 0) + 1
+    counts = {
+        "files_checked": len(files),
+        "files_skipped": int(skipped),
+        "files_missing": len(missing),
+        "files_unreadable": by_code.get("file_unreadable", 0),
+        "files_with_problems": len({r["file"] for r in all_rows if r["severity"] != "info"}),
+        "by_severity": by_severity,
+        "by_code": dict(sorted(by_code.items())),
+    }
+
+    shown = SEVERITY_ORDER[: SEVERITY_ORDER.index(min_severity) + 1]
+    kept: list[dict] = []
+    eligible = 0
+    for severity in shown:
+        same = [r for r in all_rows if r["severity"] == severity]
+        eligible += len(same)
+        kept.extend(same[: max(0, max_rows - len(kept))])
+    kept.sort(key=_sort_key)
+    return {
+        "summary_line": beacon_check_summary_line(all_rows, len(files)),
+        "counts": counts,
+        "rows": kept,
+        "rows_truncated": eligible - len(kept),
+        "min_severity": min_severity,
+    }

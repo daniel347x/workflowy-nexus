@@ -1,0 +1,5 @@
+    def _find_triple_span_for_line(line_no: int) -> Optional[tuple[int, int]]:
+        for s, e in triple_spans:
+            if s <= line_no <= e:
+                return (s, e)
+        return None

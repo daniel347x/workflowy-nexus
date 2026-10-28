@@ -1,0 +1,22 @@
+def parse_js_ts_outline_core(file_path: str) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Ungrouped core of parse_js_ts_outline (R1): the extension-to-language
+    mapping, the tree-sitter parse via ``JsTsOutlineContext``, the outline
+    walk and JS/TS beacon attachment, moved verbatim out of the wrapper's
+    try block. Returns ``(outline_nodes, ctx.lines)``; assumes tree-sitter
+    is importable; no virtual grouping and no parse-error handling.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    language_name = "javascript"
+    if ext == ".ts":
+        language_name = "typescript"
+    elif ext == ".tsx":
+        language_name = "tsx"
+    ctx = JsTsOutlineContext.from_file(file_path, language_name)
+
+    outline_nodes = _js_walk(ctx.root, ctx)
+
+    # Phase 2: JS/TS beacon parsing + attachment (unchanged from
+    # pre-Phase-D; uses the same ctx.lines list that the walker did).
+    js_beacons = parse_js_beacon_blocks(ctx.lines)
+    apply_js_beacons(file_path, ctx.lines, outline_nodes, js_beacons)
+    return outline_nodes, ctx.lines

@@ -1,0 +1,506 @@
+"""Defect 2 -- the WS reader loop no longer blocks on the F12 refresh handlers.
+
+UnitSpec §6.4 / §7 / §9.2.  ``websocket_handler``'s ``refresh_file_node`` and
+``refresh_folder_node`` clauses used to ``await`` their handler INLINE; the
+handler awaits nodes-export cache quiescence (a whole /nodes-export download),
+so every other tab<->daemon frame sat unread for the download's duration.
+Post-fix the two clauses spawn ONE module-level helper,
+``_spawn_ws_result_handler``, through ``create_isolated_context_task`` and
+``continue`` reading.
+
+Covered
+-------
+* **F1 non-blocking (CHANGE-DETECTING, red pre-fix):** a refresh frame followed
+  by an unrelated ``ping``; the stubbed handler waits on an ``asyncio.Event``
+  that is set ONLY when the ``pong`` is observed.  Pre-fix the pump is stuck in
+  the inline await and the run times out; post-fix the pong lands first.  Both
+  refresh actions.
+* **F2 failure frame (preservation of the inline clause's semantics):** a
+  raising handler still yields ``{action: *_result, success: false, node_id,
+  error}`` -- through the pump AND directly on the helper.  The best-effort
+  send swallows a closed socket.
+* **Boundary (postcondition 6.4c):** the spawned handler still enters
+  ``cache_operation_boundary`` -- in the spawned task, not the pump -- and the
+  real handlers still carry ``@_ws_cache_boundary``.
+* **Dispatch clause (CHANGE-DETECTING, red pre-fix):** mirrors
+  ``test_websocket_handler_task_dispatches_anchor_dock_update`` but inspects
+  the spawned HELPER coroutine's frame (``co_name == '_spawn_ws_result_handler'``,
+  ``f_locals['handler'] is <stub>``, ``f_locals['data']['action']``); plus the
+  §6.4(a) source postconditions on ``websocket_handler``.
+* **F5 correlation (preservation):** an inbound ``*_result`` reply is routed
+  by ``_WsRequestIdDemux`` to its waiter while a refresh task is outstanding.
+
+Not covered by a test, dispositioned by argument in the RESULT (§7): F3
+(cancel / connection closes mid-task) and F4 (two concurrent refresh frames).
+
+Model: local, no network, no real Workflowy; the REAL
+``create_isolated_context_task`` spawns the REAL helper around a stub handler.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import inspect
+import json
+import os
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from workflowy_mcp import server as srv  # noqa: E402
+
+
+REFRESH_ACTIONS = ("refresh_file_node", "refresh_folder_node")
+HANDLER_NAMES = {
+    "refresh_file_node": "_handle_refresh_file_node",
+    "refresh_folder_node": "_handle_refresh_folder_node",
+}
+PUMP_TIMEOUT_S = 2.0
+
+
+class _QueueWebSocket:
+    """A fake WS whose inbound frames the TEST feeds one at a time.
+
+    ``__anext__`` blocks on an asyncio.Queue until the test ``feed``s a frame
+    (or ``close``s the socket -> StopAsyncIteration), so the test controls the
+    interleaving; every ``send`` is recorded (decoded) and a ``pong`` sets
+    ``pong_seen``.
+    """
+
+    def __init__(self, frames=()):
+        self._inbox: asyncio.Queue = asyncio.Queue()
+        self.remote_address = ("127.0.0.1", 0)
+        self.sent: list[dict] = []
+        self.pong_seen = asyncio.Event()
+        self.result_seen = asyncio.Event()
+        self.closed = False
+        for frame in frames:
+            self._inbox.put_nowait(json.dumps(frame))
+
+    def feed(self, frame: dict) -> None:
+        self._inbox.put_nowait(json.dumps(frame))
+
+    def close(self) -> None:
+        self._inbox.put_nowait(None)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        item = await self._inbox.get()
+        if item is None:
+            self.closed = True
+            raise StopAsyncIteration
+        return item
+
+    async def send(self, payload):
+        frame = json.loads(payload)
+        self.sent.append(frame)
+        if frame.get("action") == "pong":
+            self.pong_seen.set()
+        if str(frame.get("action", "")).endswith("_result"):
+            self.result_seen.set()
+
+
+def _install_client_stub(monkeypatch):
+    # _ws_cache_boundary's wrapper calls get_client(); nothing here needs one.
+    monkeypatch.setattr(srv, "get_client", lambda: SimpleNamespace())
+
+
+async def _run_pump_and_wait(ws, *, until: asyncio.Event | None = None):
+    """Drive websocket_handler to completion; optionally wait for one more event
+    (the spawned task's completion) afterwards.  Bounded so a stuck pump is a
+    test failure, never a hung suite."""
+    await asyncio.wait_for(srv.websocket_handler(ws), timeout=PUMP_TIMEOUT_S)
+    if until is not None:
+        await asyncio.wait_for(until.wait(), timeout=PUMP_TIMEOUT_S)
+
+
+# ---------------------------------------------------------------------------
+# F1 -- non-blocking: the pump services an unrelated frame while a refresh runs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", REFRESH_ACTIONS)
+def test_pump_services_unrelated_frame_while_refresh_handler_is_pending(monkeypatch, action):
+    """CHANGE-DETECTING LOCK (F1). Pre-fix: the inline await never returns
+    because the handler waits for a pong the pump can only send after the
+    await -> asyncio.TimeoutError. Post-fix: pong first, then the handler."""
+    _install_client_stub(monkeypatch)
+    release = asyncio.Event()
+    handler_done = asyncio.Event()
+    order: list[str] = []
+
+    async def _slow_handler(data, websocket):
+        order.append("handler-start")
+        await release.wait()  # set ONLY once the pong has been observed
+        order.append("handler-end")
+        await websocket.send(
+            json.dumps({"action": f"{action}_result", "success": True, "node_id": data["node_id"]})
+        )
+        handler_done.set()
+
+    monkeypatch.setattr(srv, HANDLER_NAMES[action], _slow_handler)
+
+    # Start the pump: it reads the refresh frame, spawns, reads the ping, sends
+    # pong (-> release), reaches end-of-frames; the spawned task then finishes.
+    async def exercise():
+        ws = _QueueWebSocket([{"action": action, "node_id": "N-slow"}, {"action": "ping"}])
+        ws.close()
+
+        async def _release_on_pong():
+            await ws.pong_seen.wait()
+            order.append("pong")
+            release.set()
+
+        releaser = asyncio.ensure_future(_release_on_pong())
+        try:
+            await _run_pump_and_wait(ws, until=handler_done)
+        finally:
+            releaser.cancel()
+        return ws
+
+    ws = asyncio.run(exercise())
+    # The pump may answer the ping before the spawned task even gets its first
+    # tick (the strongest form of "not blocked"), so only the load-bearing
+    # order is asserted: the pong precedes the handler's completion.
+    assert set(order) == {"handler-start", "pong", "handler-end"}
+    assert order.index("pong") < order.index("handler-end")
+    actions = [f.get("action") for f in ws.sent]
+    assert actions.index("pong") < actions.index(f"{action}_result")
+    assert ws.sent[-1] == {"action": f"{action}_result", "success": True, "node_id": "N-slow"}
+
+
+# ---------------------------------------------------------------------------
+# F2 -- failure frame semantics survive the spawn
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", REFRESH_ACTIONS)
+def test_raising_spawned_handler_still_sends_failure_frame_through_pump(monkeypatch, action):
+    _install_client_stub(monkeypatch)
+    logged: list[tuple[str, str]] = []
+    monkeypatch.setattr(srv, "log_event", lambda msg, comp="": logged.append((msg, comp)))
+
+    async def _boom(data, websocket):
+        raise RuntimeError("boom-" + action)
+
+    monkeypatch.setattr(srv, HANDLER_NAMES[action], _boom)
+
+    async def exercise():
+        ws = _QueueWebSocket([{"action": action, "node_id": "N-fail"}])
+        ws.close()
+        await _run_pump_and_wait(ws, until=ws.result_seen)
+        return ws
+
+    ws = asyncio.run(exercise())
+    failure = [f for f in ws.sent if f.get("action") == f"{action}_result"]
+    assert failure == [
+        {
+            "action": f"{action}_result",
+            "success": False,
+            "node_id": "N-fail",
+            "error": "boom-" + action,
+        }
+    ]
+    # the SAME log_event error line the inline clause emitted
+    assert (f"{action} handler error: boom-{action}", "WS_HANDLER") in logged
+
+
+def test_spawn_helper_sends_failure_frame_and_swallows_closed_socket():
+    """Direct contract of the ONE helper: failure frame with node_id from
+    `node_id_key`; a socket that refuses the send never raises out."""
+
+    class _Closed:
+        def __init__(self):
+            self.attempts = 0
+
+        async def send(self, payload):
+            self.attempts += 1
+            raise ConnectionError("closed")
+
+    class _Open:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, payload):
+            self.sent.append(json.loads(payload))
+
+    async def _boom(data, websocket):
+        raise ValueError("nope")
+
+    async def _fine(data, websocket):
+        await websocket.send(json.dumps({"action": "refresh_file_node_result", "success": True}))
+
+    async def exercise():
+        closed = _Closed()
+        await srv._spawn_ws_result_handler(
+            _boom, {"node_id": "X"}, closed, result_action="refresh_file_node_result"
+        )
+        open_ws = _Open()
+        await srv._spawn_ws_result_handler(
+            _boom,
+            {"target_uuid": "Y"},
+            open_ws,
+            result_action="refresh_folder_node_result",
+            node_id_key="target_uuid",
+        )
+        ok_ws = _Open()
+        await srv._spawn_ws_result_handler(
+            _fine, {"node_id": "Z"}, ok_ws, result_action="refresh_file_node_result"
+        )
+        return closed, open_ws, ok_ws
+
+    closed, open_ws, ok_ws = asyncio.run(exercise())
+    assert closed.attempts == 1  # tried once, swallowed
+    assert open_ws.sent == [
+        {
+            "action": "refresh_folder_node_result",
+            "success": False,
+            "node_id": "Y",
+            "error": "nope",
+        }
+    ]
+    assert ok_ws.sent == [{"action": "refresh_file_node_result", "success": True}]
+
+
+def test_pump_survives_a_raising_spawned_handler_and_keeps_reading(monkeypatch):
+    """F2 corollary: the pump does not die -- it still answers a later ping."""
+    _install_client_stub(monkeypatch)
+
+    async def _boom(data, websocket):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(srv, "_handle_refresh_folder_node", _boom)
+
+    async def exercise():
+        ws = _QueueWebSocket([{"action": "refresh_folder_node", "node_id": "N"}, {"action": "ping"}])
+        ws.close()
+        await _run_pump_and_wait(ws, until=ws.result_seen)
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert {"action": "pong"} in ws.sent
+    assert any(f.get("action") == "refresh_folder_node_result" and f["success"] is False for f in ws.sent)
+
+
+# ---------------------------------------------------------------------------
+# Postcondition 6.4(c) -- the boundary is still established, inside the task
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", REFRESH_ACTIONS)
+def test_spawned_handler_enters_cache_operation_boundary_in_its_own_task(monkeypatch, action):
+    import workflowy_mcp.coherence.operation_cache as opc
+
+    _install_client_stub(monkeypatch)
+    entered: list[tuple[str, asyncio.Task | None]] = []
+
+    @contextlib.asynccontextmanager
+    async def _recording_boundary(client, label):
+        entered.append((label, asyncio.current_task()))
+        yield
+
+    # _ws_cache_boundary's wrapper imports cache_operation_boundary from the
+    # module at call time, so patching the module attribute is observed.
+    monkeypatch.setattr(opc, "cache_operation_boundary", _recording_boundary)
+
+    done = asyncio.Event()
+
+    @srv._ws_cache_boundary(f"ws:{action}")
+    async def _decorated_stub(data, websocket):
+        done.set()
+
+    monkeypatch.setattr(srv, HANDLER_NAMES[action], _decorated_stub)
+
+    async def exercise():
+        pump_task = asyncio.current_task()
+        ws = _QueueWebSocket([{"action": action, "node_id": "N"}])
+        ws.close()
+        await _run_pump_and_wait(ws, until=done)
+        return pump_task
+
+    pump_task = asyncio.run(exercise())
+    assert [label for label, _ in entered] == [f"ws:{action}"]
+    (_, boundary_task), = entered
+    assert boundary_task is not None
+    assert boundary_task is not pump_task  # established INSIDE the spawned task
+
+
+@pytest.mark.parametrize("action", REFRESH_ACTIONS)
+def test_real_refresh_handlers_still_carry_the_ws_cache_boundary_decorator(action):
+    handler = getattr(srv, HANDLER_NAMES[action])
+    assert hasattr(handler, "__wrapped__")  # functools.wraps from _ws_cache_boundary
+    source = inspect.getsource(handler)  # follows __wrapped__ to the decorated def
+    assert f'@_ws_cache_boundary("ws:{action}")' in source
+
+
+# ---------------------------------------------------------------------------
+# Dispatch clause -- the loop spawns the helper; the inline await is gone
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", REFRESH_ACTIONS)
+def test_websocket_handler_task_dispatches_refresh_through_spawn_helper(monkeypatch, action):
+    """CHANGE-DETECTING LOCK (red pre-fix: no spawn happens for these frames).
+    Mirrors the anchor_dock_update dispatch test, adapted to a helper: the
+    spawned coroutine IS `_spawn_ws_result_handler`, carrying the
+    (monkeypatched) handler, the frame, and the right result_action."""
+    import workflowy_mcp.coherence.operation_cache as opc
+
+    sentinel: dict = {}
+
+    async def _sentinel_handler(data, websocket):
+        sentinel["action"] = data.get("action")
+
+    monkeypatch.setattr(srv, HANDLER_NAMES[action], _sentinel_handler)
+
+    captured: list[dict] = []
+
+    def _fake_spawn(coro):
+        frame_locals = dict(coro.cr_frame.f_locals)
+        captured.append(
+            {
+                "co_name": coro.cr_code.co_name,
+                "handler": frame_locals.get("handler"),
+                "data": frame_locals.get("data"),
+                "result_action": frame_locals.get("result_action"),
+                "node_id_key": frame_locals.get("node_id_key"),
+            }
+        )
+        coro.close()
+        return None
+
+    monkeypatch.setattr(opc, "create_isolated_context_task", _fake_spawn)
+
+    async def exercise():
+        ws = _QueueWebSocket([{"action": action, "node_id": "N-dispatch"}])
+        ws.close()
+        await _run_pump_and_wait(ws)
+        return ws
+
+    ws = asyncio.run(exercise())
+    assert len(captured) == 1
+    spawned = captured[0]
+    assert spawned["co_name"] == "_spawn_ws_result_handler"
+    assert spawned["handler"] is _sentinel_handler
+    assert spawned["data"]["action"] == action
+    assert spawned["data"]["node_id"] == "N-dispatch"
+    assert spawned["result_action"] == f"{action}_result"
+    assert spawned["node_id_key"] == "node_id"
+    assert sentinel == {}  # the stub spawner never awaited the handler
+    assert ws.sent == []  # nothing sent inline either
+
+
+def test_websocket_handler_source_has_no_inline_refresh_await():
+    """§6.4(a) / DoD 8, mechanically: inside websocket_handler the two handler
+    identifiers occur exactly once each, as the first argument of
+    `_spawn_ws_result_handler(...)` which is the sole argument of
+    `create_isolated_context_task(...)`; `await _handle_refresh_` is absent."""
+    import ast
+
+    source = inspect.getsource(srv.websocket_handler)
+    assert "await _handle_refresh_" not in source
+    assert source.count("_handle_refresh_file_node") == 1
+    assert source.count("_handle_refresh_folder_node") == 1
+
+    tree = ast.parse(inspect.cleandoc(source) if not source.startswith("async def") else source)
+    spawn_calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name == "create_isolated_context_task":
+            spawn_calls.append(node)
+    helper_spawns = {}
+    for call in spawn_calls:
+        assert len(call.args) == 1 and not call.keywords
+        inner = call.args[0]
+        if isinstance(inner, ast.Call) and getattr(inner.func, "id", "") == "_spawn_ws_result_handler":
+            handler_arg = inner.args[0]
+            assert isinstance(handler_arg, ast.Name)
+            result_action = [kw.value.value for kw in inner.keywords if kw.arg == "result_action"]
+            helper_spawns[handler_arg.id] = result_action[0]
+    # U4 (WS reader loop) extended the helper family with the four long
+    # handlers whose inline failure frame was the SAME generic shape; the
+    # map lock stays complete (every _spawn_ws_result_handler spawn inside
+    # websocket_handler, named with its result_action).
+    assert helper_spawns == {
+        "_handle_refresh_file_node": "refresh_file_node_result",
+        "_handle_refresh_folder_node": "refresh_folder_node_result",
+        "_handle_open_node_in_windsurf": "open_node_in_windsurf_result",
+        "_handle_materialize_markdown_file": "materialize_markdown_file_result",
+        "_handle_bulk_materialize_markdown": "bulk_materialize_markdown_result",
+        "_handle_bulk_generate_markdown": "bulk_generate_markdown_result",
+    }
+
+
+def test_spawn_helper_is_module_level_with_the_spec_signature():
+    helper = srv._spawn_ws_result_handler
+    assert inspect.iscoroutinefunction(helper)
+    assert helper.__module__ == srv.__name__
+    assert "_spawn_ws_result_handler" in dir(srv)
+    params = inspect.signature(helper).parameters
+    assert list(params) == ["handler", "data", "websocket", "result_action", "node_id_key"]
+    assert params["result_action"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["node_id_key"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params["node_id_key"].default == "node_id"
+    # No inner coroutine inside websocket_handler does this job.
+    assert "async def " not in inspect.getsource(srv.websocket_handler).split("\n", 1)[1]
+
+
+# ---------------------------------------------------------------------------
+# F5 -- correlated replies still route while a refresh task is outstanding
+# ---------------------------------------------------------------------------
+
+
+def test_correlated_reply_is_routed_by_demux_while_refresh_task_is_outstanding(monkeypatch):
+    _install_client_stub(monkeypatch)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    done = asyncio.Event()
+
+    async def _slow_handler(data, websocket):
+        started.set()
+        await release.wait()
+        done.set()
+
+    monkeypatch.setattr(srv, "_handle_refresh_folder_node", _slow_handler)
+
+    async def exercise():
+        ws = _QueueWebSocket()
+        pump = asyncio.ensure_future(srv.websocket_handler(ws))
+        try:
+            ws.feed({"action": "refresh_folder_node", "node_id": "N-out"})
+            await asyncio.wait_for(started.wait(), timeout=PUMP_TIMEOUT_S)
+            demux = srv._ws_message_queue
+            assert isinstance(demux, srv._WsRequestIdDemux)
+            demux.register_correlated_waiter("r-77")
+            waiter = asyncio.ensure_future(demux.wait_for_correlated("r-77", PUMP_TIMEOUT_S))
+            reply = {"action": "broker_status_result", "request_id": "r-77", "ok": True}
+            ws.feed(reply)
+            routed = await asyncio.wait_for(waiter, timeout=PUMP_TIMEOUT_S)
+            assert not done.is_set()  # the refresh task is STILL outstanding
+            # a non-correlated frame still falls through to the legacy FIFO
+            ws.feed({"action": "some_legacy_frame", "x": 1})
+            legacy = await asyncio.wait_for(demux.get(), timeout=PUMP_TIMEOUT_S)
+            return routed, legacy
+        finally:
+            release.set()
+            ws.close()
+            await asyncio.wait_for(pump, timeout=PUMP_TIMEOUT_S)
+            await asyncio.wait_for(done.wait(), timeout=PUMP_TIMEOUT_S)
+
+    routed, legacy = asyncio.run(exercise())
+    assert routed == {"action": "broker_status_result", "request_id": "r-77", "ok": True}
+    assert legacy == {"action": "some_legacy_frame", "x": 1}

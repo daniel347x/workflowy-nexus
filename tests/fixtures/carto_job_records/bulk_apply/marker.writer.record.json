@@ -1,0 +1,133 @@
+{
+  "record_layout": "summary-head/2",
+  "id": "carto-bulk-apply-all-b8c4e08d",
+  "type": "CARTO_BULK_APPLY",
+  "mode": "file",
+  "root_uuid": "96a41b7c-2e3d-5777-b49f-ac1170d4fbbd",
+  "status": "completed_with_warnings",
+  "outcome": "completed_with_errors",
+  "has_errors": true,
+  "has_warnings": true,
+  "has_findings": true,
+  "error": null,
+  "created_at": "2026-10-27T17:07:23.625737",
+  "updated_at": "2026-10-27T17:07:23.735636",
+  "progress": {
+    "total_files": 1,
+    "completed_files": 1,
+    "current_file": null,
+    "current_phase": "done",
+    "nodes_created": 1,
+    "nodes_updated": 2,
+    "nodes_moved": 0,
+    "nodes_deleted": 1
+  },
+  "warning_count": 1,
+  "warnings": [
+    {
+      "type": "optional_hygiene_failed",
+      "pass": "aliases",
+      "file": "/tmp/pytest-of-daniel347x/pytest-3330/popen-gw1/test_r4_r7_joined_bulk_keeps_r0/repo/source.py",
+      "message": "refresh_file_node_beacons: comment-field alias normalization failed for /tmp/pytest-of-daniel347x/pytest-3330/popen-gw1/test_r4_r7_joined_bulk_keeps_r0/repo/source.py: ValueError: j3 optional alias diagnostic",
+      "error": "ValueError: j3 optional alias diagnostic"
+    }
+  ],
+  "root_kind": "file",
+  "detached": false,
+  "execution_model": "daemon_task",
+  "execution_owner": "launcher",
+  "cache_refresh_required": true,
+  "freshness_disposition": "performed",
+  "snapshot_path": "/tmp/pytest-of-daniel347x/pytest-3330/popen-gw1/test_r4_r7_joined_bulk_keeps_r0/snapshots/20261027-130723-610543_pid2398522_nodes_export_snapshot.json",
+  "logs_path": "/tmp/pytest-of-daniel347x/pytest-3330/popen-gw1/test_r4_r7_joined_bulk_keeps_r0/jobs/20261027-170723_carto-bulk-apply-all-b8c4e08d.log",
+  "claim_id": "f31c8edd3c8448bda9c3cbe29e9da5b7",
+  "dedupe_key": "9da8ce4a66cfecb3109a1ba9f6560370132d14710237f9d2aeb0d86bdd37a5ea",
+  "account_scope_id": "40976e08f3bf596e573c1a1994718f5f",
+  "footprint": {
+    "kind": "file",
+    "path": "/tmp/pytest-of-daniel347x/pytest-3330/popen-gw1/test_r4_r7_joined_bulk_keeps_r0/repo/source.py",
+    "root_uuid": "96a41b7c-2e3d-5777-b49f-ac1170d4fbbd",
+    "ancestor_chain": [
+      "96a41b7c-2e3d-5777-b49f-ac1170d4fbbd",
+      "3ed4cb0d-3b16-5f8a-8013-c6fb25a2343d",
+      "7c0e4983-ffb5-53cb-81b6-430b3af18049"
+    ]
+  },
+  "launcher": "gui",
+  "parent_job_id": null,
+  "handoff_state": "preparing",
+  "pid": 2398522,
+  "evidence": {
+    "files": {
+      "path": "files.jsonl",
+      "rows": 1,
+      "lines": 5,
+      "bytes": 21928,
+      "pending": 0
+    },
+    "nodes": {
+      "path": "nodes.jsonl",
+      "rows": 4,
+      "bytes": 8088
+    }
+  },
+  "in_flight": null,
+  "result_summary": {
+    "files_refreshed": 1,
+    "files_skipped": 0,
+    "node_updates": 2,
+    "nodes_skipped": 2,
+    "workflowy_nodes_updated": 2,
+    "nodes_satisfied": 1,
+    "nodes_skipped_in_sync": 0,
+    "warnings_total": 1,
+    "warnings_by_type": {
+      "optional_hygiene_failed": 1
+    },
+    "warnings_truncated": 0,
+    "changed": true,
+    "findings_total": 1,
+    "findings_by_code": {
+      "empty_comment": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "0 successful \u00b7 1 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 2 events",
+    "status": "completed_with_warnings",
+    "successful": 0,
+    "failed": 1,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "errors_total": 3,
+    "node_errors_total": 2,
+    "phase8_failed": false,
+    "files_changed_total": 1,
+    "events_total": 2,
+    "findings_by_severity": {
+      "info": 1
+    },
+    "findings_preview": [
+      {
+        "code": "empty_comment",
+        "severity": "info",
+        "message": "This block has no comment; labels still work, and a description can be supplied explicitly.",
+        "file": "/tmp/pytest-of-daniel347x/pytest-3330/popen-gw1/test_r4_r7_joined_bulk_keeps_r0/repo/source.py",
+        "line": 1,
+        "finding_id": "bf1:43897877c21982295e0d8de23fab4177d366f24813a0e370a0e1576338fdc2a0"
+      }
+    ],
+    "files_changed": [
+      "/tmp/pytest-of-daniel347x/pytest-3330/popen-gw1/test_r4_r7_joined_bulk_keeps_r0/repo/source.py"
+    ],
+    "errors": [
+      "Node update failed for d77fb97a-dfa3-5634-be76-8816ae9f2fb6 ('missing #j3'): The carried source anchor does not resolve on disk; no id-only retarget is authorized.",
+      "Node update failed for d77fb97a-dfa3-5634-be76-8816ae9f2fb6 ('existing #rejected'): source_changed_since_plan: final source fingerprint differs; zero bytes written"
+    ],
+    "preview_totals": {
+      "findings_preview": 1,
+      "files_changed": 1,
+      "errors": 2
+    }
+  }
+}

@@ -1,0 +1,11 @@
+def _markdown_source_lines(text: str | None) -> list[str]:
+    """Split Markdown source into LF-oriented lines matching markdown-it maps.
+
+    Do NOT use ``str.splitlines()`` here: it treats vertical tab, form feed,
+    and other Unicode line separators as line breaks. Markdown source maps are
+    based on newline structure. A mismatch here corrupts body-range extraction.
+    """
+    if not isinstance(text, str):
+        return []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized.split("\n")

@@ -1,0 +1,166 @@
+{
+  "markdown": "# 🌱 Pantry · example workspace\n\nA made-up team building **Pantry**, a shared grocery-list app. Example data for the NEXUS README: three Anchor Docks in three branches, and slice groups that cut across them.\n\n## 📱 Product\n\n### 🚀 Pantry 2.0 release #wfy-ns\n\nThe 2.0 release: what's in it and the checklist to ship. One node per feature; design notes go in the note.\n\n#### [ap:Q9Z518] Offline lists: sync design #offline\n\n**Goal:** a list keeps working with no signal, and nothing typed in the aisle is lost.\n\n- Every edit is saved on the phone first, then queued.\n- The queue syncs the moment the phone is back online.\n- Two people changed the same item? The last edit wins; a delete wins over an edit.\n\n| Case | Result |\n|---|---|\n| Edited offline, then synced | Applied in order |\n| Same item edited on two phones | Last edit wins |\n| Deleted on one phone, edited on the other | Deleted |\n\nAgreed in the design review [ap:LP6AKR].\n\n#### ✅ Release checklist\n\n##### Offline QA in a basement supermarket #offline\n\nAirplane mode is not enough: test where the signal really drops.\n\n## 🤝 Customers\n\n### 💬 Customer feedback #wfy-ns\n\nWhat customers tell us: support tickets, store reviews and interviews, one node per theme. Agents summarize new tickets here.\n\n#### \"My list disappears in the store\": 14 tickets this month #offline\n\n> \"No signal in the basement aisle, and my list was blank.\"\n> \"Lost three items I added in the parking garage.\"\n\nPattern: underground stores, rural shops, parking garages. All on version 1.9.",
+  "rows": [
+    {
+      "uuid": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+      "depth": 0,
+      "name": "🌱 Pantry · example workspace",
+      "ancestor_path": [],
+      "occurrence": 0,
+      "created": 1793135136,
+      "modified": 1793135136
+    },
+    {
+      "uuid": "51a4b5ad-42d0-4768-8e4e-261971b17c98",
+      "depth": 1,
+      "name": "📱 Product",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8"
+      ],
+      "occurrence": 0,
+      "created": 1793135137,
+      "modified": 1793135137
+    },
+    {
+      "uuid": "484faa8a-3a7f-4969-acd8-961fa198c256",
+      "depth": 2,
+      "name": "🚀 Pantry 2.0 release #wfy-ns",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+        "51a4b5ad-42d0-4768-8e4e-261971b17c98"
+      ],
+      "occurrence": 0,
+      "created": 1793135143,
+      "modified": 1793135222
+    },
+    {
+      "uuid": "983b7baa-223b-40f1-8110-1bd3d1ce1f17",
+      "depth": 3,
+      "name": "[ap:Q9Z518] Offline lists: sync design #offline",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+        "51a4b5ad-42d0-4768-8e4e-261971b17c98",
+        "484faa8a-3a7f-4969-acd8-961fa198c256"
+      ],
+      "occurrence": 0,
+      "created": 1793135144,
+      "modified": 1793135264
+    },
+    {
+      "uuid": "501d06a3-f67f-4d2a-8806-890e754139be",
+      "depth": 3,
+      "name": "✅ Release checklist",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+        "51a4b5ad-42d0-4768-8e4e-261971b17c98",
+        "484faa8a-3a7f-4969-acd8-961fa198c256"
+      ],
+      "occurrence": 0,
+      "created": 1793135151,
+      "modified": 1793135151
+    },
+    {
+      "uuid": "53f88a6d-8cb3-4af2-8234-d13d6d30d064",
+      "depth": 4,
+      "name": "Offline QA in a basement supermarket #offline",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+        "51a4b5ad-42d0-4768-8e4e-261971b17c98",
+        "484faa8a-3a7f-4969-acd8-961fa198c256",
+        "501d06a3-f67f-4d2a-8806-890e754139be"
+      ],
+      "occurrence": 0,
+      "created": 1793135153,
+      "modified": 1793135241
+    },
+    {
+      "uuid": "0b68f3a8-cbf5-4218-891c-0ec02a7400c2",
+      "depth": 1,
+      "name": "🤝 Customers",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8"
+      ],
+      "occurrence": 0,
+      "created": 1793135157,
+      "modified": 1793135157
+    },
+    {
+      "uuid": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "depth": 2,
+      "name": "💬 Customer feedback #wfy-ns",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+        "0b68f3a8-cbf5-4218-891c-0ec02a7400c2"
+      ],
+      "occurrence": 0,
+      "created": 1793135162,
+      "modified": 1793135223
+    },
+    {
+      "uuid": "240683c8-3cc3-4444-8c88-3f068d886734",
+      "depth": 3,
+      "name": "\"My list disappears in the store\": 14 tickets this month #offline",
+      "ancestor_path": [
+        "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+        "0b68f3a8-cbf5-4218-891c-0ec02a7400c2",
+        "786aeb66-594c-4551-abe5-2f9056db7f8c"
+      ],
+      "occurrence": 0,
+      "created": 1793135163,
+      "modified": 1793135245
+    }
+  ],
+  "render_spec": {
+    "kind": "lightning_rod",
+    "group_id": null,
+    "group_name": null,
+    "root_uuid": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+    "lightning": {
+      "mode": "render_search",
+      "query": "basement OR signal",
+      "query_mode": "smart",
+      "match_scope": "name_and_note"
+    },
+    "focus": null,
+    "match_scope": "name_and_note",
+    "descend_policy": "all",
+    "recursive": true,
+    "sort_by": "none",
+    "sort_direction": "asc",
+    "since": null,
+    "recent_by": null,
+    "headings_only": false,
+    "ancestor_notes": false,
+    "full_uuids": false,
+    "as_markdown": true,
+    "content_format": "markdown",
+    "tree_mode": "render_tree"
+  },
+  "render_scope": {
+    "kind": "lightning_rod",
+    "group_id": null,
+    "group_name": null,
+    "root_uuid": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+    "sort_by": "none",
+    "sort_direction": "asc",
+    "since": null,
+    "recent_by": null,
+    "headings_only": false,
+    "content_format": "markdown",
+    "tree_mode": "render_tree",
+    "match_scope": "name_and_note",
+    "descend_policy": "all",
+    "recursive": true,
+    "focus": null,
+    "live_gui_sync_supported": false,
+    "live_gui_sync_skipped_reason": "lightning",
+    "selection": {
+      "mode": "render_search",
+      "query": "basement OR signal",
+      "query_mode": "smart",
+      "match_scope": "name_and_note"
+    },
+    "selection_kind": "search",
+    "workflowy_search_equivalent": false
+  }
+}

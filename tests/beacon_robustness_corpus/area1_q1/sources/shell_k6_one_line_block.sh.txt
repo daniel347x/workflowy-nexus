@@ -1,0 +1,54 @@
+# @beacon[
+#   id=b1@0,
+#   slice_labels=lab-b1,
+#   kind=ast,
+#   comment=Comment of b1@0.,
+# ]
+f1() {
+  echo hi
+}
+
+# @beacon[ id=x6@0, slice_labels=one, kind=ast, ]
+x6() {
+  echo hi
+}
+
+# @beacon[
+#   id=b2@0,
+#   slice_labels=lab-b2,
+#   kind=ast,
+#   comment=Comment of b2@0.,
+# ]
+f2() {
+  echo hi
+}
+
+# @beacon[
+#   id=s1@0,
+#   slice_labels=lab-s1,
+#   kind=span,
+#   comment=Comment of s1@0.,
+# ]
+# @beacon[
+#   id=b3@0,
+#   slice_labels=lab-b3,
+#   kind=ast,
+#   comment=Comment of b3@0.,
+# ]
+f3() {
+  echo hi
+}
+
+# @beacon-close[
+#   id=s1@0,
+# ]
+# @beacon[
+#   id=b4@0,
+#   slice_labels=lab-b4,
+#   kind=ast,
+#   comment=Comment of b4@0.,
+# ]
+f4() {
+  echo hi
+}
+

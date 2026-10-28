@@ -1,0 +1,445 @@
+"""S04 Remediation Chain 6 — the journal-sealer coherence-lock failure class.
+
+A verified mutation must never escape sealing with the global hard barrier
+still clean merely because the coherence mutex could not be acquired.  Two
+acquisition points are locked here:
+
+- the INITIAL append's coherence-lock acquisition (the sealer catches the
+  CoherenceLockError, durably raises the barrier with
+  ``journal_publication_failed``, and re-raises the original lock failure —
+  or raises DirtyBarrierPublicationError on a persistent double fault, with
+  no fabricated lineage context: sequence allocation was never reached, so
+  the attempted journal sequence is None);
+- the RECOVERY's coherence-lock acquisition after an existing
+  JournalPublicationError (the original publication failure stays the
+  primary failed seal; the recovery lock failure rides as diagnostic
+  context; the same barrier/double-fault discipline applies, with the
+  append-stamped lineage context preserved where it is known).
+
+Invariant 6 is untouched: typed existing-lineage errors still propagate
+unbarriered, and the catch is never broadened beyond CoherenceLockError.
+"""
+
+from __future__ import annotations
+
+import threading
+from contextlib import contextmanager
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    InjectedFault,
+    launch_subprocess,
+    make_coherence_root,
+    s04_append,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp.coherence import (
+    CoherenceLockError,
+    DirtyBarrierPublicationError,
+    DurableFileOps,
+    JournalPublicationError,
+    journal_record_filename,
+    journal_store,
+    read_manifest,
+)
+from workflowy_mcp.coherence import barrier as barrier_module
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+class _ManifestReplaceFails:
+    """Fail the FIRST N manifest replace operations, then let them through.
+
+    Mirrors the journal-sealing suite's fixture: inside one seal the
+    manifest-replace sequence is (1) append head advance, (2) recovery
+    orphan adoption, (3) barrier write — so N selects the failing stage(s).
+    """
+
+    def __init__(self, fails: int) -> None:
+        self._remaining = fails
+
+    def ops(self) -> DurableFileOps:
+        from workflowy_mcp.carto_job_governance import (
+            _default_mkdir,
+            _default_replace,
+            _default_tmp_name,
+            _default_unlink,
+            _default_write_fsync,
+        )
+
+        def replace(tmp, target) -> None:
+            if target.name == "manifest.json" and self._remaining > 0:
+                self._remaining -= 1
+                raise InjectedFault("manifest_replace_fail")
+            _default_replace(tmp, target)
+
+        return DurableFileOps(
+            write_fsync=_default_write_fsync,
+            replace=replace,
+            mkdir=_default_mkdir,
+            unlink=_default_unlink,
+            tmp_name=_default_tmp_name,
+        )
+
+
+# ---------------------------------------------------------------------------
+# (a) Initial append acquisition fails once; barrier acquisition succeeds
+# ---------------------------------------------------------------------------
+
+
+def test_initial_append_lock_failure_raises_barrier(tmp_path, monkeypatch):
+    """Work-order (a): the initial append's coherence-lock acquisition fails
+    once with CoherenceLockError; barrier acquisition then succeeds.
+
+    The ORIGINAL lock failure returns (identity preserved); dirty_status is
+    active at generation 1 with reason journal_publication_failed; the
+    pre-generated transaction id is preserved; nothing is committed; zero
+    post-seal hook / local-cache application at sealer altitude.
+
+    Mutation-sensitivity anchor (work-order (e)): against the d960a01
+    baseline this test observes ``(barrier_calls, dirty_active) == (0,
+    False)`` — the lock failure escapes with no barrier attempted.
+    """
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    append_lock_failure = CoherenceLockError(
+        "coherence mutex busy (injected initial-acquisition failure)", busy=True
+    )
+    real_journal_lock = journal_store.coherence_lock
+    lock_calls = {"append": 0}
+
+    def _fail_first_append_lock(paths_arg, **kwargs):
+        lock_calls["append"] += 1
+        if lock_calls["append"] == 1:
+            raise append_lock_failure
+        return real_journal_lock(paths_arg, **kwargs)
+
+    monkeypatch.setattr(journal_store, "coherence_lock", _fail_first_append_lock)
+
+    real_raise = barrier_module.raise_global_dirty_barrier
+    barrier_calls: list[str | None] = []
+
+    def _counting_raise(paths_arg, **kwargs):
+        barrier_calls.append(kwargs.get("reason_code"))
+        return real_raise(paths_arg, **kwargs)
+
+    monkeypatch.setattr(barrier_module, "raise_global_dirty_barrier", _counting_raise)
+
+    checkpoint_calls: list[int] = []
+    with pytest.raises(CoherenceLockError) as captured:
+        s04_append(
+            paths,
+            transaction_id="tx-lock-initial",
+            checkpoint_request=lambda: checkpoint_calls.append(1) or True,
+        )
+    # The ORIGINAL lock failure returns (identity preserved).
+    assert captured.value is append_lock_failure
+    assert captured.value.busy is True
+    manifest = read_manifest(paths, required=True)
+    # The (e) observation as ONE assertion: at baseline (0, False).
+    assert (len(barrier_calls), manifest.dirty_status.active) == (1, True)
+    assert barrier_calls == ["journal_publication_failed"]
+    assert manifest.dirty_status.generation == 1
+    assert manifest.dirty_status.reason_code == "journal_publication_failed"
+    # The pre-generated transaction identity is preserved on the barrier.
+    assert manifest.dirty_status.transaction_id == "tx-lock-initial"
+    # Nothing committed; zero post-seal hook / local-cache application (the
+    # sealer owns no cache-write seam; the hook is the only post-seal seam).
+    assert manifest.journal_head_seq == 0
+    assert checkpoint_calls == []
+
+
+# ---------------------------------------------------------------------------
+# (b) Genuine cross-process contention: H holds; S times out; H releases;
+#     the barrier lands before S returns failure
+# ---------------------------------------------------------------------------
+
+_MUTEX_HOLDER = r"""
+import sys
+sys.path.insert(0, sys.argv[2] + "/tests")
+from pathlib import Path
+from coherence_harness import ACCOUNT_A, make_coherence_root, touch, wait_for_file
+from workflowy_mcp.coherence.paths import coherence_lock
+
+root = Path(sys.argv[1])
+paths = make_coherence_root(root, ACCOUNT_A, bootstrap=False)
+with coherence_lock(paths):
+    touch(root / "holder_holding")
+    assert wait_for_file(root / "release_holder", timeout=90)
+touch(root / "holder_released")
+print("released")
+"""
+
+
+def test_genuine_cross_process_contention_barrier_lands_before_failure_returns(
+    tmp_path, monkeypatch
+):
+    """Work-order (b): GENUINE cross-process contention on one coherence
+    root.  Process H (a REAL subprocess) holds coherence.mutex; the sealer
+    S (in-process thread) attempts the initial append through the REAL lock
+    facade with a deterministic short acquisition ceiling (0.2s), so its
+    acquisition provably enters the contended/busy path and times out
+    (``busy is True`` — reachable only from the busy-timeout mapping).  H
+    releases BEFORE S attempts barrier publication; the barrier lands
+    before S returns failure.
+
+    Sentinel protocol (no probabilistic margins as load-bearing proof):
+    holder_holding -> start S -> append_lock_failed (S contended and is
+    parked) -> release_holder -> holder_released (H's OS lock provably
+    freed) -> S proceeds to barrier publication.
+    """
+
+    root = tmp_path / "share"
+    paths = make_coherence_root(root, ACCOUNT_A)
+    holder = launch_subprocess(_MUTEX_HOLDER, str(root), str(REPO))
+    assert wait_for_file(root / "holder_holding", timeout=60), "holder never acquired"
+
+    outcome: dict = {}
+    real_journal_lock = journal_store.coherence_lock
+
+    @contextmanager
+    def _short_ceiling_lock(paths_arg, **kwargs):
+        # Deterministic short acquisition ceiling through the REAL facade.
+        kwargs["timeout_seconds"] = 0.2
+        kwargs["poll_seconds"] = 0.02
+        try:
+            with real_journal_lock(paths_arg, **kwargs):
+                yield
+        except CoherenceLockError:
+            # S contended against H's held mutex and timed out: acknowledge,
+            # then park until H's OS unlock is PROVABLE (holder_released),
+            # so H releases strictly BEFORE S attempts barrier publication.
+            touch(root / "append_lock_failed")
+            assert wait_for_file(root / "holder_released", timeout=90)
+            raise
+
+    monkeypatch.setattr(journal_store, "coherence_lock", _short_ceiling_lock)
+
+    def _seal():
+        try:
+            s04_append(paths, transaction_id="tx-contended")
+            outcome["error"] = None
+        except BaseException as exc:
+            outcome["error"] = exc
+            outcome["dirty_at_return"] = read_manifest(
+                paths, required=True
+            ).dirty_status.active
+
+    sealer = threading.Thread(target=_seal, daemon=True)
+    sealer.start()
+    assert wait_for_file(root / "append_lock_failed", timeout=60), (
+        "sealer never contended against the held mutex"
+    )
+    # H releases BEFORE S attempts barrier publication.
+    touch(root / "release_holder")
+    assert wait_for_file(root / "holder_released", timeout=60), "holder never released"
+    sealer.join(timeout=60)
+    _out, err = holder.communicate(timeout=60)
+    assert holder.returncode == 0, f"holder failed:\n{err}"
+
+    error = outcome.get("error")
+    # S acknowledged the contended/busy path and timed out.
+    assert isinstance(error, CoherenceLockError)
+    assert error.busy is True
+    # The barrier landed BEFORE S returned failure.
+    assert outcome.get("dirty_at_return") is True
+    manifest = read_manifest(paths, required=True)
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.generation == 1
+    assert manifest.dirty_status.reason_code == "journal_publication_failed"
+    assert manifest.dirty_status.transaction_id == "tx-contended"
+    assert manifest.journal_head_seq == 0
+
+
+# ---------------------------------------------------------------------------
+# (c) Persistent double fault: append acquisition AND barrier acquisition
+#     both fail -> DirtyBarrierPublicationError preserving both failures
+# ---------------------------------------------------------------------------
+
+
+def test_persistent_double_fault_raises_dirty_barrier_publication_error(
+    tmp_path, monkeypatch
+):
+    """Work-order (c): the append acquisition fails AND the barrier
+    acquisition fails.  DirtyBarrierPublicationError is raised; BOTH
+    failures and the exception chaining are preserved; no false coherent
+    success is possible (the barrier never lands and nothing reports
+    success).  The ACCOUNT is known from the validated CoherencePaths even
+    though no manifest was ever read (Chain 6 Round 2, item 1); epoch,
+    actual head, and the attempted sequence remain genuinely unknown (no
+    manifest read; allocation never reached — never fabricated)."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    append_lock_failure = CoherenceLockError(
+        "coherence mutex busy (injected append acquisition failure)", busy=True
+    )
+    barrier_lock_failure = CoherenceLockError(
+        "coherence mutex unavailable/broken (injected barrier acquisition failure)",
+        busy=False,
+    )
+
+    def _fail_append_lock(paths_arg, **kwargs):
+        raise append_lock_failure
+
+    def _fail_barrier_lock(paths_arg, **kwargs):
+        raise barrier_lock_failure
+
+    monkeypatch.setattr(journal_store, "coherence_lock", _fail_append_lock)
+    monkeypatch.setattr(barrier_module, "coherence_lock", _fail_barrier_lock)
+
+    with pytest.raises(DirtyBarrierPublicationError) as captured:
+        s04_append(paths, transaction_id="tx-double-fault")
+    error = captured.value
+    assert error.original_reason_code == "journal_publication_failed"
+    assert error.original_transaction_id == "tx-double-fault"
+    # The account is KNOWN from the validated CoherencePaths even though no
+    # manifest was ever read (Chain 6 Round 2, item 1).
+    assert error.account_scope_id == ACCOUNT_A
+    # epoch/head/attempted remain genuinely unknown (no manifest read;
+    # allocation never reached).
+    assert error.epoch_id is None
+    assert error.journal_head_seq is None
+    assert error.attempted_journal_sequence is None
+    # BOTH failures preserved: the barrier-publication failure is the
+    # underlying/cause; the original sealing (append lock) failure rides
+    # the exception chain beneath it.
+    assert error.underlying is barrier_lock_failure
+    assert error.__cause__ is barrier_lock_failure
+    assert barrier_lock_failure.__context__ is append_lock_failure
+    assert error.recovery_required is True
+    assert "no coherent success may be reported" in str(error)
+    # No false coherent success: the barrier never landed.
+    manifest = read_manifest(paths, required=True)
+    assert manifest.dirty_status.active is False
+    assert manifest.journal_head_seq == 0
+
+
+# ---------------------------------------------------------------------------
+# (d) Recovery acquisition failure after an existing JournalPublicationError
+# ---------------------------------------------------------------------------
+
+
+def test_recovery_acquisition_failure_preserves_original_publication_failure(
+    tmp_path, monkeypatch
+):
+    """Work-order (d): a record/head publication failure routes to
+    _seal_recovery_or_barrier; a CoherenceLockError is forced BEFORE any
+    recovery inspection.  The ORIGINAL publication failure returns as the
+    primary failed seal (its append-stamped attempted identity intact); the
+    recovery lock failure is preserved as diagnostic context; hard dirt
+    lands before the failure returns — NEVER a clean escape.
+
+    The fixture deliberately uses a head-advance failure (record_durable
+    True): the uniform Chain-6 lock classification pins
+    journal_publication_failed here — the recovery could not inspect, so
+    the sealer must not claim verified_effect_unpublishable even though the
+    append's stamp proves durable evidence exists.
+    """
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    recovery_lock_failure = CoherenceLockError(
+        "coherence mutex busy (injected recovery acquisition failure)", busy=True
+    )
+    real_barrier_lock = barrier_module.coherence_lock
+    lock_calls = {"barrier": 0}
+
+    def _fail_first_barrier_lock(paths_arg, **kwargs):
+        lock_calls["barrier"] += 1
+        if lock_calls["barrier"] == 1:
+            raise recovery_lock_failure
+        return real_barrier_lock(paths_arg, **kwargs)
+
+    monkeypatch.setattr(barrier_module, "coherence_lock", _fail_first_barrier_lock)
+
+    with pytest.raises(JournalPublicationError) as captured:
+        s04_append(
+            paths,
+            transaction_id="tx-recovery-lock",
+            fs_ops=_ManifestReplaceFails(1).ops(),
+        )
+    publication_error = captured.value
+    # The ORIGINAL publication failure is the primary failed seal: the
+    # append's stamped attempted identity rides it.
+    assert publication_error.sequence == 1
+    assert publication_error.record_durable is True
+    # The recovery lock failure is preserved as diagnostic context.
+    assert publication_error.__cause__ is recovery_lock_failure
+    # Hard dirt landed BEFORE the failure returned (recovery lock failed;
+    # the barrier acquisition then succeeded).
+    assert lock_calls["barrier"] == 2
+    manifest = read_manifest(paths, required=True)
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.generation == 1
+    assert manifest.dirty_status.reason_code == "journal_publication_failed"
+    assert manifest.dirty_status.transaction_id == "tx-recovery-lock"
+    # The orphan record remains durable evidence above the unadvanced head.
+    assert manifest.journal_head_seq == 0
+    assert (paths.journal_dir / journal_record_filename(1)).exists()
+
+
+def test_recovery_acquisition_failure_double_fault(tmp_path, monkeypatch):
+    """Work-order (d), double-fault form: the recovery acquisition fails AND
+    the barrier acquisition fails.  DirtyBarrierPublicationError is raised;
+    all KNOWN lineage context is preserved (the append-stamped pre-attempt
+    head/account/epoch and the DISTINCT attempted sequence — the recovery
+    never read a manifest of its own); ALL THREE failures remain separately
+    inspectable exception objects (Chain 6 Round 2, item 2): the original
+    publication failure rides the chain beneath the barrier failure, the
+    recovery CoherenceLockError is the explicit recovery_error field, and
+    the barrier-publication failure is the underlying/cause; never a clean
+    escape."""
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    recovery_lock_failure = CoherenceLockError(
+        "coherence mutex busy (injected recovery acquisition failure)", busy=True
+    )
+    barrier_lock_failure = CoherenceLockError(
+        "coherence mutex unavailable/broken (injected barrier acquisition failure)",
+        busy=False,
+    )
+    lock_calls = {"barrier": 0}
+
+    def _always_fail_barrier_lock(paths_arg, **kwargs):
+        lock_calls["barrier"] += 1
+        if lock_calls["barrier"] == 1:
+            raise recovery_lock_failure
+        raise barrier_lock_failure
+
+    monkeypatch.setattr(barrier_module, "coherence_lock", _always_fail_barrier_lock)
+
+    with pytest.raises(DirtyBarrierPublicationError) as captured:
+        s04_append(
+            paths,
+            transaction_id="tx-recovery-double",
+            fs_ops=_ManifestReplaceFails(1).ops(),
+        )
+    error = captured.value
+    assert error.original_reason_code == "journal_publication_failed"
+    assert error.original_transaction_id == "tx-recovery-double"
+    # Known lineage context is preserved: the append-stamped pre-attempt
+    # head and the DISTINCT attempted sequence.
+    assert error.journal_head_seq == 0
+    assert error.attempted_journal_sequence == 1
+    assert error.account_scope_id == ACCOUNT_A
+    # The barrier-publication failure is the underlying/cause; the ORIGINAL
+    # publication failure rides the chain beneath the barrier failure.
+    assert error.underlying is barrier_lock_failure
+    assert error.__cause__ is barrier_lock_failure
+    assert isinstance(barrier_lock_failure.__context__, JournalPublicationError)
+    assert barrier_lock_failure.__context__.sequence == 1
+    # ALL THREE failures are separately inspectable (Chain 6 Round 2, item
+    # 2): the recovery CoherenceLockError is the explicit recovery_error
+    # field (the current graph DROPS it — the baseline mutation observation).
+    assert error.recovery_error is recovery_lock_failure
+    assert error.recovery_required is True
+    assert lock_calls["barrier"] == 2
+    # No false coherent success: the barrier never landed; the orphan
+    # record evidence is untouched.
+    manifest = read_manifest(paths, required=True)
+    assert manifest.dirty_status.active is False
+    assert error.epoch_id == manifest.epoch_id
+    assert (paths.journal_dir / journal_record_filename(1)).exists()

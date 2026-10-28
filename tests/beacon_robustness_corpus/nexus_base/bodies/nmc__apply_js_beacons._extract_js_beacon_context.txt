@@ -1,0 +1,110 @@
+    def _extract_js_beacon_context(comment_line: int) -> List[str]:
+        """Extract nearby JS/TS comments (non-beacon) around a JS/TS beacon.
+
+        Includes:
+        - Lines that are part of a '//' line comment
+        - Lines that are part of a block comment /* ... */ above/below the beacon
+
+        Skips:
+        - blank lines
+        - @beacon[...] / @beacon-close[...] metadata delimiter blocks (stripped
+          as whole blocks via _strip_beacon_meta_blocks_from_context, not by a
+          naive per-line '@beacon' substring check)
+        """
+        context: List[str] = []
+
+        # Precompute which lines are comment-like and a cleaned text version.
+        # For block comments we treat every line between /* and */ (inclusive)
+        # as comment-like, so that interior lines are visible in CONTEXT COMMENTS.
+        comment_mask: list[bool] = [False] * n
+        cleaned: list[str] = ["" for _ in range(n)]
+        in_block = False
+
+        for idx, raw in enumerate(lines, start=1):
+            stripped = raw.lstrip()
+            if not stripped:
+                continue
+            # NOTE: we intentionally do NOT skip '@beacon' lines here.
+            # We collect them into context and later strip the entire
+            # delimiter block via _strip_beacon_meta_blocks_from_context(...).
+
+            is_comment = False
+            text = ""
+
+            if not in_block:
+                if stripped.startswith("//"):
+                    is_comment = True
+                    text = stripped[2:].lstrip()
+                elif "/*" in stripped:
+                    is_comment = True
+                    in_block = True
+                    after = stripped.split("/*", 1)[1]
+                    if "*/" in after:
+                        before_close, _ = after.split("*/", 1)
+                        text = before_close.strip()
+                        in_block = False
+                    else:
+                        text = after.strip()
+            else:
+                is_comment = True
+                if "*/" in stripped:
+                    before_close, _ = stripped.split("*/", 1)
+                    text = before_close.strip()
+                    in_block = False
+                else:
+                    text = stripped
+
+            if is_comment:
+                comment_mask[idx - 1] = True
+                cleaned[idx - 1] = text
+
+        # Find end of beacon block (first line containing ']')
+        j = comment_line
+        block_end = comment_line
+        while j <= n:
+            raw = lines[j - 1]
+            body = raw.lstrip()
+            if body.startswith("//"):
+                body = body[2:].lstrip()
+            if body.startswith("/*"):
+                body = body[2:].lstrip()
+            if body.startswith("*/"):
+                body = body[2:].lstrip()
+            if body.startswith("*"):
+                body = body[1:].lstrip()
+            if body.rstrip().endswith("*/"):
+                body = body.rstrip()[:-2].rstrip()
+            if body.strip().startswith("]"):
+                block_end = j
+                break
+            j += 1
+
+        # Above
+        j = comment_line - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            if not raw.strip():
+                j -= 1
+                continue
+            if comment_mask[j - 1]:
+                if cleaned[j - 1]:
+                    context.insert(0, cleaned[j - 1])
+                j -= 1
+                continue
+            break
+
+        # Below
+        j = block_end + 1
+        while j <= n:
+            raw = lines[j - 1]
+            if not raw.strip():
+                j += 1
+                continue
+            if comment_mask[j - 1]:
+                if cleaned[j - 1]:
+                    context.append(cleaned[j - 1])
+                j += 1
+                continue
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)

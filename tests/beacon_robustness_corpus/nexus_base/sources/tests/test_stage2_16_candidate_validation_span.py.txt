@@ -1,0 +1,552 @@
+"""Stage2-16 (Waypoint A locked work order) — reduce the 0.20 s under-mutex
+candidate validation span.
+
+The full candidate-envelope reparse (~27 MB JSON, the measured ~0.20 s
+span at 27.6 MB / 25,501 nodes — S02 ledger item 12, CF-S05-A3) moved OUT
+of the coherence mutex.  Under the lock, ``publish_epoch`` now verifies
+only the immutable candidate file identity (device/inode/size/mtime_ns
+TOCTOU proof) before pure in-memory lineage validation on the already
+parsed envelope.
+
+Proof obligations discharged here:
+- validation is NOT weakened: swap/delete of the candidate between the
+  outside validation read and the in-lock publication fails loudly
+  (TOCTOU guard), and the outside read itself is stability-bracketed
+  (stat → read → stat);
+- error precedence is byte-for-byte the prior shape (claim/manifest
+  guards fire before a candidate error; a missing candidate is the same
+  CoherenceStateMissingError);
+- the structural regression lock: zero candidate file reads occur under
+  the coherence mutex, and the in-lock identity verification DOES run;
+- publisher-contention latency/regression proof on real OS processes:
+  a large-candidate publisher plus a concurrent journal appender, with
+  the publisher's in-lock window measured inside the actor.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import time
+from contextlib import asynccontextmanager
+from functools import wraps
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    NOW,
+    make_coherence_root,
+    s02_node,
+    touch,
+    wait_for_file,
+)
+from stage2_harness import (
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+)
+
+import workflowy_mcp.coherence.epoch_publisher as epoch_publisher
+from workflowy_mcp.coherence import (
+    REFRESH_CUT_SCHEMA_VERSION,
+    RefreshCutToken,
+    RefreshPublicationClaim,
+    new_claim_id,
+    new_epoch_id,
+    publish_epoch,
+    read_manifest,
+    write_refresh_claim,
+)
+from workflowy_mcp.coherence.errors import (
+    CoherenceSchemaError,
+    CoherenceStateMissingError,
+    ManifestConflictError,
+)
+from workflowy_mcp.coherence.snapshot_store import (
+    new_snapshot_candidate_path,
+    write_snapshot_candidate,
+)
+
+REPO = Path(__file__).resolve().parents[1]
+_API_BASE_URL = "https://stage2-16.invalid"
+_API_KEY = "stage2-16-key"
+
+
+def async_test(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return wrapper
+
+
+def _snapshot_dir(tmp_path: Path) -> Path:
+    target = tmp_path / "snapshots"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _plant_full_refresh_claim(paths, *, target_epoch_id: str | None = None):
+    """Write one active full-refresh claim whose persisted cut matches the
+    current manifest (the A5.2 self-defense guards require it)."""
+
+    manifest = read_manifest(paths, required=True)
+    cut = RefreshCutToken(
+        schema_version=REFRESH_CUT_SCHEMA_VERSION,
+        account_scope_id=ACCOUNT_A,
+        epoch_number=manifest.epoch_number,
+        epoch_id=manifest.epoch_id,
+        journal_head_seq=manifest.journal_head_seq,
+        hard_barrier_generation=0,
+        external_dirt_generation=0,
+        captured_at=NOW,
+    )
+    claim = RefreshPublicationClaim(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        claim_id=new_claim_id(),
+        owner_pid=os.getpid(),
+        owner_pid_create_time=1.0,
+        refresh_kind="system",
+        status="publishing",
+        cut_token=cut,
+        requested_hard_generation=0,
+        requested_external_generation=0,
+        target_epoch_number=manifest.epoch_number + 1,
+        target_epoch_id=target_epoch_id or new_epoch_id(),
+        started_at=NOW,
+        updated_at=NOW,
+        result=None,
+        candidate_snapshot_path=None,
+    )
+    write_refresh_claim(paths, claim)
+    return claim
+
+
+def _write_candidate(paths, snapshot_dir: Path, claim, *, nodes, incorporated: int = 0):
+    return write_snapshot_candidate(
+        new_snapshot_candidate_path(snapshot_dir),
+        {"nodes": nodes},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=claim.target_epoch_number,
+        epoch_id=claim.target_epoch_id,
+        incorporated_through_seq=incorporated,
+        publication_kind="full_refresh",
+    )
+
+
+async def _publish(paths, claim, candidate, *, incorporated: int = 0, claim_id=None):
+    return await publish_epoch(
+        paths=paths,
+        claim_id=claim_id or claim.claim_id,
+        basis_epoch_id=read_manifest(paths, required=True).epoch_id,
+        candidate_snapshot_path=candidate,
+        incorporated_through_seq=incorporated,
+        publication_kind="full_refresh",
+        refresh_cut=claim.cut_token,
+        clear_hard_through_generation=None,
+        clear_external_through_generation=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Happy path + error vocabulary / precedence
+# ---------------------------------------------------------------------------
+
+
+@async_test
+async def test_publish_succeeds_with_outside_lock_candidate_validation(tmp_path):
+    """Baseline: publication through the restructured span succeeds and the
+    epoch advances exactly once."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _plant_full_refresh_claim(paths)
+    candidate = _write_candidate(paths, _snapshot_dir(tmp_path), claim, nodes=[s02_node("a")])
+    result = await _publish(paths, claim, candidate)
+    manifest = read_manifest(paths, required=True)
+    assert result.epoch_number == 1
+    assert manifest.epoch_number == 1
+    assert manifest.base_snapshot_path == candidate
+
+
+@async_test
+async def test_missing_candidate_keeps_state_missing_vocabulary(tmp_path):
+    """The Stage2-09 shape: the candidate is gone BEFORE publish_epoch is
+    entered — the failure is the same CoherenceStateMissingError as when
+    the read lived inside the lock."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _plant_full_refresh_claim(paths)
+    candidate = _write_candidate(paths, _snapshot_dir(tmp_path), claim, nodes=[s02_node("a")])
+    os.unlink(candidate)
+    with pytest.raises(CoherenceStateMissingError):
+        await _publish(paths, claim, candidate)
+    assert read_manifest(paths, required=True).epoch_number == 0
+
+
+@async_test
+async def test_claim_guards_fire_before_candidate_error(tmp_path):
+    """Error precedence preserved: a claim-token mismatch wins over a
+    missing candidate, exactly as with the in-lock read."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _plant_full_refresh_claim(paths)
+    candidate = _write_candidate(paths, _snapshot_dir(tmp_path), claim, nodes=[s02_node("a")])
+    os.unlink(candidate)
+    with pytest.raises(ManifestConflictError):
+        await _publish(paths, claim, candidate, claim_id="0" * 32)
+    assert read_manifest(paths, required=True).epoch_number == 0
+
+
+# ---------------------------------------------------------------------------
+# TOCTOU guard — swap / delete between outside validation and in-lock publish
+# ---------------------------------------------------------------------------
+
+
+def _swap_after_proof(original, replacement_writer):
+    """Wrap epoch_publisher.read_candidate_snapshot_proof: return the real
+    proof, then mutate the candidate file (the TOCTOU interleaving)."""
+
+    def _wrapper(candidate, *args, **kwargs):
+        proof = original(candidate, *args, **kwargs)
+        replacement_writer(candidate)
+        return proof
+
+    return _wrapper
+
+
+@async_test
+async def test_toctou_atomic_replacement_fails_loudly(tmp_path):
+    """A second writer atomically replaces the candidate after the outside
+    validation read: the in-lock identity check rejects the publication,
+    the manifest never advances, and the failure is loud."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _plant_full_refresh_claim(paths)
+    snap_dir = _snapshot_dir(tmp_path)
+    candidate = _write_candidate(paths, snap_dir, claim, nodes=[s02_node("a")])
+
+    def _replace(path: str) -> None:
+        write_snapshot_candidate(
+            path,  # same path: atomic os.replace -> new inode + mtime
+            {"nodes": [s02_node("tampered")]},
+            account_scope_id=ACCOUNT_A,
+            epoch_number=claim.target_epoch_number,
+            epoch_id=claim.target_epoch_id,
+            incorporated_through_seq=0,
+            publication_kind="full_refresh",
+        )
+
+    original = epoch_publisher.read_candidate_snapshot_proof
+    monkey = pytest.MonkeyPatch()
+    with monkey.context() as m:
+        m.setattr(
+            epoch_publisher,
+            "read_candidate_snapshot_proof",
+            _swap_after_proof(original, _replace),
+        )
+        with pytest.raises(CoherenceSchemaError, match="TOCTOU"):
+            await _publish(paths, claim, candidate)
+    manifest = read_manifest(paths, required=True)
+    assert manifest.epoch_number == 0
+    assert manifest.epoch_id == claim.cut_token.epoch_id
+
+
+@async_test
+async def test_toctou_mid_publish_deletion_fails_loudly(tmp_path):
+    """A GC-style deletion landing AFTER the outside validation read but
+    before the in-lock publish is caught by the guard (a hole the old
+    in-lock-read shape could not see between its read and the manifest
+    CAS)."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _plant_full_refresh_claim(paths)
+    candidate = _write_candidate(paths, _snapshot_dir(tmp_path), claim, nodes=[s02_node("a")])
+
+    def _delete(path: str) -> None:
+        os.unlink(path)
+
+    original = epoch_publisher.read_candidate_snapshot_proof
+    monkey = pytest.MonkeyPatch()
+    with monkey.context() as m:
+        m.setattr(
+            epoch_publisher,
+            "read_candidate_snapshot_proof",
+            _swap_after_proof(original, _delete),
+        )
+        with pytest.raises(CoherenceStateMissingError, match="TOCTOU"):
+            await _publish(paths, claim, candidate)
+    assert read_manifest(paths, required=True).epoch_number == 0
+
+
+@async_test
+async def test_identical_rewrite_before_entry_is_no_false_positive(tmp_path):
+    """An atomic rewrite with byte-identical content BEFORE publish_epoch
+    is entered re-reads cleanly (the proof is taken at entry) — no false
+    TOCTOU rejection."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _plant_full_refresh_claim(paths)
+    snap_dir = _snapshot_dir(tmp_path)
+    candidate = _write_candidate(paths, snap_dir, claim, nodes=[s02_node("a")])
+    write_snapshot_candidate(
+        candidate,
+        {"nodes": [s02_node("a")]},
+        account_scope_id=ACCOUNT_A,
+        epoch_number=claim.target_epoch_number,
+        epoch_id=claim.target_epoch_id,
+        incorporated_through_seq=0,
+        publication_kind="full_refresh",
+    )
+    result = await _publish(paths, claim, candidate)
+    assert result.epoch_number == 1
+
+
+# ---------------------------------------------------------------------------
+# Structural regression lock — no candidate read under the coherence mutex
+# ---------------------------------------------------------------------------
+
+
+@async_test
+# @beacon[
+#   id=auto-beacon@test_no_candidate_read_under_coherence_mutex-wsme,
+#   role=test_no_candidate_read_under_coherence_mutex,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+async def test_no_candidate_read_under_coherence_mutex(tmp_path, monkeypatch):
+    """THE regression lock: during publish_epoch, ZERO opens of the
+    candidate file occur while the coherence mutex is held, and the
+    in-lock identity stat DOES run.  Claim/manifest/journal file reads
+    under the lock are legitimate and excluded by path."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    claim = _plant_full_refresh_claim(paths)
+    snap_dir = _snapshot_dir(tmp_path)
+    candidate = _write_candidate(paths, snap_dir, claim, nodes=[s02_node("a")])
+
+    state = {"held": False, "opens": [], "stats": []}
+    real_lock = epoch_publisher.coherence_lock_async
+
+    @asynccontextmanager
+    async def _recording_lock(paths_arg):
+        state["held"] = True
+        try:
+            async with real_lock(paths_arg):
+                yield
+        finally:
+            state["held"] = False
+
+    real_open = Path.open
+    real_stat = Path.stat
+
+    def _open(self, *args, **kwargs):
+        if os.path.normpath(str(self)) == os.path.normpath(candidate):
+            state["opens"].append(state["held"])
+        return real_open(self, *args, **kwargs)
+
+    def _stat(self, *args, **kwargs):
+        if os.path.normpath(str(self)) == os.path.normpath(candidate):
+            state["stats"].append(state["held"])
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(epoch_publisher, "coherence_lock_async", _recording_lock)
+    monkeypatch.setattr(Path, "open", _open)
+    monkeypatch.setattr(Path, "stat", _stat)
+
+    result = await _publish(paths, claim, candidate)
+    assert result.epoch_number == 1
+    assert state["stats"] and any(state["stats"]), (
+        "the in-lock TOCTOU identity stat never ran"
+    )
+    assert not any(state["opens"]), (
+        f"candidate file was read under the coherence mutex: {state['opens']}"
+    )
+
+
+@async_test
+async def test_in_lock_span_dwarfs_outside_read_span(tmp_path, monkeypatch):
+    """Latency regression proof (relative, machine-independent): with a
+    ~20 MB candidate, the ENTIRE in-lock publish section costs a small
+    fraction of the outside candidate reparse — the span that used to
+    hold the mutex through the full JSON parse."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    # ~64 MB candidate: sized so the JSON parse (~0.2 s) dominates the
+    # near-constant in-lock residual (~10 ms of small-file I/O) by an
+    # order of magnitude on any plausible host.
+    node_count = 200_000
+    payload_nodes = [
+        s02_node(f"n{i}", name=f"node-{i}", note="x" * 240) for i in range(node_count)
+    ]
+    claim = _plant_full_refresh_claim(paths)
+    snap_dir = _snapshot_dir(tmp_path)
+    candidate = _write_candidate(paths, snap_dir, claim, nodes=payload_nodes)
+    size_mb = os.path.getsize(candidate) / 1e6
+
+    spans = {"outside_read": 0.0, "in_lock": 0.0}
+    real_lock = epoch_publisher.coherence_lock_async
+    real_proof = epoch_publisher.read_candidate_snapshot_proof
+
+    @asynccontextmanager
+    async def _timed_lock(paths_arg):
+        start = time.perf_counter()
+        async with real_lock(paths_arg):
+            yield
+        spans["in_lock"] += time.perf_counter() - start
+
+    def _timed_proof(candidate_arg):
+        start = time.perf_counter()
+        proof = real_proof(candidate_arg)
+        spans["outside_read"] += time.perf_counter() - start
+        return proof
+
+    monkeypatch.setattr(epoch_publisher, "coherence_lock_async", _timed_lock)
+    monkeypatch.setattr(epoch_publisher, "read_candidate_snapshot_proof", _timed_proof)
+
+    result = await _publish(paths, claim, candidate)
+    assert result.epoch_number == 1
+    assert spans["outside_read"] > 0 and spans["in_lock"] > 0
+    # The pre-Stage2-16 shape held the mutex for ~the full parse.  The new
+    # in-lock section (small claim/manifest reads + stat + CAS write) must
+    # stay below 10% of the outside reparse — a 10x margin that cannot
+    # flake against machine speed, only against a genuine regression (a
+    # candidate read back under the lock pushes the ratio toward 1x).
+    assert spans["in_lock"] * 10 < spans["outside_read"], (
+        f"in-lock span {spans['in_lock']:.3f}s not <10x smaller than the "
+        f"outside reparse {spans['outside_read']:.3f}s (candidate {size_mb:.1f} MB)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Real two-process publisher-contention latency proof
+# ---------------------------------------------------------------------------
+
+_PUBLISHER_ACTOR = (
+    "import asyncio, os, sys, time\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from contextlib import asynccontextmanager\n"
+    "from pathlib import Path\n"
+    "root = Path(sys.argv[1])\n"
+    'os.environ["WORKFLOWY_MCP_TEST_RUNTIME_DIR"] = str(root)\n'
+    "from coherence_harness import (\n"
+    "    ACCOUNT_A, RecordedSleep, make_coherence_root, s02_fetch, s02_make_export,\n"
+    "    s02_node, touch, wait_for_file,\n"
+    ")\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp.coherence import run_full_refresh\n"
+    "import workflowy_mcp.coherence.epoch_publisher as epoch_publisher\n"
+    + """
+paths = make_coherence_root(root / "w", ACCOUNT_A)
+touch(root / "pid_publisher", str(os.getpid()))
+
+state = {"held": False, "in_lock": 0.0, "candidate_opens_under_lock": 0}
+real_lock = epoch_publisher.coherence_lock_async
+
+
+@asynccontextmanager
+async def _timed_lock(paths_arg):
+    global state
+    start = time.perf_counter()
+    state["held"] = True
+    try:
+        async with real_lock(paths_arg):
+            yield
+    finally:
+        state["held"] = False
+        state["in_lock"] += time.perf_counter() - start
+
+
+epoch_publisher.coherence_lock_async = _timed_lock
+
+from pathlib import Path as _P
+_real_open = _P.open
+
+
+def _open(self, *args, **kwargs):
+    if state["held"] and "snapshot" in str(self):
+        state["candidate_opens_under_lock"] += 1
+    return _real_open(self, *args, **kwargs)
+
+
+_P.open = _open
+
+nodes = [s02_node(f"n{i}", name=f"node-{i}", note="x" * 240) for i in range(200_000)]
+outcome = asyncio.run(run_full_refresh(
+    paths=paths,
+    fetch=s02_fetch(s02_make_export(nodes)),
+    refresh_kind="system",
+    settle_seconds=0.0,
+    snapshot_dir=str(root / "snap"),
+    sleep=RecordedSleep(),
+    poll_seconds=0.05,
+))
+write_result(root / "publisher_result.json", {
+    "published": outcome is not None and outcome.status == "published",
+    "epoch_number": None if outcome is None else outcome.epoch_number,
+    "in_lock_seconds": state["in_lock"],
+    "candidate_opens_under_lock": state["candidate_opens_under_lock"],
+})
+touch(root / "publisher_done")
+"""
+)
+
+_APPENDER_ACTOR = (
+    "import os, sys, time\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "root = Path(sys.argv[1])\n"
+    'os.environ["WORKFLOWY_MCP_TEST_RUNTIME_DIR"] = str(root)\n'
+    "from coherence_harness import (\n"
+    "    ACCOUNT_A, make_coherence_root, s02_append, touch, wait_for_file,\n"
+    ")\n"
+    "from stage2_harness import write_result\n"
+    + """
+paths = make_coherence_root(root / "w", ACCOUNT_A)
+touch(root / "pid_appender", str(os.getpid()))
+elapsed = []
+for _ in range(6):
+    start = time.perf_counter()
+    s02_append(paths)
+    elapsed.append(time.perf_counter() - start)
+write_result(root / "appender_result.json", {
+    "appended": len(elapsed),
+    "max_elapsed": max(elapsed),
+})
+touch(root / "appender_done")
+"""
+)
+
+
+def test_real_two_process_publisher_contention(tmp_path):
+    """REAL_MULTIPROCESS latency/regression proof: a large-candidate
+    publisher (real subprocess) races a journal appender (real
+    subprocess).  Both succeed; the publisher's own in-lock window
+    (measured INSIDE the actor) stays a tiny fraction of its outside
+    reparse, and ZERO candidate reads occur under its coherence mutex."""
+    root = tmp_path / "share"
+    root.mkdir(parents=True)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    publisher = launch_actor(_PUBLISHER_ACTOR, str(root), str(REPO))
+    assert wait_for_file(root / "pid_publisher", timeout=60)
+    appender = launch_actor(_APPENDER_ACTOR, str(root), str(REPO))
+    try:
+        pub = read_result(root / "publisher_result.json", timeout=300)
+        app = read_result(root / "appender_result.json", timeout=120)
+
+        assert pub["published"] is True
+        assert pub["epoch_number"] == 1
+        assert pub["candidate_opens_under_lock"] == 0, (
+            "the publisher re-read the candidate under the coherence mutex "
+            f"({pub['candidate_opens_under_lock']} times)"
+        )
+        # Coarse latency corroboration (the deterministic lock is the zero
+        # reads above): ~64 MB candidate → the old in-lock parse was ~0.2 s;
+        # the new in-lock window must stay far below it even on a slow host.
+        assert pub["in_lock_seconds"] < 0.15, (
+            f"publisher in-lock window {pub['in_lock_seconds']:.3f}s"
+        )
+        assert app["appended"] == 6
+        assert app["max_elapsed"] < 2.0
+
+        pids = collect_distinct_pids(root, ["parent", "publisher", "appender"])
+        assert len(set(pids.values())) == 3
+    finally:
+        touch(root / "test_done")
+        finish_actor(publisher, label="large-candidate publisher")
+        finish_actor(appender, label="journal appender")

@@ -1,0 +1,853 @@
+"""N07 conversions: task-exit memory authority, actual coordinator, private files."""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import threading
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import pytest
+
+from workflowy_mcp import server as srv
+from workflowy_mcp import carto_job_governance as gov
+
+REAL_REQUEST = srv._request_nodes_export_cache_refresh_async
+
+
+@pytest.fixture
+def final_env(tmp_path, monkeypatch):
+    from pathlib import Path
+    assert Path(srv.__file__).resolve() == Path(__file__).resolve().parents[1] / "src/workflowy_mcp/server.py"
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    monkeypatch.setattr(srv, "_get_carto_jobs_base_dir", lambda: str(jobs))
+    monkeypatch.setattr(srv, "_get_carto_file_refresh_dir", lambda: str(tmp_path / "f12"))
+    monkeypatch.setattr(srv, "get_server_config", lambda: SimpleNamespace(
+        admission=SimpleNamespace(start_grace_seconds=30, spawn_grace_seconds=60,
+                                  cooldown_seconds=60, orphan_grace_seconds=120),
+        governance=SimpleNamespace(mutex_wait_seconds=10)))
+    monkeypatch.setattr(srv, "log_event", lambda *a, **k: None)
+    for name in ("_carto_jobs_lock", "_nodes_export_refresh_lock"):
+        monkeypatch.setattr(srv, name, asyncio.Lock())
+    monkeypatch.setattr(srv, "_carto_final_live_attempts", set())
+    monkeypatch.setattr(srv, "_carto_final_obligations", {})
+    monkeypatch.setattr(srv, "_carto_final_delivery_task", None)
+    monkeypatch.setattr(srv, "_carto_final_retry_event", asyncio.Event())
+    monkeypatch.setattr(srv, "_carto_final_observed_records", {})
+    monkeypatch.setattr(srv, "_carto_job_states", {})
+    monkeypatch.setattr(srv, "_carto_active_cache_jobs", set())
+    monkeypatch.setattr(srv, "_carto_pending_terminal_cache_jobs", set())
+    monkeypatch.setattr(srv, "_carto_jobs_tracker_initialized", False)
+    monkeypatch.setattr(srv, "_carto_jobs_quiescent_event", asyncio.Event())
+    calls = []
+
+    async def schedule(**kwargs):
+        calls.append(kwargs)
+        return {"success": True, "coalesced": True}
+
+    monkeypatch.setattr(srv, "_request_nodes_export_cache_refresh_async", schedule)
+    return jobs, calls
+
+
+def write_job(jobs, jid="A", status="running", **changes):
+    path = jobs / f"{jid}.json"
+    payload = {"id": jid, "type": "CARTO_REFRESH", "status": status,
+               "pid": os.getpid(), "created_at": "2026-10-11T00:00:00+00:00",
+               "claim_id": "fixture-" + jid, "account_scope_id": "test-account",
+               "cache_refresh_required": True, **changes}
+    gov.atomic_write_json(path, payload)
+    notify_job_exit(path, payload)
+    return path, payload
+
+
+def notify_job_exit(path, payload):
+    # Explicit test task-exit notifications replace the old file-observation
+    # lever. Integrated F01 separately runs the real scheduler and exit door.
+    from workflowy_mcp.carto_job_runtime import CartoJobSpec, CartoJobControl, _freeze_job_data
+    spec = CartoJobSpec(payload["id"], path, None, "CARTO_REFRESH", "file", "fixture-root",
+                        payload["claim_id"], payload["account_scope_id"])
+    srv._register_carto_final_obligation(spec)
+    if srv.is_carto_job_terminal(payload["status"]):
+        control = CartoJobControl(may_have_workflowy_effects=payload.get("cache_refresh_required") is not False)
+        srv._record_carto_task_terminal(spec, control, _freeze_job_data({**payload, "path": str(path), "execution_model": "daemon_task"}))
+
+
+def record(jobs, jid="A"):
+    from workflowy_mcp.carto_job_runtime import _thaw_job_data
+    return _thaw_job_data(srv._carto_final_obligations[jid].snapshot())
+
+
+@pytest.mark.parametrize("bad", ["empty", "partial", "missing", "nonobject", "id", "type", "false", "null"])
+def test_omission_is_not_stop_and_terminal_batch_stays_reserved(final_env, bad):
+    jobs, calls = final_env
+    path, payload = write_job(jobs)
+
+    async def exercise():
+        await srv._refresh_carto_job_tracker_once()
+        if bad == "missing":
+            path.unlink()
+        elif bad in {"empty", "partial", "nonobject"}:
+            path.write_text({"empty": "", "partial": '{"id":', "nonobject": "[]"}[bad])
+        else:
+            changed = {**payload, **{"id": {"id": "changed"}, "type": {"type": "unrelated"},
+                                     "false": {"cache_refresh_required": False},
+                                     "null": {"cache_refresh_required": None}}[bad]}
+            gov.atomic_write_json(path, changed)
+        await srv._refresh_carto_job_tracker_once()
+        assert calls == [], "uncertain/missing active row falsely produced a terminal request"
+        assert not srv._carto_jobs_quiescent_event.is_set()
+        assert record(jobs)["state"] in {"observing", "uncertain"}
+        gov.atomic_write_json(path, payload)
+        await srv._refresh_carto_job_tracker_once()
+        assert calls == []
+        write_job(jobs, status="completed")
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        assert calls[0]["require_new_fetch"] is True
+        assert record(jobs)["state"] == "reserved", "scheduling is not publication"
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+
+    asyncio.run(exercise())
+
+
+def test_unseen_bad_artifact_does_not_block_task_terminal_coalescing(final_env):
+    jobs, calls = final_env
+    (jobs / "unseen.json").write_text("")
+    write_job(jobs, "B", "completed_with_warnings")
+    write_job(jobs, "C", "failed")
+
+    async def exercise():
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        assert record(jobs, "B")["state"] == "reserved"
+        (jobs / "unseen.json").unlink()
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        assert {o["job_id"] for o in calls[0]["final_obligations"]} == {"B", "C"}
+    asyncio.run(exercise())
+
+
+def test_within_lifetime_does_not_forget_observing_job_when_file_missing(final_env, monkeypatch):
+    jobs, calls = final_env
+    path, _ = write_job(jobs)
+    asyncio.run(srv._refresh_carto_job_tracker_once())
+    path.unlink()
+    monkeypatch.setattr(srv, "_carto_job_states", {})
+    monkeypatch.setattr(srv, "_carto_final_observed_records", {})
+    monkeypatch.setattr(srv, "_carto_jobs_tracker_initialized", False)
+    write_job(jobs, "B", "completed")
+    asyncio.run(srv._refresh_carto_job_tracker_once())
+    assert len(calls) == 1 and {o["job_id"] for o in calls[0]["final_obligations"]} == {"B"}
+    assert record(jobs)["state"] == "observing"
+
+
+def test_known_active_identity_survives_simultaneous_artifact_omissions(final_env):
+    jobs, calls = final_env
+    path, _ = write_job(jobs)
+    asyncio.run(srv._refresh_carto_job_tracker_once())
+    path.unlink()
+    write_job(jobs, "B", "completed")
+    asyncio.run(srv._refresh_carto_job_tracker_once())
+    assert len(calls) == 1 and {o["job_id"] for o in calls[0]["final_obligations"]} == {"B"}
+    assert record(jobs)["state"] == "observing"
+
+
+def test_legacy_flag_default_false_and_unknown_status(final_env):
+    jobs, calls = final_env
+    path, payload = write_job(jobs, status="future_status")
+    payload.pop("cache_refresh_required")
+    gov.atomic_write_json(path, payload)
+    write_job(jobs, "excluded", "running", cache_refresh_required=False)
+    assert srv._scan_carto_job_files(str(jobs))[0]["cache_refresh_required"] is True
+    asyncio.run(srv._refresh_carto_job_tracker_once())
+    assert record(jobs)["state"] == "observing"
+    assert not calls
+
+
+@pytest.fixture
+def coordinator_env(final_env, monkeypatch):
+    monkeypatch.setattr(srv, "_request_nodes_export_cache_refresh_async", REAL_REQUEST)
+    monkeypatch.setattr(srv, "_nodes_export_refresh_task", None)
+    monkeypatch.setattr(srv, "_nodes_export_refresh_pending_reasons", [])
+    monkeypatch.setattr(srv, "_nodes_export_refresh_pending_kinds", [])
+    monkeypatch.setattr(srv, "_nodes_export_refresh_pending_new_fetch", False)
+    monkeypatch.setattr(srv, "_nodes_export_refresh_pending_final_batches", {})
+    monkeypatch.setattr(srv, "_nodes_export_refresh_rerun_requested", False)
+    monkeypatch.setattr(srv, "_nodes_export_refresh_idle_event", asyncio.Event())
+    monkeypatch.setattr(srv, "_cache_refresh_should_skip", lambda: False)
+    async def no_event(*a, **k):
+        return None
+    monkeypatch.setattr(srv, "_send_ws_json_best_effort", no_event)
+    monkeypatch.setattr(srv, "_emit_nodes_export_cache_status", no_event)
+    return final_env
+
+
+def good_receipt(**updates):
+    return {"status": "published", "publication_kind": "full_refresh", "new_fetch": True,
+            "adopted": True, "claim_id": "authority", "account_scope_id": "test-account",
+            "epoch_id": "epoch", "epoch_number": 1, "adopted_sequence": 0,
+            "base_snapshot_path": "/private/snapshot.json", **updates}
+
+
+def test_coordinator_cutoff_cannot_receipt_later_final_batch(coordinator_env, monkeypatch):
+    jobs, _ = coordinator_env
+    async def exercise():
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = []
+        async def refresh(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                entered.set()
+                await release.wait()
+                assert record(jobs)["state"] == "reserved"
+            return {"success": True, "final_publication_receipt": good_receipt(epoch_number=len(calls))}
+        monkeypatch.setattr(srv, "get_client", lambda: SimpleNamespace(refresh_nodes_export_cache=refresh))
+        await REAL_REQUEST(reason="ordinary", source="widget", refresh_kind="widget")
+        await entered.wait()  # extraction already happened
+        write_job(jobs, status="completed")
+        await srv._refresh_carto_job_tracker_once()
+        for _ in range(3):
+            await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        assert record(jobs)["state"] == "reserved"
+        task = srv._nodes_export_refresh_task
+        release.set()
+        await task
+        assert calls == [{"refresh_kind": "widget"}, {"refresh_kind": "system", "require_new_fetch": True}]
+        assert record(jobs)["state"] == "published"
+        assert record(jobs)["receipt"]["epoch_number"] == 2
+    asyncio.run(exercise())
+
+
+def test_final_with_widget_before_cutoff_ors_new_fetch(coordinator_env, monkeypatch):
+    jobs, _ = coordinator_env
+    calls = []
+    async def refresh(**kwargs):
+        calls.append(kwargs)
+        return {"success": True, "final_publication_receipt": good_receipt()}
+    monkeypatch.setattr(srv, "get_client", lambda: SimpleNamespace(refresh_nodes_export_cache=refresh))
+    async def exercise():
+        import workflowy_mcp.coherence.operation_cache as opc
+        gate = asyncio.Event()
+        original_factory = opc.create_isolated_context_task
+        def gated_factory(coro):
+            async def delayed():
+                await gate.wait()
+                return await coro
+            return original_factory(delayed())
+        monkeypatch.setattr(opc, "create_isolated_context_task", gated_factory)
+        write_job(jobs, status="completed")
+        await srv._refresh_carto_job_tracker_once()
+        # The request schedules without yielding after task creation; add the
+        # widget reason in that same not-yet-extracted coordinator iteration.
+        await REAL_REQUEST(reason="widget", source="widget", refresh_kind="widget")
+        gate.set()
+        await srv._nodes_export_refresh_task
+        assert calls == [{"refresh_kind": "widget", "require_new_fetch": True}]
+    asyncio.run(exercise())
+
+
+def test_old_direct_export_cannot_cover_final_content_and_daemon_adoption(coordinator_env, tmp_path, monkeypatch):
+    from test_coherence_s02_carto_lineage import _make_client
+    from coherence_harness import s02_node
+    from workflowy_mcp.coherence import read_manifest, run_full_refresh
+    import workflowy_mcp.coherence.refresh_authority as authority
+    jobs, _ = coordinator_env
+    client, _, snapshots = _make_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(gov, "get_cartographer_jobs_dir", lambda: jobs)
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    monkeypatch.setattr(client, "_refresh_settle_seconds", lambda _: 0)
+    monkeypatch.setattr(client, "_gc_nodes_export_snapshots", lambda: None)
+    events, adopted = [], []
+    original_adopt = client._publish_lineage_view
+    def adopt(*a, **k):
+        view = original_adopt(*a, **k)
+        adopted.append(view)
+        events.append("adopt")
+        assert record(jobs)["state"] == "reserved"
+        return view
+    monkeypatch.setattr(client, "_publish_lineage_view", adopt)
+    async def exercise():
+        downloaded, release = asyncio.Event(), asyncio.Event()
+        original_publish = authority.publish_epoch
+        async def publish(**kwargs):
+            if not downloaded.is_set():
+                downloaded.set()
+                await release.wait()
+            result = await original_publish(**kwargs)
+            events.append("manifest_publish")
+            return result
+        monkeypatch.setattr(authority, "publish_epoch", publish)
+        remote = {"nodes": [s02_node("root"), s02_node("moved", parent_id="root", name="old")]}
+        async def old_fetch():
+            events.append("old_fetch")
+            return json.loads(json.dumps(remote))
+        async def fetch(client, max_retries):
+            events.append("final_fetch")
+            return remote
+        monkeypatch.setattr("workflowy_mcp.client.api_client_etch.fetch_nodes_export_uncached", fetch)
+        old = asyncio.create_task(run_full_refresh(paths=client._coherence_paths(), fetch=old_fetch,
+            settle_seconds=0, snapshot_dir=snapshots, poll_seconds=0.001))
+        await downloaded.wait()
+        remote = {"nodes": [s02_node("root"), s02_node("last", parent_id="root"),
+                            s02_node("moved", parent_id="last", name="updated", note="last field", priority=7)]}
+        events.append("mutation_return")
+        write_job(jobs, status="completed", account_scope_id=client._safe_account_scope_id())
+        await srv._refresh_carto_job_tracker_once()
+        assert record(jobs)["state"] == "reserved"
+        task = srv._nodes_export_refresh_task
+        await asyncio.sleep(0.02)
+        assert "final_fetch" not in events
+        release.set()
+        await asyncio.gather(old, task)
+        result = record(jobs)
+        assert result["state"] == "published"
+        manifest = read_manifest(client._coherence_paths(), required=True)
+        persisted = json.loads(Path(manifest.base_snapshot_path).read_text())["nodes_export"]
+        for nodes in (persisted["nodes"], adopted[-1].nodes_export["nodes"]):
+            by_id = {n["id"]: n for n in nodes}
+            assert by_id["moved"]["parent_id"] == "last"
+            assert by_id["moved"]["name"] == "updated"
+            assert by_id["moved"]["note"] == "last field"
+            assert by_id["moved"]["priority"] == 7
+            assert "last" in by_id
+        assert events == ["old_fetch", "mutation_return", "manifest_publish", "final_fetch", "manifest_publish", "adopt"]
+        assert result["receipt"]["epoch_id"] == adopted[-1].epoch_id == manifest.epoch_id
+    from pathlib import Path
+    asyncio.run(exercise())
+
+
+def test_scan_through_update_is_serialized_and_off_loop(final_env, monkeypatch):
+    """Historical name: the retired scan lock's one-at-a-time oracle is gone.
+
+    Both data workers stay off-loop and the post-read loop update still retains
+    final-refresh responsibility. Only that deleted-lock sub-observation retires
+    under 72EJFD's separable mixed-test clause.
+    """
+    jobs, calls = final_env
+    started = threading.Event()
+    release = threading.Event()
+    entries = []
+    original = srv._scan_carto_job_inventory_locked
+    loop_thread = threading.get_ident()
+
+    def paused(*a, **k):
+        entries.append(threading.get_ident())
+        if len(entries) == 1:
+            started.set()
+        assert threading.get_ident() != loop_thread, "history scan ran on the event loop"
+        if len(entries) == 1:
+            assert release.wait(5)
+        return original(*a, **k)
+    monkeypatch.setattr(srv, "_scan_carto_job_inventory_locked", paused)
+    if __import__("os").environ.get("CUT2B_NEUTRALIZE_HISTORY_OFFLOAD"):
+        real_cpu = srv.run_carto_cpu
+        async def inline_inventory(phase, function, *args, **kwargs):
+            if phase == "job-inventory":
+                return function(*args, **kwargs)
+            return await real_cpu(phase, function, *args, **kwargs)
+        monkeypatch.setattr(srv, "run_carto_cpu", inline_inventory)
+
+    async def exercise():
+        loop_thread = threading.get_ident()
+        first = asyncio.create_task(srv._scan_carto_job_files_async(str(jobs)))
+        assert await asyncio.to_thread(started.wait, 5)
+        second = asyncio.create_task(srv._scan_carto_job_files_async(str(jobs)))
+        await asyncio.sleep(0.02)
+        write_job(jobs)
+        release.set()
+        await asyncio.gather(first, second)
+        await srv._refresh_carto_job_tracker_once()
+        assert all(t != loop_thread for t in entries)
+    asyncio.run(exercise())
+    assert not calls
+    assert record(jobs)["state"] == "observing"
+
+
+@pytest.mark.parametrize("fault", ["schedule", "fetch", "materialize", "candidate", "publish", "adopt", "terminal_bookkeeping", "receipt", "cancel", "cancel_before_start"])
+def test_actual_final_pipeline_failure_retains_responsibility_and_normal_poll_recovers(coordinator_env, tmp_path, monkeypatch, fault):
+    from test_coherence_s02_carto_lineage import _make_client
+    from coherence_harness import s02_node
+    import workflowy_mcp.coherence.refresh_authority as authority
+    import workflowy_mcp.coherence.operation_cache as opc
+    jobs, _ = coordinator_env
+    client, _, _ = _make_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(gov, "get_cartographer_jobs_dir", lambda: jobs)
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    monkeypatch.setattr(client, "_refresh_settle_seconds", lambda _: 0)
+    monkeypatch.setattr(client, "_gc_nodes_export_snapshots", lambda: None)
+    failing = [True]
+    fetches = []
+    async def fetch(client, max_retries):
+        fetches.append(1)
+        if failing[0] and fault in {"fetch", "cancel"}:
+            if fault == "cancel":
+                raise asyncio.CancelledError()
+            raise OSError("injected fetch failure")
+        return {"nodes": [s02_node("last")]}
+    monkeypatch.setattr("workflowy_mcp.client.api_client_etch.fetch_nodes_export_uncached", fetch)
+    if fault in {"materialize", "candidate"}:
+        name = {"materialize": "materialize_payload_with_records", "candidate": "write_snapshot_candidate"}[fault]
+        original = getattr(authority, name)
+        def fail(*a, **k):
+            if failing[0]:
+                raise OSError("injected " + fault)
+            return original(*a, **k)
+        monkeypatch.setattr(authority, name, fail)
+    if fault == "publish":
+        original = authority.publish_epoch
+        async def fail(**kwargs):
+            if failing[0]:
+                raise OSError("injected publication failure")
+            return await original(**kwargs)
+        monkeypatch.setattr(authority, "publish_epoch", fail)
+    if fault == "terminal_bookkeeping":
+        original = authority._write_claim_status
+        async def fail(paths, claim, status, **kwargs):
+            if failing[0] and status == "completed":
+                raise OSError("injected bookkeeping failure after manifest publication")
+            return await original(paths, claim, status, **kwargs)
+        monkeypatch.setattr(authority, "_write_claim_status", fail)
+    if fault == "adopt":
+        original = client._publish_lineage_view
+        def fail(*a, **k):
+            if failing[0]:
+                raise OSError("injected post-publication adoption failure")
+            return original(*a, **k)
+        monkeypatch.setattr(client, "_publish_lineage_view", fail)
+    if fault == "receipt":
+        original = srv._carto_final_receipt_valid
+        def fail(value):
+            return False if failing[0] else original(value)
+        monkeypatch.setattr(srv, "_carto_final_receipt_valid", fail)
+    if fault == "schedule":
+        original = opc.create_isolated_context_task
+        def fail(coro, *a, **k):
+            if failing[0]:
+                raise RuntimeError("injected task factory failure")
+            return original(coro, *a, **k)
+        monkeypatch.setattr(opc, "create_isolated_context_task", fail)
+    if fault == "cancel_before_start":
+        original = opc.create_isolated_context_task
+        def gated(coro, *a, **k):
+            if not failing[0] or getattr(getattr(coro, "cr_code", None), "co_name", "") != "_nodes_export_cache_refresh_worker":
+                return original(coro, *a, **k)
+            async def wait_before_first_instruction():
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    coro.close()
+            return original(wait_before_first_instruction(), *a, **k)
+        monkeypatch.setattr(opc, "create_isolated_context_task", gated)
+    async def exercise():
+        write_job(jobs, status="completed", account_scope_id=client._safe_account_scope_id())
+        await srv._refresh_carto_job_tracker_once()
+        task = srv._nodes_export_refresh_task
+        if task is not None:
+            if fault == "cancel_before_start":
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        # The coordinator can already be idle while its failed execution's
+        # shielded receipt handoff is still running; await that responsibility,
+        # including when no global task is available to await.
+        for _ in range(1000):
+            if not srv._carto_final_live_attempts:
+                break
+            await asyncio.sleep(0.001)
+        assert record(jobs)["state"] in {"reserved", "pending"}
+        assert not srv._carto_final_disposition_valid(record(jobs))
+        failing[0] = False
+        await srv._refresh_carto_job_tracker_once()
+        retry = srv._nodes_export_refresh_task
+        if retry is not None:
+            await retry
+        # Task/idle bookkeeping is not final evidence (especially during the
+        # cancellation handoff). Wait for the durable exact disposition.
+        deadline = asyncio.get_running_loop().time() + 5
+        while record(jobs)["state"] != "published" and asyncio.get_running_loop().time() < deadline:
+            await srv._refresh_carto_job_tracker_once()
+            current = srv._nodes_export_refresh_task
+            if current is not None:
+                await current
+            await asyncio.sleep(0.001)
+        assert record(jobs)["state"] == "published", record(jobs)
+        count = len(fetches)
+        assert count == (1 if fault in {"schedule", "cancel_before_start"} else 2)
+        await srv._refresh_carto_job_tracker_once()
+        assert len(fetches) == count
+        assert not srv._carto_final_live_attempts
+    asyncio.run(exercise())
+
+
+def test_policy_skip_is_lifetime_exact_and_does_not_become_timer_debt(coordinator_env, monkeypatch):
+    jobs, _ = coordinator_env
+    monkeypatch.setattr(srv, "_cache_refresh_should_skip", lambda: True)
+    monkeypatch.setattr(srv, "_cache_refresh_remaining_seconds", lambda: 60)
+    async def forbidden(**kwargs):
+        raise AssertionError("policy skip must not fetch")
+    monkeypatch.setattr(srv, "get_client", lambda: SimpleNamespace(refresh_nodes_export_cache=forbidden))
+    async def exercise():
+        write_job(jobs, status="completed")
+        await srv._refresh_carto_job_tracker_once()
+        assert record(jobs)["state"] == "skipped_policy"
+        assert "receipt" not in record(jobs)
+        monkeypatch.setattr(srv, "_cache_refresh_should_skip", lambda: False)
+        await srv._refresh_carto_job_tracker_once()
+        assert srv._nodes_export_refresh_task is None
+    asyncio.run(exercise())
+
+
+def test_stale_callback_and_foreign_account_cannot_complete_reservation(final_env):
+    jobs, calls = final_env
+    async def exercise():
+        write_job(jobs, status="completed", account_scope_id="expected")
+        await srv._refresh_carto_job_tracker_once()
+        obligation = calls[0]["final_obligations"]
+        token = calls[0]["attempt_token"]
+        await srv._finish_carto_final_batch(obligation, "old-token", receipt=good_receipt())
+        assert record(jobs)["state"] == "reserved"
+        await srv._finish_carto_final_batch(obligation, token, receipt=good_receipt())
+        assert record(jobs)["state"] == "pending"
+        await srv._refresh_carto_job_tracker_once()
+        replacement = calls[-1]
+        await srv._finish_carto_final_batch(obligation, token, receipt=good_receipt(account_scope_id="expected"))
+        assert record(jobs)["state"] == "reserved"
+        await srv._finish_carto_final_batch(replacement["final_obligations"], replacement["attempt_token"],
+                                           receipt=good_receipt(account_scope_id="expected"))
+        assert record(jobs)["state"] == "published"
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("bad", ["enumeration", "duplicate", "read_error"])
+def test_inventory_uncertainty_blocks_another_terminal_and_recovers(final_env, monkeypatch, bad):
+    from pathlib import Path
+    jobs, calls = final_env
+    write_job(jobs, "B", "completed")
+    cleanup = lambda: None
+    if bad == "enumeration":
+        original = Path.iterdir
+        def fail(path):
+            if path == jobs:
+                raise OSError("cannot enumerate")
+            return original(path)
+        monkeypatch.setattr(Path, "iterdir", fail)
+        cleanup = lambda: monkeypatch.setattr(Path, "iterdir", original)
+    elif bad == "duplicate":
+        path, payload = write_job(jobs, "A", "completed")
+        duplicate = jobs / "duplicate.json"
+        gov.atomic_write_json(duplicate, payload)
+        cleanup = duplicate.unlink
+    else:
+        path, _ = write_job(jobs, "A", "completed")
+        original = Path.open
+        def fail(path_arg, *a, **k):
+            if path_arg == path:
+                raise OSError("cannot read")
+            return original(path_arg, *a, **k)
+        monkeypatch.setattr(Path, "open", fail)
+        cleanup = lambda: monkeypatch.setattr(Path, "open", original)
+    async def exercise():
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        assert not srv._carto_jobs_quiescent_event.is_set()
+        cleanup()
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        assert "B" in {o["job_id"] for o in calls[0]["final_obligations"]}
+    asyncio.run(exercise())
+
+
+def test_legacy_reservation_owner_does_not_create_lifetime_responsibility(final_env, monkeypatch):
+    jobs, calls = final_env
+    # History without an actual task is not this daemon's terminal proof.
+    gov.atomic_write_json(jobs / "A.json", {"id": "A", "type": "CARTO_REFRESH", "status": "completed"})
+    monkeypatch.setattr(srv, "_carto_final_live_attempts", set())
+    asyncio.run(srv._refresh_carto_job_tracker_once())
+    assert calls == [] and not srv._carto_final_obligations
+
+
+def test_legacy_marker_is_not_success_and_exact_receipt_survives_history_omission(final_env, monkeypatch):
+    jobs, calls = final_env
+    write_job(jobs, status="completed")
+    async def exercise():
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        # Keep the exact-receipt oracle without the obsolete disk marker:
+        # a structurally valid but non-new-fetch receipt cannot discharge debt.
+        from dataclasses import replace
+        assert not srv._carto_final_receipt_valid(None)
+        original = srv._carto_final_obligations["A"]
+        with monkeypatch.context() as patch:
+            clone = replace(original)
+            patch.setattr(srv, "_carto_final_obligations", {"A": clone})
+            patch.setattr(srv, "_carto_job_states", dict(srv._carto_job_states))
+            patch.setattr(srv, "_carto_pending_terminal_cache_jobs", set(srv._carto_pending_terminal_cache_jobs))
+            patch.setattr(srv, "_carto_jobs_quiescent_event", asyncio.Event())
+            srv._finish_carto_final_batch_locked(
+                calls[0]["final_obligations"], calls[0]["attempt_token"],
+                receipt=good_receipt(new_fetch=False),
+            )
+            assert clone.state == "pending"
+        await srv._finish_carto_final_batch(calls[0]["final_obligations"], calls[0]["attempt_token"], receipt=good_receipt())
+        assert record(jobs)["state"] == "published"
+        srv._carto_jobs_tracker_initialized = False
+        srv._carto_job_states = {}
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        (jobs / "A.json").unlink()
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+    asyncio.run(exercise())
+
+
+def test_matching_terminal_record_need_not_wait_for_live_claim_exit(final_env):
+    """Terminal proof is the actual task terminal, not a legacy claim's exit."""
+    jobs, calls = final_env
+    write_job(jobs, status="completed_with_warnings")
+    asyncio.run(srv._refresh_carto_job_tracker_once())
+    assert len(calls) == 1
+    assert record(jobs)["terminal_proof"]["kind"] == "task_terminal"
+
+
+def test_lifetime_recovers_interrupted_attempt_when_history_is_omitted(final_env):
+    jobs, calls = final_env
+    path, _ = write_job(jobs, status="completed")
+    async def exercise():
+        await srv._refresh_carto_job_tracker_once()
+        old_token = calls[0]["attempt_token"]
+        path.unlink()
+        srv._carto_final_live_attempts.clear()  # Lost attempt, NOT a daemon restart (F05).
+        srv._carto_jobs_tracker_initialized = False
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 2
+        assert calls[1]["attempt_token"] != old_token
+        assert calls[1]["final_obligations"][0]["terminal_proof"]["status"] == "completed"
+    asyncio.run(exercise())
+
+
+def test_later_job_cannot_inherit_inflight_batch_receipt_and_gc_cannot_erase_it(coordinator_env, monkeypatch):
+    jobs, _ = coordinator_env
+    async def exercise():
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = []
+        async def refresh(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                entered.set()
+                await release.wait()
+            return {"success": True, "final_publication_receipt": good_receipt(epoch_number=len(calls))}
+        monkeypatch.setattr(srv, "get_client", lambda: SimpleNamespace(refresh_nodes_export_cache=refresh))
+        write_job(jobs, "B", "completed", updated_at="2020-01-01")
+        await srv._refresh_carto_job_tracker_once()
+        await entered.wait()
+        b_task = srv._nodes_export_refresh_task
+        srv._gc_carto_jobs(str(jobs), protected_ids=srv._carto_gc_protection())
+        await srv._clear_carto_job_history(str(jobs))
+        assert (jobs / "B.json").exists()
+        write_job(jobs, "A", "running")
+        await srv._refresh_carto_job_tracker_once()
+        write_job(jobs, "A", "completed")
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+        assert record(jobs, "A")["state"] == "pending"
+        release.set()
+        await b_task
+        assert record(jobs, "B")["state"] == "published"
+        assert record(jobs, "A")["state"] == "pending"
+        await srv._refresh_carto_job_tracker_once()
+        task = srv._nodes_export_refresh_task
+        if task:
+            await task
+        assert record(jobs, "A")["state"] == "published"
+        assert record(jobs, "A")["receipt"]["epoch_number"] == 2
+        assert record(jobs, "B")["receipt"]["epoch_number"] == 1
+        assert len(calls) == 2
+    asyncio.run(exercise())
+
+
+def test_cancel_during_coordinator_handoff_retains_exact_accepted_responsibility(coordinator_env, monkeypatch):
+    jobs, _ = coordinator_env
+    async def exercise():
+        entered, finish, accepted, release = (asyncio.Event() for _ in range(4))
+        fetches = []
+        async def refresh(**kwargs):
+            fetches.append(kwargs)
+            entered.set()
+            await finish.wait()
+            return {"success": True, "final_publication_receipt": good_receipt()}
+        async def handoff(**kwargs):
+            result = await REAL_REQUEST(**kwargs)
+            accepted.set()
+            await release.wait()
+            return result
+        monkeypatch.setattr(srv, "_request_nodes_export_cache_refresh_async", handoff)
+        monkeypatch.setattr(srv, "get_client", lambda: SimpleNamespace(refresh_nodes_export_cache=refresh))
+        write_job(jobs, status="completed")
+        first = asyncio.create_task(srv._refresh_carto_job_tracker_once())
+        try:
+            await asyncio.wait_for(accepted.wait(), 5)
+            cancelled_token, = srv._carto_final_live_attempts
+            assert record(jobs)["state"] == "reserved"
+            first.cancel()
+            await asyncio.sleep(0)
+            assert not first.done(), "tracker escaped before its coordinator handoff was joined"
+            assert cancelled_token in srv._carto_final_live_attempts
+            await srv._refresh_carto_job_tracker_once()
+            assert record(jobs)["attempt_token"] == cancelled_token
+        finally:
+            release.set()
+        outcome, = await asyncio.gather(first, return_exceptions=True)
+        assert isinstance(outcome, asyncio.CancelledError)
+        await asyncio.wait_for(entered.wait(), 5)
+        assert cancelled_token in srv._carto_final_live_attempts
+        assert record(jobs)["state"] == "reserved" and record(jobs)["attempt_token"] == cancelled_token
+        assert fetches == [{"refresh_kind": "system", "require_new_fetch": True}]
+        worker = srv._nodes_export_refresh_task
+        finish.set()
+        await worker
+        assert record(jobs)["state"] == "published"
+        assert record(jobs)["attempt_token"] == cancelled_token
+        await srv._refresh_carto_job_tracker_once()
+        assert len(fetches) == 1 and not srv._carto_final_live_attempts
+
+    asyncio.run(exercise())
+
+
+def test_current_token_wrong_incarnation_cannot_release_or_discharge_attempt(final_env):
+    jobs, calls = final_env
+
+    async def exercise():
+        write_job(jobs, status="completed", account_scope_id="test-account")
+        await srv._refresh_carto_job_tracker_once()
+        request = calls[0]
+        token = request["attempt_token"]
+        obligations = request["final_obligations"]
+        before = record(jobs)
+        wrong = [{**obligations[0], "incarnation": "different-incarnation"}]
+        await srv._finish_carto_final_batch(wrong, token, receipt=good_receipt())
+        assert record(jobs) == before, "same-token mismatched incarnation altered durable responsibility"
+        assert token in srv._carto_final_live_attempts, "foreign acknowledgment released a live attempt"
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1 and record(jobs) == before
+        await srv._finish_carto_final_batch(obligations, token, receipt=good_receipt())
+        assert record(jobs)["state"] == "published"
+        assert token not in srv._carto_final_live_attempts
+        await srv._refresh_carto_job_tracker_once()
+        assert len(calls) == 1
+
+    asyncio.run(exercise())
+
+
+def test_lost_done_callback_before_worker_entry_recovers_on_explicit_tracker_poll(coordinator_env, monkeypatch):
+    import workflowy_mcp.coherence.operation_cache as opc
+    jobs, _ = coordinator_env
+    original_factory = opc.create_isolated_context_task
+    original_recover = srv._recover_nodes_export_refresh_task
+    callbacks, recoveries, fetches = [], [], []
+
+    async def exercise():
+        wrapper_entered, fetch_entered, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        def gated_factory(coro, *args, **kwargs):
+            async def before_worker_entry():
+                try:
+                    wrapper_entered.set()
+                    await asyncio.Event().wait()
+                    return await coro
+                finally:
+                    coro.close()
+            return original_factory(before_worker_entry(), *args, **kwargs)
+
+        def lost_callback(task):
+            callbacks.append(task)  # deliberately lose the recovery dispatch, not the worker state
+
+        async def recover(task):
+            await original_recover(task)
+            recoveries.append(task)
+            assert record(jobs)["state"] == "pending"
+            assert not srv._carto_final_live_attempts
+
+        async def refresh(**kwargs):
+            fetches.append(kwargs)
+            fetch_entered.set()
+            await finish.wait()
+            return {"success": True, "final_publication_receipt": good_receipt()}
+
+        monkeypatch.setattr(opc, "create_isolated_context_task", gated_factory)
+        monkeypatch.setattr(srv, "_nodes_export_refresh_task_done", lost_callback)
+        monkeypatch.setattr(srv, "_recover_nodes_export_refresh_task", recover)
+        monkeypatch.setattr(srv, "get_client", lambda: SimpleNamespace(refresh_nodes_export_cache=refresh))
+        write_job(jobs, status="completed")
+        await srv._refresh_carto_job_tracker_once()
+        await asyncio.wait_for(wrapper_entered.wait(), 5)
+        task = srv._nodes_export_refresh_task
+        old_token = record(jobs)["attempt_token"]
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert callbacks == [task] and recoveries == []
+        assert srv._nodes_export_refresh_task is task and task.done()
+        assert record(jobs)["state"] == "reserved" and old_token in srv._carto_final_live_attempts
+        assert fetches == []
+        monkeypatch.setattr(opc, "create_isolated_context_task", original_factory)
+        await srv._refresh_carto_job_tracker_once()  # actual done-task fallback, before its next scan
+        assert recoveries == [task]
+        await asyncio.wait_for(fetch_entered.wait(), 5)
+        assert record(jobs)["state"] == "reserved" and record(jobs)["attempt_token"] != old_token
+        for _ in range(3):
+            await srv._refresh_carto_job_tracker_once()
+        assert len(fetches) == 1
+        worker = srv._nodes_export_refresh_task
+        finish.set()
+        await worker
+        assert record(jobs)["state"] == "published" and not srv._carto_final_live_attempts
+        await srv._refresh_carto_job_tracker_once()
+        assert len(fetches) == 1
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("bad_receipt", ["missing", "nonobject", "empty", "missing_epoch", "not_new", "not_adopted", "foreign_account"])
+@pytest.mark.parametrize("omit_rows", [False, True])
+def test_restart_ignores_invalid_v2_receipts_without_reconstructing_debt(final_env, bad_receipt, omit_rows):
+    jobs, calls = final_env
+    # RETIRE durable restart recovery, retaining invalid-receipt/no-false-success
+    # checks. F05 covers the real fresh lifetime and explicit cache healing.
+    async def exercise():
+        records = {}
+        for jid in ("A", "B", "valid_published", "valid_skipped"):
+            gov.atomic_write_json(jobs / f"{jid}.json", {"id": jid, "type": "CARTO_REFRESH", "status": "completed"})
+            base = {"schema_version": 2, "job_id": jid, "path": str(jobs / f"{jid}.json"),
+                    "incarnation": "claim:" + jid, "account_scope_id": "test-account", "relevant": True,
+                    "terminal_proof": {"kind": "persisted_terminal", "status": "completed"},
+                    "state": "published", "attempt_token": "old", "receipt": good_receipt()}
+            if jid == "valid_skipped":
+                base.update(state="skipped_policy", skip_reason="cache_refresh_skip_toggle_active")
+                base.pop("receipt")
+            records[jid] = base
+        valid_published = records["valid_published"]
+        valid_skipped = records["valid_skipped"]
+        for jid in ("A", "B"):
+            damaged = dict(records[jid])
+            if bad_receipt == "missing":
+                damaged.pop("receipt")
+            else:
+                receipt = {"nonobject": [], "empty": {},
+                           "missing_epoch": {k: v for k, v in good_receipt().items() if k != "epoch_id"},
+                           "not_new": good_receipt(new_fetch=False),
+                           "not_adopted": good_receipt(adopted=False),
+                           "foreign_account": good_receipt(account_scope_id="other-account")}[bad_receipt]
+                damaged["receipt"] = receipt
+            assert not srv._carto_final_disposition_valid(damaged)
+            if omit_rows:
+                (jobs / f"{jid}.json").unlink()
+        await srv._refresh_carto_job_tracker_once()
+        assert calls == [] and not srv._carto_final_obligations
+        assert "receipt" not in valid_skipped
+        await srv._refresh_carto_job_tracker_once()
+        assert calls == [], "legacy marker created responsibility in a fresh lifetime"
+        assert srv._carto_final_disposition_valid(valid_published) and srv._carto_final_disposition_valid(valid_skipped)
+
+    asyncio.run(exercise())

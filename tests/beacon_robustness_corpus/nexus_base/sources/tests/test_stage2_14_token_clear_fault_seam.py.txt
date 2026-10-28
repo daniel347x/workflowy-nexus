@@ -1,0 +1,114 @@
+"""Real process death after epoch publication, before claim terminalization.
+
+The historical filename/function name remain. No token-clearing seam remains.
+CUT-2B later converts this geometry to the single-daemon restart case.
+"""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+from mutation_lease_harness import ACCOUNT_A, make_lease_env, node
+from stage2_harness import REPO, collect_distinct_pids, finish_actor, launch_actor, read_result, touch
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp.coherence.schema import read_manifest, read_refresh_claim
+
+_TOPO = [node("vault"), node("repo", "vault"), node("file", "repo")]
+_COMMON = '''
+import asyncio, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[2] + '/tests')
+from coherence_harness import touch, s02_exit_ops
+from stage2_harness import write_result
+from workflowy_mcp.coherence import run_full_refresh
+from workflowy_mcp.coherence.paths import coherence_paths
+root = Path(sys.argv[1])
+paths = coherence_paths('a' * 32, jobs_root=root / 'cartographer_jobs')
+async def fetch():
+    return {'nodes': [
+        {'id': 'vault', 'name': 'vault', 'parent_id': None},
+        {'id': 'repo', 'name': 'repo', 'parent_id': 'vault'},
+        {'id': 'file', 'name': 'file', 'parent_id': 'repo'},
+    ]}
+'''
+_REFRESH_EXIT_AT_SEAM = _COMMON + '''
+touch(root / 'pid_refresh1', str(os.getpid()))
+asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind='recovery', settle_seconds=0,
+    snapshot_dir=root / 'snapshots', poll_seconds=0.05,
+    fs_ops=s02_exit_ops('claim_replace', times=6, exit_code=42),
+))
+'''
+_REFRESH_SUCCESSOR = _COMMON + '''
+touch(root / 'pid_refresh2', str(os.getpid()))
+outcome = asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind='recovery', settle_seconds=0,
+    snapshot_dir=root / 'snapshots', poll_seconds=0.05,
+))
+write_result(root / 'refresh2_result.json', {
+    'status': outcome.status, 'epoch_number': outcome.epoch_number,
+    'successor_refresh_performed': outcome.successor_refresh_performed,
+})
+'''
+_NEUTRALIZE_RECOVERY = '''
+from workflowy_mcp.coherence import refresh_authority as authority
+def fail_recovery(*args, **kwargs):
+    raise RuntimeError('test-only dead-owner recovery disabled')
+authority._recover_dead_owner_locked = fail_recovery
+'''
+
+
+def _death_then_successor(root, *, neutralize=False):
+    touch(root / "pid_parent", str(os.getpid()))
+    env = make_lease_env(root, ACCOUNT_A, nodes=_TOPO)
+    assert read_refresh_claim(env.paths) is None
+    first = launch_actor(_REFRESH_EXIT_AT_SEAM, str(root), str(REPO))
+    out, err = first.communicate(timeout=120)
+    assert first.returncode == 42, f"refresh1 did not die at claim replace 6:\n{out}\n{err}"
+    manifest = read_manifest(env.paths)
+    assert manifest.epoch_number == 1
+    assert manifest.base_snapshot_path is not None
+    from workflowy_mcp.coherence.snapshot_store import materialize_current_payload
+
+    assert {n["id"] for n in materialize_current_payload(env.paths, manifest).payload["nodes"]} == {"vault", "repo", "file"}
+    claim = read_refresh_claim(env.paths)
+    assert claim is not None and not claim.is_terminal
+    assert claim.target_epoch_id == manifest.epoch_id
+    assert gov.classify_owner_liveness(gov.StoredOwnerIdentity.from_refresh_claim(claim)) == "dead"
+    assert manifest.dirty_status.generation == 0
+    code = _REFRESH_SUCCESSOR
+    if neutralize:
+        code = code.replace("outcome = asyncio.run", _NEUTRALIZE_RECOVERY + "\noutcome = asyncio.run")
+    second = launch_actor(code, str(root), str(REPO))
+    try:
+        # Check exit BEFORE waiting for output: the injected failure is prompt.
+        finish_actor(second, label="successor refresh")
+        result = read_result(root / "refresh2_result.json")
+        assert result["status"] == "published"
+        assert result["epoch_number"] == 2
+        assert result["successor_refresh_performed"] is True
+        assert read_manifest(env.paths).dirty_status.generation == 0
+        assert len(set(collect_distinct_pids(root, ["parent", "refresh1", "refresh2"]).values())) == 3
+    finally:
+        if second.poll() is None:
+            finish_actor(second, label="successor refresh cleanup")
+
+
+# @beacon[
+#   id=auto-beacon@test_named_seam_process_death_between_publish_and_clear_successor_recovers-jkzk,
+#   role=test_named_seam_process_death_between_publish_and_clear_successor_recovers,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_named_seam_process_death_between_publish_and_clear_successor_recovers(tmp_path):
+    """Death after publication and before terminalization leaves a whole E1;
+    a real successor recovers the dead owner and publishes E2."""
+    _death_then_successor(tmp_path)
+
+
+def test_successor_recovery_sensitivity(tmp_path):
+    with pytest.raises(AssertionError, match="successor refresh failed"):
+        _death_then_successor(tmp_path / "neutralized", neutralize=True)
+    _death_then_successor(tmp_path / "restored")

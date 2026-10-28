@@ -1,0 +1,125 @@
+def _extract_sh_beacon_context(
+    lines: list[str],
+    comment_line: int,
+    beacon_id: Optional[str] = None,
+) -> List[str]:
+    """Extract nearby shell comments (non-beacon) around a shell @beacon block.
+    This populates the "CONTEXT COMMENTS (SH)" section of Workflowy notes.
+    Rules:
+    - Never include any @beacon[...] / @beacon-close[...] delimiter blocks (or their metadata lines).
+    - When encountering a @beacon-close block, treat it as the terminator ONLY if its id matches
+      `beacon_id` (supports overlapping/nested span beacons).
+
+    - Skip empty comment bodies and hash-only separators (e.g. "###").
+    """
+    n = len(lines)
+    context: List[str] = []
+    # @beacon[
+    #   id=auto-beacon@_extract_sh_beacon_context._strip_hash_prefix-89ha,
+    #   role=ƒ _strip_hash_prefix(raw_line: str),
+    #   slice_labels=ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _strip_hash_prefix(raw_line: str) -> str:
+        s = raw_line.lstrip()
+        if s.startswith("#"):
+            # Remove only ONE leading '#'. This avoids turning '###' into ''
+            # (which produced blank lines in the extracted context).
+            return s[1:].lstrip()
+        return s
+    # @beacon[
+    #   id=auto-beacon@_extract_sh_beacon_context._is_meta_block_end-lxa3,
+    #   role=ƒ _is_meta_block_end(body: str),
+    #   slice_labels=ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _is_meta_block_end(body: str) -> bool:
+        # Close delimiter is a line that begins with ']'.
+        # We intentionally do NOT use substring matching to avoid false positives.
+        return body.strip().startswith("]")
+    # Locate the end of the opener metadata block so we can start scanning below it.
+    open_end = comment_line
+
+    j = comment_line
+    while 1 <= j <= n:
+        body = _strip_hash_prefix(lines[j - 1])
+        if _is_meta_block_end(body):
+            open_end = j
+            break
+        j += 1
+
+    # ABOVE: collect contiguous comment bodies above the opener.
+    j = comment_line - 1
+    while j >= 1:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j -= 1
+            continue
+        stripped = raw.lstrip()
+        if not stripped.startswith("#"):
+            break
+        body = _strip_hash_prefix(raw)
+        if not body:
+            j -= 1
+            continue
+        if body.startswith("@beacon") or _is_meta_block_end(body):
+            break
+        if set(body.strip()) <= {"#"}:
+            j -= 1
+            continue
+        context.insert(0, body)
+        j -= 1
+
+    # BELOW: collect contiguous comment bodies below the opener until we hit
+    # a non-comment line or a matching @beacon-close block.
+    j = open_end + 1
+    while j <= n:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j += 1
+            continue
+        stripped = raw.lstrip()
+        if not stripped.startswith("#"):
+            break
+        body = _strip_hash_prefix(raw)
+        if not body:
+            j += 1
+            continue
+        # Skip nested opener blocks entirely (do not treat as a terminator).
+        if body.startswith("@beacon["):
+            j += 1
+            while j <= n:
+                inner_body = _strip_hash_prefix(lines[j - 1])
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            continue
+        # Stop at a matching close block; ignore close blocks for other beacon ids.
+        if body.startswith("@beacon-close["):
+            close_id: Optional[str] = None
+            j += 1
+            while j <= n:
+                inner_body = _strip_hash_prefix(lines[j - 1]).strip()
+                if inner_body.startswith("id=") and close_id is None:
+                    close_id = inner_body.split("=", 1)[1].strip()
+                    # Drop common trailing punctuation
+                    close_id = close_id.rstrip(",").rstrip("]").strip()
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            # Only stop when the close id matches this beacon id.
+            if beacon_id and close_id and close_id != beacon_id:
+                continue
+            break
+        # Any other beacon marker terminates the context region.
+        if body.startswith("@beacon"):
+            break
+        if set(body.strip()) <= {"#"}:
+            j += 1
+            continue
+        context.append(body)
+        j += 1
+
+    return _strip_beacon_meta_blocks_from_context(context)

@@ -1,0 +1,4520 @@
+# Generated file: do not edit by hand. Regenerate it with the build script from the upstream source.
+
+import ast
+import os
+import re
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Sequence
+
+try:
+    from tree_sitter import Parser
+    from tree_sitter_language_pack import get_language, get_parser
+    _HAVE_TREE_SITTER = True
+except Exception:
+    Parser = None
+    get_language = None
+    get_parser = None
+    _HAVE_TREE_SITTER = False
+
+NODE_DECORATION_SYMBOLS = frozenset({
+    "🔱",
+    "📂",
+    "📄",
+    "🐍",
+    "📘",
+    "🗄️",
+    "🐚",
+    "📦",
+    "ƒ",
+    "⚡",
+    "💎",
+    "🟨",
+    "🟦",
+    "🟩",
+})
+
+
+def strip_leading_decoration_symbols(text_value):
+    if not text_value or not isinstance(text_value, str):
+        return text_value or ""
+    s = text_value
+    symbols_longest_first = sorted(NODE_DECORATION_SYMBOLS, key=len, reverse=True)
+    while True:
+        s = s.lstrip()
+        while s and s[0] in ("️", "‍"):
+            s = s[1:]
+        matched = False
+        for sym in symbols_longest_first:
+            if sym and s.startswith(sym):
+                s = s[len(sym):]
+                matched = True
+                break
+        if not matched:
+            break
+    return s.strip()
+
+
+_FORBIDDEN_COMMENT_TOKENS = ("/*", "*/", "<!--", "-->", "@beacon[", "BEACON (")
+
+
+_TRANSPORT_ENTITY_RE = re.compile(
+    r"&(?:lt|gt|amp|quot);|&#\d+;|&#[xX][0-9a-fA-F]+;",
+    re.IGNORECASE,
+)
+
+
+def validate_beacon_comment_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    comment = str(value).strip()
+    if not comment:
+        return None
+    comment = strip_leading_decoration_symbols(comment)
+    if not comment:
+        return None
+    for ch in comment:
+        code = ord(ch)
+        if (
+            code < 0x20
+            or code == 0x7F
+            or 0x80 <= code <= 0x9F
+            or code in (0x2028, 0x2029)
+        ):
+            raise ValueError(
+                f"unsafe beacon comment {comment!r}: contains forbidden "
+                f"control character U+{code:04X}"
+            )
+    for token in _FORBIDDEN_COMMENT_TOKENS:
+        if token in comment:
+            raise ValueError(
+                f"unsafe beacon comment {comment!r}: contains forbidden token {token!r}"
+            )
+    if _TRANSPORT_ENTITY_RE.search(comment):
+        raise ValueError(
+            f"unsafe beacon comment {comment!r}: contains an HTML entity pattern"
+        )
+    return comment
+
+
+def _parser_normalize_comment_value(value: Optional[str]) -> str:
+    text = (value or "").strip()
+    while text and text[-1] in ",]":
+        text = text[:-1].rstrip()
+    return text
+
+
+BEACON_FIELD_KEYS = frozenset({
+    "id",
+    "role",
+    "slice_labels",
+    "kind",
+    "start_snippet",
+    "end_snippet",
+    "comment",
+    "comments",
+    "show_span",
+})
+
+
+_BEACON_FIELD_START_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+def parse_beacon_field_lines(texts: Any) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    cur_key: Optional[str] = None
+    parts: list[str] = []
+
+    def _flush() -> None:
+        if cur_key is None:
+            return
+        val = " ".join(p for p in parts if p).strip()
+        while val and val[-1] in ",]":
+            val = val[:-1].rstrip()
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
+            val = val[1:-1]
+        fields[cur_key] = val
+
+    for raw in texts or ():
+        text = (raw or "").strip()
+        if not text:
+            continue
+        m = _BEACON_FIELD_START_RE.match(text)
+        if m and m.group(1) in BEACON_FIELD_KEYS:
+            _flush()
+            cur_key = m.group(1)
+            parts = [text[m.end():].strip()]
+        elif cur_key is not None:
+            parts.append(text)
+    _flush()
+    return fields
+
+
+def beacon_field_unknown_keys(texts: Any) -> list[str]:
+    unknown: list[str] = []
+    for raw in texts or ():
+        text = (raw or "").strip()
+        if not text:
+            continue
+        m = _BEACON_FIELD_START_RE.match(text)
+        if m and m.group(1) not in BEACON_FIELD_KEYS:
+            unknown.append(m.group(1))
+    return unknown
+
+
+def _kept_conflict_warning(existing: Optional[str], requested: str, source: str) -> str:
+    return (
+        f"existing {source} comment {existing!r} kept; requested comment "
+        f"{requested!r} was NOT applied (comment_mode 'fill' never overwrites). "
+        "Re-run with comment_mode 'replace' to overwrite, or 'append' to extend."
+    )
+
+
+@dataclass(frozen=True)
+class BeaconCommentIntent:
+
+    mode: Literal["preserve", "fill_if_empty", "replace", "append"]
+    value: Optional[str] = None
+
+    @classmethod
+    def preserve(cls) -> "BeaconCommentIntent":
+        return cls(mode="preserve", value=None)
+
+    @classmethod
+    def fill_if_empty(cls, value: Any) -> "BeaconCommentIntent":
+        validated = validate_beacon_comment_text(value)
+        if validated is None:
+            raise ValueError("fill_if_empty requires a non-empty comment value")
+        return cls(mode="fill_if_empty", value=validated)
+
+    @classmethod
+    def replace(cls, value: Any) -> "BeaconCommentIntent":
+        validated = validate_beacon_comment_text(value)
+        if validated is None:
+            raise ValueError("replace requires a non-empty comment value")
+        return cls(mode="replace", value=validated)
+
+    @classmethod
+    def append(cls, value: Any) -> "BeaconCommentIntent":
+        validated = validate_beacon_comment_text(value)
+        if validated is None:
+            raise ValueError("append requires a non-empty comment value")
+        return cls(mode="append", value=validated)
+
+    def to_dict(self) -> dict:
+        return {"mode": self.mode, "value": self.value}
+
+
+@dataclass(frozen=True)
+class CommentResolution:
+
+    outcome: str
+    resolved: Optional[str] = None
+    conflict_detail: Optional[str] = None
+    existing_comment: Optional[str] = None
+    warning: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "outcome": self.outcome,
+            "resolved": self.resolved,
+            "conflict_detail": self.conflict_detail,
+            "existing_comment": self.existing_comment,
+            "warning": self.warning,
+        }
+
+
+def resolve_beacon_comment(
+    *,
+    intent: BeaconCommentIntent,
+    note_comment: Optional[str],
+    disk_comment: Optional[str],
+    beacon_exists_on_disk: bool,
+) -> CommentResolution:
+    norm_requested = (
+        _parser_normalize_comment_value(intent.value)
+        if intent.mode in ("fill_if_empty", "replace", "append")
+        else ""
+    )
+    norm_note = _parser_normalize_comment_value(note_comment)
+    norm_disk = (
+        _parser_normalize_comment_value(disk_comment) if beacon_exists_on_disk else ""
+    )
+
+    if intent.mode == "preserve":
+        resolved = norm_disk or norm_note or None
+        return CommentResolution(outcome="preserve", resolved=resolved)
+
+    if intent.mode == "fill_if_empty":
+        if norm_note and norm_disk and norm_note != norm_disk:
+            warning = _kept_conflict_warning(norm_disk, norm_requested, "on-disk")
+            return CommentResolution(
+                outcome="kept_existing_conflict",
+                resolved=norm_disk,
+                conflict_detail=warning,
+                existing_comment=norm_disk,
+                warning=warning,
+            )
+        if norm_disk and norm_disk == norm_requested:
+            return CommentResolution(outcome="idempotent", resolved=norm_disk)
+        if norm_disk and norm_disk != norm_requested:
+            warning = _kept_conflict_warning(norm_disk, norm_requested, "on-disk")
+            return CommentResolution(
+                outcome="kept_existing_conflict",
+                resolved=norm_disk,
+                conflict_detail=warning,
+                existing_comment=norm_disk,
+                warning=warning,
+            )
+        if not norm_disk and norm_note and norm_note != norm_requested:
+            warning = _kept_conflict_warning(
+                norm_note, norm_requested, "cached-note"
+            )
+            return CommentResolution(
+                outcome="kept_existing_conflict",
+                resolved=norm_note,
+                conflict_detail=warning,
+                existing_comment=norm_note,
+                warning=warning,
+            )
+        return CommentResolution(outcome="fill", resolved=norm_requested or None)
+
+    if intent.mode == "replace":
+        if norm_disk and norm_disk == norm_requested:
+            return CommentResolution(outcome="idempotent", resolved=norm_disk)
+        return CommentResolution(outcome="replace", resolved=norm_requested or None)
+
+    if intent.mode == "append":
+        if not norm_disk:
+            return CommentResolution(outcome="fill", resolved=norm_requested or None)
+        if norm_disk == norm_requested or norm_disk.endswith(" " + norm_requested):
+            return CommentResolution(outcome="idempotent", resolved=norm_disk)
+        return CommentResolution(
+            outcome="append",
+            resolved=f"{norm_disk} {norm_requested}",
+        )
+
+    raise ValueError(f"unknown comment intent mode {intent.mode!r}")
+
+
+EMOJI_CLASS = "📦"
+
+
+EMOJI_FUNC = "ƒ"
+
+
+EMOJI_ASYNC = "⚡"
+
+
+EMOJI_CONST = "💎"
+
+
+TRIDENT = "🔱"
+
+
+def _beacon_block_diagnostic(
+    line: int,
+    end_line: Optional[int],
+    outcome: str,
+    fields: dict[str, str],
+    field_texts: list[str],
+) -> dict[str, Any]:
+    return {
+        "record": "block",
+        "line": line,
+        "end_line": end_line,
+        "outcome": outcome,
+        "kind_raw": fields.get("kind"),
+        "id": fields.get("id"),
+        "field_keys": sorted(fields),
+        "unknown_keys": beacon_field_unknown_keys(field_texts),
+    }
+
+
+def normalize_for_match(s: str) -> str:
+    if not isinstance(s, str):
+        return ""
+    return "".join(ch for ch in s if not ch.isspace())
+
+
+def _is_meaningful_js_local_name(var_name: str | None) -> bool:
+    raw = (var_name or "").strip()
+    if not raw:
+        return False
+
+    compact = re.sub(r"[_$]", "", raw)
+    if len(compact) < 3:
+        return False
+    return True
+
+
+def _new_js_scope_state(*, is_lambda: bool) -> dict[str, Any]:
+    return {
+        "is_lambda": bool(is_lambda),
+        "anon_counter": 0,
+        "local_name_counts": {},
+    }
+
+
+def _js_next_anonymous_scope_name(scope_state: dict[str, Any] | None) -> str:
+    if not isinstance(scope_state, dict):
+        return "__lambdao_1"
+
+    next_n = int(scope_state.get("anon_counter") or 0) + 1
+    scope_state["anon_counter"] = next_n
+    return f"__lambdao_{next_n}"
+
+
+def _js_next_lambda_local_suffix(scope_state: dict[str, Any] | None, var_name: str) -> str:
+    if not isinstance(scope_state, dict):
+        return "1"
+
+    counts = scope_state.get("local_name_counts")
+    if not isinstance(counts, dict):
+        counts = {}
+        scope_state["local_name_counts"] = counts
+
+    next_n = int(counts.get(var_name) or 0) + 1
+    counts[var_name] = next_n
+    return str(next_n)
+
+
+def _slice_label_tags(slice_labels: str) -> str:
+    if not isinstance(slice_labels, str):
+        return ""
+    labels = []
+    for part in re.split(r"[\s,]+", slice_labels):
+        part = part.strip()
+        if not part:
+            continue
+        labels.append(f"#{part}")
+    return " ".join(labels)
+
+
+def _strip_tag_underline_markup(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    s = text
+    s = re.sub(r"(?i)&lt;\s*/?\s*u\s*&gt;", "", s)
+    s = re.sub(r"(?i)<\s*/?\s*u\s*>", "", s)
+    s = re.sub(r"(?i)&lt;\s*-\s*u\s*&gt;", "", s)
+    s = re.sub(r"(?i)<\s*-\s*u\s*>", "", s)
+    return s
+
+
+def _sanitize_slice_label_token(part: str) -> str:
+    if not isinstance(part, str):
+        return ""
+    sanitized = re.sub(r"[\x00-\x1f\x7f]+", "", part)
+    sanitized = _strip_tag_underline_markup(sanitized)
+    sanitized = re.sub(r"[\s/\\:.,#|]+", "-", sanitized)
+    return sanitized.strip("-")
+
+
+def _canonicalize_slice_labels(slice_labels: str | None, role: str | None) -> str:
+    raw = (slice_labels or "").strip()
+    base_role = (role or "").strip()
+    tokens: list[str] = []
+
+    if raw:
+        for part in re.split(r"[\s,]+", raw):
+            part = part.strip()
+            if not part:
+                continue
+            sanitized = _sanitize_slice_label_token(part)
+            if sanitized:
+                tokens.append(sanitized)
+    elif base_role:
+        sanitized = _sanitize_slice_label_token(base_role)
+        if sanitized:
+            tokens.append(sanitized)
+
+    return ",".join(tokens)
+
+
+def _coerce_boolish(val: Any | None) -> Optional[bool]:
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    if not s:
+        return None
+    if s in {"false", "0", "no", "off"}:
+        return False
+    if s in {"true", "1", "yes", "on"}:
+        return True
+    return None
+
+
+def _parse_show_span_fields(fields: dict[str, str]) -> tuple[bool, bool]:
+    raw = fields.get("show_span")
+    if raw is None:
+        return True, False
+    b = _coerce_boolish(raw)
+    if b is None:
+        return True, True
+    return b, True
+
+
+def _beacon_show_span(beacon: dict[str, Any]) -> tuple[bool, bool]:
+    explicit = bool(beacon.get("show_span_explicit"))
+    raw = beacon.get("show_span")
+    if isinstance(raw, bool):
+        return raw, explicit
+    b = _coerce_boolish(raw)
+    if b is None:
+        return True, explicit
+    return b, True
+
+
+def _strip_beacon_meta_blocks_from_context(context_lines: list[str]) -> list[str]:
+    if not context_lines:
+        return []
+
+    def _normalize_meta_line(raw: str) -> str:
+        s = (raw or "").strip()
+        if s.startswith("#"):
+            s = s.lstrip("#").lstrip()
+        if s.startswith("--"):
+            s = s[2:].lstrip()
+        if s.startswith("//"):
+            s = s[2:].lstrip()
+        if s.startswith("*"):
+            s = s.lstrip("*").lstrip()
+        return s
+
+    def _is_meta_block_end(norm: str) -> bool:
+        return norm.strip().startswith("]")
+
+    out: list[str] = []
+    in_meta = False
+
+    for raw in context_lines:
+        norm = _normalize_meta_line(raw)
+
+
+        if not in_meta and (norm.startswith("@beacon[") or norm.startswith("@beacon" + "-close[")):
+            if "]" in norm:
+                continue
+            in_meta = True
+            continue
+
+        if in_meta:
+            if _is_meta_block_end(norm):
+                in_meta = False
+            continue
+
+        out.append(raw)
+
+    return out
+
+
+def parse_python_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    beacons: list[dict[str, Any]] = []
+
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            body = stripped.lstrip("#").lstrip()
+            if body.startswith("@beacon["):
+                comment_line = i + 1
+                block_lines = [body]
+                i += 1
+                block_end_line = None
+                while i < n:
+                    next_line = lines[i].lstrip()
+                    if next_line.startswith("#"):
+                        next_body = next_line.lstrip("#").lstrip()
+                    else:
+                        next_body = next_line
+                    block_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        block_end_line = i + 1
+                        i += 1
+                        break
+                    i += 1
+
+                field_texts: list[str] = []
+                inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+                for raw in inner_lines:
+                    text = raw.strip()
+                    if not text or text.startswith("@beacon"):
+                        continue
+                    field_texts.append(text)
+                fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+                kind_raw = fields.get("kind")
+                kind = (kind_raw or "span").strip().lower() or "span"
+                if kind not in {"ast", "span"}:
+                    if diagnostics is not None:
+                        diagnostics.append(_beacon_block_diagnostic(
+                            comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                        ))
+                    continue
+
+                show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+                beacon = {
+                    "id": fields.get("id"),
+                    "role": fields.get("role"),
+                    "slice_labels": fields.get("slice_labels"),
+                    "kind": kind,
+                    "start_snippet": fields.get("start_snippet"),
+                    "end_snippet": fields.get("end_snippet"),
+                    "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                    "comment_line": comment_line,
+                    "kind_explicit": bool(kind_raw),
+                    "show_span": show_span,
+                    "show_span_explicit": show_span_explicit,
+                }
+                beacons.append(beacon)
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "kept", fields, field_texts,
+                    ))
+                continue
+        i += 1
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        if beacon.get("span_lineno_start") is not None and beacon.get("span_lineno_end") is not None:
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+            else:
+                body = stripped
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1]
+            if "@beacon-close[" in raw:
+                close_lines = [raw]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1]
+                    close_lines.append(next_raw)
+                    _nb = next_raw.lstrip()
+                    if _nb.startswith("#"):
+                        _nb = _nb.lstrip("#").lstrip()
+                    if _nb.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    text = cl.strip()
+                    if text.startswith("#"):
+                        text = text.lstrip("#").lstrip()
+                    while text and text[-1] in ",]":
+                        text = text[:-1].rstrip()
+                    if text.startswith("id="):
+                        _, val = text.split("=", 1)
+                        close_id = val.strip()
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons
+
+
+def _iter_ast_outline_nodes(nodes: list[dict[str, Any]]):
+    for node in nodes:
+        if isinstance(node, dict) and node.get("ast_type"):
+            yield node
+        children = (node.get("children") or []) if isinstance(node, dict) else []
+        for ch in children:
+            if isinstance(ch, dict):
+                for sub in _iter_ast_outline_nodes([ch]):
+                    yield sub
+
+
+def _find_enclosing_ast_node_for_line(
+    nodes: list[dict[str, Any]], start_line: int
+) -> Optional[dict[str, Any]]:
+    best: Optional[dict[str, Any]] = None
+    best_depth = -1
+
+    def _recurse(node: dict[str, Any], depth: int) -> None:
+        nonlocal best, best_depth
+        if not isinstance(node, dict):
+            return
+        start = node.get("orig_lineno_start_unused")
+        end = node.get("orig_lineno_end_unused")
+        ast_type = node.get("ast_type")
+        if (
+            ast_type
+            and isinstance(start, int)
+            and isinstance(end, int)
+            and start <= start_line <= end
+        ):
+            if depth > best_depth:
+                best = node
+                best_depth = depth
+        for ch in node.get("children") or []:
+            if isinstance(ch, dict):
+                _recurse(ch, depth + 1)
+
+    for root in nodes:
+        _recurse(root, 0)
+    return best
+
+
+def apply_python_beacons(
+    file_path: str,
+    lines: list[str],
+    outline_nodes: list[dict[str, Any]],
+    *,
+    decorator_ranges_by_definition: Optional[dict[int, list[tuple[int, int]]]] = None,
+) -> None:
+    beacons = parse_python_beacon_blocks(lines)
+    if not beacons:
+        return
+    _prepend_duplicate_beacon_id_warning_nodes(outline_nodes, beacons, language="PY")
+
+    ast_nodes = list(_iter_ast_outline_nodes(outline_nodes))
+
+    if decorator_ranges_by_definition is None:
+        decorator_ranges_by_definition = _python_decorator_ranges_by_definition(lines)
+    decorator_lines = {
+        idx
+        for ranges in decorator_ranges_by_definition.values()
+        for start, end in ranges
+        for idx in range(start, end + 1)
+    }
+
+    triple_spans: List[tuple[int, int]] = []
+    in_block = False
+    quote_type: Optional[str] = None
+    start_line_q: Optional[int] = None
+
+    for idx, raw in enumerate(lines, start=1):
+        if not in_block:
+            if '"""' in raw or "'''" in raw:
+                dq_index = raw.find('"""') if '"""' in raw else -1
+                sq_index = raw.find("'''") if "'''" in raw else -1
+                if dq_index != -1 and (sq_index == -1 or dq_index <= sq_index):
+                    q = '"""'
+                else:
+                    q = "'''"
+                count = raw.count(q)
+                if count >= 2:
+                    triple_spans.append((idx, idx))
+                else:
+                    in_block = True
+                    quote_type = q
+                    start_line_q = idx
+        else:
+            if quote_type and quote_type in raw:
+                triple_spans.append((start_line_q or idx, idx))
+                in_block = False
+                quote_type = None
+                start_line_q = None
+
+    def _find_triple_span_for_line(line_no: int) -> Optional[tuple[int, int]]:
+        for s, e in triple_spans:
+            if s <= line_no <= e:
+                return (s, e)
+        return None
+
+    def _header_line_for_node(node: dict[str, Any]) -> Optional[str]:
+        ln = node.get("orig_lineno_start_unused")
+        if not isinstance(ln, int) or ln <= 0 or ln > len(lines):
+            return None
+        return lines[ln - 1]
+
+    span_sort_lines: dict[int, int] = {}
+
+    def _node_source_order_line(node: dict[str, Any]) -> int:
+        cached = span_sort_lines.get(id(node))
+        if isinstance(cached, int):
+            return cached
+        ln = node.get("orig_lineno_start_unused") if isinstance(node, dict) else None
+        if isinstance(ln, int):
+            return ln
+        return 10**9
+
+    def _insert_child_in_source_order(
+        siblings: List[Dict[str, Any]],
+        child_node: Dict[str, Any],
+        sort_line: int,
+    ) -> None:
+        span_sort_lines[id(child_node)] = sort_line
+        insert_at = len(siblings)
+        for idx, existing in enumerate(siblings):
+            if _node_source_order_line(existing) > sort_line:
+                insert_at = idx
+                break
+        siblings.insert(insert_at, child_node)
+
+    def _next_anchor_line_after(line_no: int) -> Optional[int]:
+        if line_no - 1 in decorator_lines:
+            return None
+        for idx in range(line_no + 1, len(lines) + 1):
+            if idx - 1 in decorator_lines:
+                continue
+            stripped = lines[idx - 1].lstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            return idx
+        return None
+
+    def _extract_python_beacon_context(
+        comment_line: int,
+        decor_start: Optional[int] = None,
+        beacon_id: Optional[str] = None,
+    ) -> List[str]:
+        context: List[str] = []
+        seen_spans: set[tuple[int, int]] = set()
+
+        j = comment_line
+        block_end = comment_line
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+            else:
+                body = stripped
+            if body.strip().startswith("]"):
+                block_end = j
+                break
+            j += 1
+
+        j = comment_line - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j -= 1
+                continue
+            if decor_start is not None and decor_start <= j <= block_end:
+                j -= 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.insert(0, body)
+                j -= 1
+                continue
+            span = _find_triple_span_for_line(j)
+            if span and span not in seen_spans:
+                s, e = span
+                for k in range(e, s - 1, -1):
+                    context.insert(0, lines[k - 1])
+                seen_spans.add(span)
+                j = s - 1
+                continue
+            if stripped.startswith("@"):
+                j -= 1
+                continue
+            break
+
+        j = block_end + 1
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j += 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body.startswith("@beacon["):
+                    j += 1
+                    while j <= len(lines):
+                        nxt = lines[j - 1].lstrip()
+                        nb = nxt.lstrip("#").lstrip() if nxt.startswith("#") else nxt
+                        if nb.strip().startswith("]"):
+                            j += 1
+                            break
+                        j += 1
+                    continue
+                if body.startswith("@beacon-close["):
+                    close_id: Optional[str] = None
+                    j += 1
+                    while j <= len(lines):
+                        nxt = lines[j - 1].lstrip()
+                        nb = nxt.lstrip("#").lstrip() if nxt.startswith("#") else nxt
+                        nb_strip = nb.strip()
+                        if nb_strip.startswith("id=") and close_id is None:
+                            close_id = nb_strip.split("=", 1)[1].strip().strip(",").strip("]")
+                        if nb_strip.startswith("]"):
+                            break
+                        j += 1
+                    if beacon_id and close_id and close_id != beacon_id:
+                        j += 1
+                        continue
+                    break
+                if body.startswith("@beacon"):
+                    break
+                if body:
+                    context.append(body)
+                j += 1
+                continue
+            span = _find_triple_span_for_line(j)
+            if span and span not in seen_spans:
+                s, e = span
+                for k in range(s, e + 1):
+                    context.append(lines[k - 1])
+                seen_spans.add(span)
+                j = e + 1
+                continue
+            if stripped.startswith("@"):
+                break
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)
+
+    for beacon in beacons:
+        kind = beacon.get("kind")
+        start_snippet = beacon.get("start_snippet")
+        if kind not in {"span", "ast"}:
+            continue
+        if start_snippet:
+            continue
+
+        comment_line = beacon.get("comment_line") or 0
+        if isinstance(comment_line, int) and comment_line > 0:
+            anchor = _next_anchor_line_after(comment_line)
+        else:
+            anchor = None
+        if anchor is None:
+            continue
+        beacon["_anchor_lineno"] = anchor
+
+        if kind != "span":
+            continue
+
+        if isinstance(beacon.get("span_lineno_end"), int):
+            continue
+
+        if bool(beacon.get("kind_explicit")):
+            continue
+
+        ast_candidates: list[dict[str, Any]] = []
+        for node in ast_nodes:
+            ast_type = node.get("ast_type")
+            if ast_type not in {"class", "function", "async_function", "const", "const_decl"}:
+                continue
+            ln = node.get("orig_lineno_start_unused")
+            if isinstance(ln, int) and ln == anchor:
+                ast_candidates.append(node)
+
+        if len(ast_candidates) == 1:
+            beacon["kind"] = "ast"
+
+    for beacon in beacons:
+        if beacon.get("kind") != "ast":
+            continue
+        b_id = beacon.get("id") or "(no-id)"
+        start_snippet = beacon.get("start_snippet")
+        comment_line = beacon.get("comment_line") or 0
+        anchor_lineno = beacon.get("_anchor_lineno")
+
+        chosen: Optional[dict[str, Any]] = None
+
+        if start_snippet:
+            norm_snip = normalize_for_match(start_snippet)
+            if not norm_snip:
+                continue
+
+            candidates: list[dict[str, Any]] = []
+            for node in ast_nodes:
+                header = _header_line_for_node(node)
+                if header is None:
+                    continue
+                if norm_snip in normalize_for_match(header):
+                    candidates.append(node)
+
+            if not candidates:
+                continue
+
+            if len(candidates) == 1:
+                chosen = candidates[0]
+            else:
+                after = [
+                    n
+                    for n in candidates
+                    if isinstance(n.get("orig_lineno_start_unused"), int)
+                    and n["orig_lineno_start_unused"] > comment_line
+                ]
+                if len(after) == 1:
+                    chosen = after[0]
+                else:
+                    continue
+        else:
+            anchor = beacon.get("_anchor_lineno")
+            if not isinstance(anchor, int):
+                continue
+            ast_candidates = [
+                node
+                for node in ast_nodes
+                if node.get("ast_type") in {"class", "function", "async_function", "const", "const_decl"}
+                and isinstance(node.get("orig_lineno_start_unused"), int)
+                and node["orig_lineno_start_unused"] == anchor
+            ]
+            if len(ast_candidates) == 1:
+                chosen = ast_candidates[0]
+            else:
+                continue
+
+        if not chosen:
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "ast-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = chosen.get("name") or "Untitled"
+        if "🔱" not in name:
+            name = f"{name} 🔱"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+        chosen["name"] = name
+
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+        meta_lines = [
+            "BEACON (AST)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: ast",
+        ]
+        if comment:
+            meta_lines.append(f"comment: {comment}")
+        note = chosen.get("note") or ""
+        if note:
+            note_lines = note.splitlines()
+            insert_idx = (
+                1
+                if (note_lines and note_lines[0].strip().startswith("AST_QUALNAME:"))
+                else 0
+            )
+            new_note_lines: list[str] = []
+            new_note_lines.extend(note_lines[:insert_idx])
+            new_note_lines.extend(meta_lines)
+            if insert_idx < len(note_lines):
+                if note_lines[insert_idx].strip():
+                    new_note_lines.append("")
+                new_note_lines.extend(note_lines[insert_idx:])
+            chosen["note"] = "\n".join(new_note_lines)
+        else:
+            chosen["note"] = "\n".join(meta_lines)
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+        start_snippet = beacon.get("start_snippet")
+        comment_line = beacon.get("comment_line") or 0
+
+        attachment_line: Optional[int] = None
+
+        if start_snippet:
+            norm_snip = normalize_for_match(start_snippet)
+            if not norm_snip:
+                continue
+
+            start_candidates: list[int] = []
+            for idx, line in enumerate(lines, start=1):
+                stripped = line.lstrip()
+                if stripped.startswith("#"):
+                    continue
+                if norm_snip in normalize_for_match(line):
+                    start_candidates.append(idx)
+
+            if not start_candidates:
+                continue
+
+            if len(start_candidates) == 1:
+                attachment_line = start_candidates[0]
+            else:
+                after = [ln for ln in start_candidates if ln > comment_line]
+                if len(after) == 1:
+                    attachment_line = after[0]
+                else:
+                    continue
+        else:
+            span_start = beacon.get("span_lineno_start")
+            if isinstance(span_start, int):
+                attachment_line = span_start
+            elif isinstance(comment_line, int) and comment_line > 0:
+                attachment_line = comment_line
+            else:
+                anchor = beacon.get("_anchor_lineno")
+                attachment_line = anchor if isinstance(anchor, int) else None
+
+        if attachment_line is None:
+            continue
+
+        enclosing = _find_enclosing_ast_node_for_line(outline_nodes, attachment_line)
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "span-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        enclosing_decor_start: Optional[int] = None
+        if enclosing is not None:
+            dsl = enclosing.get("decor_start_lineno")
+            if isinstance(dsl, int):
+                enclosing_decor_start = dsl
+        context_lines = _extract_python_beacon_context(
+            comment_line,
+            enclosing_decor_start,
+            beacon_id=b_id,
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (PYTHON):")
+            note_lines.extend(context_lines)
+
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        span_text_lines: List[str] = []
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            span_start = max(1, span_start)
+            span_end = min(len(lines), span_end)
+            if span_start <= span_end:
+                span_text_lines = lines[span_start - 1 : span_end]
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+            "orig_lineno_start_unused": attachment_line,
+            "orig_lineno_end_unused": attachment_line,
+        }
+
+        if enclosing is not None:
+            children = enclosing.get("children") or []
+            _insert_child_in_source_order(children, span_node, attachment_line)
+            enclosing["children"] = children
+        else:
+            _insert_child_in_source_order(outline_nodes, span_node, attachment_line)
+
+
+def get_docstring(node: ast.AST) -> str:
+    return ast.get_docstring(node) or ""
+
+
+def get_function_signature(node: ast.FunctionDef) -> str:
+    args = []
+    
+    for arg in node.args.args:
+        arg_str = arg.arg
+        if arg.annotation:
+            if isinstance(arg.annotation, ast.Name):
+                arg_str += f": {arg.annotation.id}"
+            elif isinstance(arg.annotation, ast.Subscript):
+                try:
+                    val = getattr(arg.annotation.value, 'id', '')
+                    slice_val = getattr(arg.annotation.slice, 'id', '')
+                    if not slice_val and hasattr(arg.annotation.slice, 'value'):
+                         if isinstance(arg.annotation.slice, ast.Name):
+                             slice_val = arg.annotation.slice.id
+                    if val and slice_val:
+                        arg_str += f": {val}[{slice_val}]"
+                except:
+                    pass
+            elif isinstance(arg.annotation, ast.Attribute):
+                arg_str += f": {arg.annotation.attr}"
+        args.append(arg_str)
+        
+    return f"{node.name}({', '.join(args)})"
+
+
+def _dedupe_python_const_ast_qualnames(outline_nodes: list[dict[str, Any]]) -> None:
+    buckets: dict[str, list[dict[str, Any]]] = {}
+
+    def _walk(nodes: list[dict[str, Any]]) -> None:
+        for node in nodes or []:
+            if not isinstance(node, dict):
+                continue
+            qual = node.get("ast_qualname")
+            if node.get("ast_type") == "const" and isinstance(qual, str) and qual:
+                buckets.setdefault(qual, []).append(node)
+            _walk([c for c in (node.get("children") or []) if isinstance(c, dict)])
+
+    _walk(outline_nodes)
+
+    for qual, nodes in buckets.items():
+        if len(nodes) <= 1:
+            continue
+        for ordinal, node in enumerate(sorted(nodes, key=lambda n: int(n.get("orig_lineno_start_unused") or 10**9)), start=1):
+            line = node.get("orig_lineno_start_unused")
+            suffix = f"line{line}" if isinstance(line, int) else f"occ{ordinal}"
+            new_qual = f"{qual}@{suffix}"
+            node["ast_qualname"] = new_qual
+            note = node.get("note")
+            if isinstance(note, str):
+                lines = note.splitlines()
+                for idx, raw in enumerate(lines):
+                    if raw.strip().startswith("AST_QUALNAME:"):
+                        prefix = raw.split("AST_QUALNAME:", 1)[0]
+                        lines[idx] = f"{prefix}AST_QUALNAME: {new_qual}"
+                        node["note"] = "\n".join(lines)
+                        break
+
+
+def parse_file_outline_core(file_path: str) -> tuple[List[Dict[str, Any]], List[str]]:
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    tree = ast.parse(content, filename=file_path)
+    lines = content.splitlines()
+    decorator_ranges_by_definition = _python_decorator_ranges_by_definition(lines, tree=tree)
+
+    def _extract_ast_comment_context(start_lineno: int, decor_start: Optional[int]) -> list[str]:
+        context: list[str] = []
+        j = start_lineno - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j -= 1
+                continue
+            if decor_start is not None and decor_start <= j < start_lineno:
+                j -= 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.insert(0, body)
+                j -= 1
+                continue
+            break
+
+        j = start_lineno + 1
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j += 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.append(body)
+                j += 1
+                continue
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)
+
+    priority_counter = [100]
+
+    def _should_map_python_assigned_name(name: str, *, qual_prefix: Optional[str]) -> bool:
+        if not isinstance(name, str) or not name:
+            return False
+        if name.isupper():
+            return True
+        if qual_prefix is None and len(name) > 4 and name.startswith("__") and name.endswith("__"):
+            return True
+        return False
+
+    def _assigned_name_note_label(name: str, *, qual_prefix: Optional[str]) -> str:
+        if qual_prefix is None and len(name) > 4 and name.startswith("__") and name.endswith("__"):
+            return "Module global"
+        return "Constant"
+
+    def _iter_nested_statement_bodies(stmt: ast.AST) -> List[List[ast.AST]]:
+        candidates: List[tuple[int, int, List[ast.AST]]] = []
+        ordinal = 0
+
+        def _add(body: Any) -> None:
+            nonlocal ordinal
+            if not isinstance(body, list) or not body:
+                return
+            first_stmt = body[0]
+            first_lineno = getattr(first_stmt, "lineno", None)
+            if not isinstance(first_lineno, int):
+                first_lineno = 10**9
+            candidates.append((first_lineno, ordinal, body))
+            ordinal += 1
+
+        for attr in ("body", "orelse", "finalbody"):
+            _add(getattr(stmt, attr, None))
+
+        handlers = getattr(stmt, "handlers", None)
+        if isinstance(handlers, list):
+            for handler in handlers:
+                _add(getattr(handler, "body", None))
+
+        cases = getattr(stmt, "cases", None)
+        if isinstance(cases, list):
+            for case in cases:
+                _add(getattr(case, "body", None))
+
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return [body for _, _, body in candidates]
+
+    def walk_body(
+        body_items: List[ast.AST],
+        qual_prefix: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for item in body_items:
+            decor_ranges = decorator_ranges_by_definition.get(getattr(item, "lineno", 0) - 1, [])
+            decor_start: Optional[int] = decor_ranges[0][0] + 1 if decor_ranges else None
+            if isinstance(item, ast.ClassDef):
+                qual = item.name if not qual_prefix else f"{qual_prefix}.{item.name}"
+                start = getattr(item, "lineno", None)
+                end = getattr(item, "end_lineno", start)
+                doc = get_docstring(item)
+                note_lines: list[str] = [f"AST_QUALNAME: {qual}"]
+                if doc:
+                    note_lines.append("---")
+                    note_lines.append(doc)
+                context_lines = _extract_ast_comment_context(start, decor_start) if isinstance(start, int) else []
+                if context_lines:
+                    note_lines.append("")
+                    note_lines.append("CONTEXT COMMENTS (PYTHON):")
+                    note_lines.extend(context_lines)
+                note_text = "\n".join(note_lines)
+
+                node = {
+                    "name": f"{EMOJI_CLASS} class {item.name}",
+                    "priority": priority_counter[0],
+                    "note": note_text,
+                    "children": walk_body(item.body, qual_prefix=qual),
+                    "ast_type": "class",
+                    "ast_name": item.name,
+                    "ast_qualname": qual,
+                    "file_path": file_path,
+                    "orig_lineno_start_unused": start,
+                    "orig_lineno_end_unused": end,
+                    "decor_start_lineno": decor_start,
+                }
+                priority_counter[0] += 100
+                results.append(node)
+            elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                prefix = EMOJI_ASYNC if isinstance(item, ast.AsyncFunctionDef) else EMOJI_FUNC
+                sig = get_function_signature(item)
+                qual = item.name if not qual_prefix else f"{qual_prefix}.{item.name}"
+                start = getattr(item, "lineno", None)
+                end = getattr(item, "end_lineno", start)
+
+                doc = get_docstring(item)
+                note_lines: list[str] = [f"AST_QUALNAME: {qual}"]
+                if doc:
+                    note_lines.append("---")
+                    note_lines.append(doc)
+                context_lines = _extract_ast_comment_context(start, decor_start) if isinstance(start, int) else []
+                if context_lines:
+                    note_lines.append("")
+                    note_lines.append("CONTEXT COMMENTS (PYTHON):")
+                    note_lines.extend(context_lines)
+                note_text = "\n".join(note_lines)
+
+                node = {
+                    "name": f"{prefix} {sig}",
+                    "priority": priority_counter[0],
+                    "note": note_text,
+                    "children": walk_body(item.body, qual_prefix=qual),
+                    "ast_type": "async_function" if isinstance(item, ast.AsyncFunctionDef) else "function",
+                    "ast_name": item.name,
+                    "ast_qualname": qual,
+                    "file_path": file_path,
+                    "orig_lineno_start_unused": start,
+                    "orig_lineno_end_unused": end,
+                    "decor_start_lineno": decor_start,
+                }
+                priority_counter[0] += 100
+                results.append(node)
+            elif isinstance(item, ast.Assign):
+                for target in item.targets:
+                    if isinstance(target, ast.Name) and _should_map_python_assigned_name(
+                        target.id,
+                        qual_prefix=qual_prefix,
+                    ):
+                        start = getattr(item, "lineno", None)
+                        end = getattr(item, "end_lineno", start)
+                        qual_const = target.id if not qual_prefix else f"{qual_prefix}.{target.id}"
+                        note_label = _assigned_name_note_label(target.id, qual_prefix=qual_prefix)
+                        note_text = f"AST_QUALNAME: {qual_const}\n---\n{note_label}"
+                        node = {
+                            "name": f"{EMOJI_CONST} {target.id}",
+                            "priority": priority_counter[0],
+                            "note": note_text,
+                            "children": [],
+                            "ast_type": "const",
+                            "ast_name": target.id,
+                            "ast_qualname": qual_const,
+                            "file_path": file_path,
+                            "orig_lineno_start_unused": start,
+                            "orig_lineno_end_unused": end,
+                        }
+                        priority_counter[0] += 100
+                        results.append(node)
+            elif isinstance(item, ast.AnnAssign):
+                target = item.target
+                if isinstance(target, ast.Name) and _should_map_python_assigned_name(
+                    target.id,
+                    qual_prefix=qual_prefix,
+                ):
+                    start = getattr(item, "lineno", None)
+                    end = getattr(item, "end_lineno", start)
+                    qual_const = target.id if not qual_prefix else f"{qual_prefix}.{target.id}"
+                    note_label = _assigned_name_note_label(target.id, qual_prefix=qual_prefix)
+                    note_text = f"AST_QUALNAME: {qual_const}\n---\n{note_label}"
+                    node = {
+                        "name": f"{EMOJI_CONST} {target.id}",
+                        "priority": priority_counter[0],
+                        "note": note_text,
+                        "children": [],
+                        "ast_type": "const",
+                        "ast_name": target.id,
+                        "ast_qualname": qual_const,
+                        "file_path": file_path,
+                        "orig_lineno_start_unused": start,
+                        "orig_lineno_end_unused": end,
+                    }
+                    priority_counter[0] += 100
+                    results.append(node)
+            else:
+                for nested_body in _iter_nested_statement_bodies(item):
+                    results.extend(walk_body(nested_body, qual_prefix=qual_prefix))
+        return results
+
+    outline_nodes = walk_body(tree.body)
+    _dedupe_python_const_ast_qualnames(outline_nodes)
+    apply_python_beacons(
+        file_path, lines, outline_nodes,
+        decorator_ranges_by_definition=decorator_ranges_by_definition,
+    )
+    return outline_nodes, lines
+
+
+def _build_js_comment_mask(src_lines: list[str]) -> tuple[list[bool], list[str]]:
+    comment_mask: list[bool] = [False] * len(src_lines)
+    cleaned: list[str] = ["" for _ in range(len(src_lines))]
+    in_block = False
+
+    for idx, raw in enumerate(src_lines, start=1):
+        stripped = raw.lstrip()
+        if not stripped:
+            continue
+
+        is_comment = False
+        text = ""
+
+        if not in_block:
+            if stripped.startswith("//"):
+                is_comment = True
+                text = stripped[2:].lstrip()
+            elif "/*" in stripped:
+                is_comment = True
+                in_block = True
+                after = stripped.split("/*", 1)[1]
+                if "*/" in after:
+                    before_close, _ = after.split("*/", 1)
+                    text = before_close.strip()
+                    in_block = False
+                else:
+                    text = after.strip()
+        else:
+            is_comment = True
+            if "*/" in stripped:
+                before_close, _ = stripped.split("*/", 1)
+                text = before_close.strip()
+                in_block = False
+            else:
+                text = stripped
+
+        if is_comment:
+            comment_mask[idx - 1] = True
+            cleaned[idx - 1] = text
+
+    return comment_mask, cleaned
+
+
+def _extract_js_ast_comment_context(
+    start_line: int,
+    lines: list[str],
+    n: int,
+    comment_mask: list[bool],
+    cleaned_comments: list[str],
+) -> list[str]:
+    ctx: list[str] = []
+
+    j = start_line - 1
+    while j >= 1:
+        raw = lines[j - 1]
+        stripped = raw.lstrip()
+        if not stripped:
+            j -= 1
+            continue
+        if stripped.startswith("@"):
+            j -= 1
+            continue
+        if comment_mask[j - 1]:
+            text = cleaned_comments[j - 1]
+            if text:
+                ctx.insert(0, text)
+            j -= 1
+            continue
+        break
+
+    j = start_line + 1
+    while j <= n:
+        raw = lines[j - 1]
+        stripped = raw.lstrip()
+        if not stripped:
+            j += 1
+            continue
+        if comment_mask[j - 1]:
+            text = cleaned_comments[j - 1]
+            if text:
+                ctx.append(text)
+            j += 1
+            continue
+        break
+
+    return _strip_beacon_meta_blocks_from_context(ctx)
+
+
+def _js_collapse_signature_ws(text: str | None) -> str:
+    if not isinstance(text, str):
+        return ""
+    return " ".join(text.split())
+
+
+def _js_node_text(node: Any, source_bytes: bytes) -> str:
+    if node is None:
+        return ""
+    return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+
+
+def _js_is_function_like(v: Any) -> bool:
+    return bool(v) and getattr(v, "type", None) in {"arrow_function", "function"}
+
+
+def _js_callee_simple_name(v: Any, source_bytes: bytes) -> str:
+    if not v or getattr(v, "type", None) != "call_expression":
+        return ""
+    fn = v.child_by_field_name("function")
+    if fn is None:
+        return ""
+    fn_text = _js_node_text(fn, source_bytes).strip()
+    m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", fn_text)
+    return m.group(1) if m else ""
+
+
+def _js_find_function_wrapper_body(v: Any, source_bytes: bytes) -> Any:
+    if not v or getattr(v, "type", None) != "call_expression":
+        return None
+    callee = _js_callee_simple_name(v, source_bytes)
+    if callee not in {"computed"}:
+        return None
+    args = v.child_by_field_name("arguments")
+    if args is None:
+        return None
+    for a in getattr(args, "named_children", []) or []:
+        if _js_is_function_like(a):
+            body = a.child_by_field_name("body")
+            if body is not None:
+                return body
+    return None
+
+
+def _js_find_define_store_setup_body(v: Any, source_bytes: bytes) -> Any:
+    if not v or getattr(v, "type", None) != "call_expression":
+        return None
+    fn = v.child_by_field_name("function")
+    if fn is None:
+        return None
+    fn_text = _js_node_text(fn, source_bytes).strip()
+    if not fn_text.endswith("defineStore"):
+        return None
+    args = v.child_by_field_name("arguments")
+    if args is None:
+        return None
+    for a in getattr(args, "named_children", []) or []:
+        if getattr(a, "type", None) in {"arrow_function", "function"}:
+            body = a.child_by_field_name("body")
+            if body is not None:
+                return body
+    return None
+
+
+def _js_find_define_store_options_object(v: Any, source_bytes: bytes) -> Any:
+    if not v or getattr(v, "type", None) != "call_expression":
+        return None
+    fn = v.child_by_field_name("function")
+    if fn is None:
+        return None
+    fn_text = _js_node_text(fn, source_bytes).strip()
+    if not fn_text.endswith("defineStore"):
+        return None
+    args = v.child_by_field_name("arguments")
+    if args is None:
+        return None
+    for a in getattr(args, "named_children", []) or []:
+        if getattr(a, "type", None) == "object":
+            return a
+    return None
+
+
+def _js_key_text(n: Any, source_bytes: bytes) -> str:
+    if n is None:
+        return ""
+    txt = _js_node_text(n, source_bytes).strip()
+    return txt.strip("\"'")
+
+
+def _js_params_text(fn_node: Any, source_bytes: bytes) -> str:
+    if fn_node is None:
+        return "()"
+    p = fn_node.child_by_field_name("parameters")
+    if p is None:
+        p = fn_node.child_by_field_name("parameter")
+    if p is None:
+        return "()"
+    t = _js_collapse_signature_ws(_js_node_text(p, source_bytes))
+    return t if t.startswith("(") else f"({t})"
+
+
+def _js_body_node(fn_node: Any) -> Any:
+    if fn_node is None:
+        return None
+    return fn_node.child_by_field_name("body")
+
+
+@dataclass
+class JsTsOutlineContext:
+
+    file_path: str
+    source_text: str
+    source_bytes: bytes
+    language_name: str
+    root: Any
+    lines: list[str]
+    n: int
+    comment_mask: list[bool]
+    cleaned_comments: list[str]
+    line_offset0: int = 0
+    qual_prefix: Optional[str] = None
+    priority_counter: list[int] = field(default_factory=lambda: [100])
+
+
+    @classmethod
+    def from_file(cls, file_path: str, language_name: str) -> "JsTsOutlineContext":
+        with open(file_path, "r", encoding="utf-8") as f:
+            source_text = f.read()
+        source_bytes = source_text.encode("utf-8")
+        parser = Parser()
+        language = get_language(language_name)
+        parser.language = language
+        tree = parser.parse(source_bytes)
+        root = tree.root_node
+        lines = source_text.splitlines()
+        n = len(lines)
+        comment_mask, cleaned_comments = _build_js_comment_mask(lines)
+        return cls(
+            file_path=file_path,
+            source_text=source_text,
+            source_bytes=source_bytes,
+            language_name=language_name,
+            root=root,
+            lines=lines,
+            n=n,
+            comment_mask=comment_mask,
+            cleaned_comments=cleaned_comments,
+        )
+
+    @classmethod
+    def from_source(
+        cls,
+        *,
+        source_text: str,
+        file_path: str,
+        language_name: str,
+        line_offset0: int,
+        qual_prefix: str,
+    ) -> "JsTsOutlineContext":
+        source_bytes = source_text.encode("utf-8")
+        parser = Parser()
+        language = get_language(language_name)
+        parser.language = language
+        tree = parser.parse(source_bytes)
+        root = tree.root_node
+        lines = source_text.splitlines()
+        n = len(lines)
+        comment_mask, cleaned_comments = _build_js_comment_mask(lines)
+        return cls(
+            file_path=file_path,
+            source_text=source_text,
+            source_bytes=source_bytes,
+            language_name=language_name,
+            root=root,
+            lines=lines,
+            n=n,
+            comment_mask=comment_mask,
+            cleaned_comments=cleaned_comments,
+            line_offset0=line_offset0,
+            qual_prefix=qual_prefix,
+        )
+
+
+    def abs_line(self, local_line: int) -> int:
+        return int(local_line) + int(self.line_offset0 or 0)
+
+    def qualify(self, inner_qual: str) -> str:
+        pref = (self.qual_prefix or "").strip()
+        if pref and not pref.endswith(":"):
+            pref = pref + ":"
+        return f"{pref}{inner_qual}" if pref else inner_qual
+
+
+    def make_note(
+        self,
+        ast_qual: str,
+        start_line_local: Optional[int] = None,
+        doc: Optional[str] = None,
+    ) -> str:
+        note_lines: List[str] = [f"AST_QUALNAME: {ast_qual}"]
+        if doc:
+            note_lines.append("---")
+            note_lines.append(doc)
+        if isinstance(start_line_local, int):
+            ctx_comments = _extract_js_ast_comment_context(
+                start_line_local,
+                self.lines,
+                self.n,
+                self.comment_mask,
+                self.cleaned_comments,
+            )
+            if ctx_comments:
+                note_lines.append("")
+                note_lines.append("CONTEXT COMMENTS (JS/TS):")
+                note_lines.extend(ctx_comments)
+        return "\n".join(note_lines)
+
+
+    def next_priority(self) -> int:
+        p = self.priority_counter[0]
+        self.priority_counter[0] += 100
+        return p
+
+
+    def node_text(self, node: Any) -> str:
+        return _js_node_text(node, self.source_bytes)
+
+    def is_function_like(self, v: Any) -> bool:
+        return _js_is_function_like(v)
+
+    def callee_simple_name(self, v: Any) -> str:
+        return _js_callee_simple_name(v, self.source_bytes)
+
+    def find_function_wrapper_body(self, v: Any) -> Any:
+        return _js_find_function_wrapper_body(v, self.source_bytes)
+
+    def find_define_store_setup_body(self, v: Any) -> Any:
+        return _js_find_define_store_setup_body(v, self.source_bytes)
+
+    def find_define_store_options_object(self, v: Any) -> Any:
+        return _js_find_define_store_options_object(v, self.source_bytes)
+
+    def key_text(self, n: Any) -> str:
+        return _js_key_text(n, self.source_bytes)
+
+    def params_text(self, fn_node: Any) -> str:
+        return _js_params_text(fn_node, self.source_bytes)
+
+    def body_node(self, fn_node: Any) -> Any:
+        return _js_body_node(fn_node)
+
+
+def _js_walk_extract_define_store_options_children(
+    ctx: "JsTsOutlineContext",
+    *,
+    options_obj: Any,
+    store_inner_qual: str,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+
+    def _emit_obj_functions(*, section: str, obj_node: Any) -> None:
+        if obj_node is None:
+            return
+        for prop in getattr(obj_node, "children", []) or []:
+            pt = getattr(prop, "type", None)
+            if pt == "method_definition":
+                name_n = prop.child_by_field_name("name")
+                fname = ctx.key_text(name_n) or "anonymous"
+                inner_qual = f"{store_inner_qual}.{section}.{fname}"
+                ast_qual = ctx.qualify(inner_qual)
+                start_line_local = prop.start_point[0] + 1
+                end_line_local = prop.end_point[0] + 1
+                start_line_abs = ctx.abs_line(start_line_local)
+                end_line_abs = ctx.abs_line(end_line_local)
+                sig = f"{fname}{ctx.params_text(prop)}"
+                note_text = ctx.make_note(ast_qual, start_line_local)
+                body = ctx.body_node(prop)
+                children_local = _js_walk(
+                    body,
+                    ctx,
+                    qual_prefix=inner_qual,
+                    scope_state=_new_js_scope_state(is_lambda=False),
+                ) if body is not None else []
+                out.append({
+                    "name": f"{EMOJI_FUNC} {section} {sig}",
+                    "priority": ctx.next_priority(),
+                    "note": note_text,
+                    "children": children_local,
+                    "ast_type": "method",
+                    "ast_name": fname,
+                    "ast_qualname": ast_qual,
+                    "file_path": ctx.file_path,
+                    "orig_lineno_start_unused": start_line_abs,
+                    "orig_lineno_end_unused": end_line_abs,
+                })
+                continue
+            if pt == "pair":
+                k = prop.child_by_field_name("key")
+                v = prop.child_by_field_name("value")
+                fname = ctx.key_text(k) or "anonymous"
+                if v is None or getattr(v, "type", None) not in {"arrow_function", "function"}:
+                    continue
+                inner_qual = f"{store_inner_qual}.{section}.{fname}"
+                ast_qual = ctx.qualify(inner_qual)
+                start_line_local = prop.start_point[0] + 1
+                end_line_local = prop.end_point[0] + 1
+                start_line_abs = ctx.abs_line(start_line_local)
+                end_line_abs = ctx.abs_line(end_line_local)
+                sig = f"{fname}{ctx.params_text(v)}"
+                note_text = ctx.make_note(ast_qual, start_line_local)
+                body = ctx.body_node(v)
+                children_local = _js_walk(
+                    body,
+                    ctx,
+                    qual_prefix=inner_qual,
+                    scope_state=_new_js_scope_state(is_lambda=False),
+                ) if body is not None else []
+                out.append({
+                    "name": f"{EMOJI_FUNC} {section} {sig}",
+                    "priority": ctx.next_priority(),
+                    "note": note_text,
+                    "children": children_local,
+                    "ast_type": "function",
+                    "ast_name": fname,
+                    "ast_qualname": ast_qual,
+                    "file_path": ctx.file_path,
+                    "orig_lineno_start_unused": start_line_abs,
+                    "orig_lineno_end_unused": end_line_abs,
+                })
+                continue
+
+    for prop in getattr(options_obj, "children", []) or []:
+        if getattr(prop, "type", None) != "pair":
+            continue
+        k = prop.child_by_field_name("key")
+        v = prop.child_by_field_name("value")
+        key = ctx.key_text(k)
+        if key not in {"actions", "getters"}:
+            continue
+        if v is None or getattr(v, "type", None) != "object":
+            continue
+        _emit_obj_functions(section=key[:-1] if key.endswith("s") else key, obj_node=v)
+
+    return out
+
+
+def _js_walk(
+    node: Any,
+    ctx: "JsTsOutlineContext",
+    qual_prefix: Optional[str] = None,
+    scope_state: Optional[dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    if scope_state is None:
+        scope_state = _new_js_scope_state(is_lambda=False)
+
+    results: List[Dict[str, Any]] = []
+
+    for child in node.children:
+        t = child.type
+
+        if t == "class_declaration":
+            name_node = child.child_by_field_name("name")
+            class_name = _js_collapse_signature_ws(ctx.node_text(name_node)) or "AnonymousClass"
+            inner_qual = class_name if not qual_prefix else f"{qual_prefix}.{class_name}"
+            ast_qual = ctx.qualify(inner_qual)
+            start_line_local = child.start_point[0] + 1
+            end_line_local = child.end_point[0] + 1
+            start_line_abs = ctx.abs_line(start_line_local)
+            end_line_abs = ctx.abs_line(end_line_local)
+
+            note_text = ctx.make_note(ast_qual, start_line_local)
+
+            class_node: Dict[str, Any] = {
+                "name": f"{EMOJI_CLASS} class {class_name}",
+                "priority": ctx.next_priority(),
+                "note": note_text,
+                "children": [],
+                "ast_type": "class",
+                "ast_name": class_name,
+                "ast_qualname": ast_qual,
+                "file_path": ctx.file_path,
+                "orig_lineno_start_unused": start_line_abs,
+                "orig_lineno_end_unused": end_line_abs,
+            }
+
+            body = child.child_by_field_name("body")
+            if body is not None:
+                class_node["children"] = _js_walk(
+                    body,
+                    ctx,
+                    qual_prefix=inner_qual,
+                    scope_state=_new_js_scope_state(is_lambda=False),
+                )
+
+            results.append(class_node)
+            continue
+
+        if t in {"interface_declaration", "type_alias_declaration", "enum_declaration"}:
+            name_node = child.child_by_field_name("name")
+            type_name = _js_collapse_signature_ws(ctx.node_text(name_node)) or "anonymous"
+            inner_qual = type_name if not qual_prefix else f"{qual_prefix}.{type_name}"
+            ast_qual = ctx.qualify(inner_qual)
+            start_line_local = child.start_point[0] + 1
+            end_line_local = child.end_point[0] + 1
+            start_line_abs = ctx.abs_line(start_line_local)
+            end_line_abs = ctx.abs_line(end_line_local)
+            note_text = ctx.make_note(ast_qual, start_line_local)
+
+            kind_label = (
+                "interface" if t == "interface_declaration" else
+                "type" if t == "type_alias_declaration" else
+                "enum"
+            )
+            type_node: Dict[str, Any] = {
+                "name": f"{EMOJI_CLASS} {kind_label} {type_name}",
+                "priority": ctx.next_priority(),
+                "note": note_text,
+                "children": [],
+                "ast_type": kind_label,
+                "ast_name": type_name,
+                "ast_qualname": ast_qual,
+                "file_path": ctx.file_path,
+                "orig_lineno_start_unused": start_line_abs,
+                "orig_lineno_end_unused": end_line_abs,
+            }
+            results.append(type_node)
+            continue
+
+        if t == "function_declaration":
+            name_node = child.child_by_field_name("name")
+            func_name = _js_collapse_signature_ws(ctx.node_text(name_node)) or "anonymous"
+            inner_qual = func_name if not qual_prefix else f"{qual_prefix}.{func_name}"
+            ast_qual = ctx.qualify(inner_qual)
+            start_line_local = child.start_point[0] + 1
+            end_line_local = child.end_point[0] + 1
+            start_line_abs = ctx.abs_line(start_line_local)
+            end_line_abs = ctx.abs_line(end_line_local)
+
+            signature = func_name
+            params_node = child.child_by_field_name("parameters")
+            if params_node is not None:
+                params_text = _js_collapse_signature_ws(ctx.node_text(params_node))
+                signature = f"{func_name}{params_text}"
+
+            note_text = ctx.make_note(ast_qual, start_line_local)
+
+            func_node: Dict[str, Any] = {
+                "name": f"{EMOJI_FUNC} function {signature}",
+                "priority": ctx.next_priority(),
+                "note": note_text,
+                "children": [],
+                "ast_type": "function",
+                "ast_name": func_name,
+                "ast_qualname": ast_qual,
+                "file_path": ctx.file_path,
+                "orig_lineno_start_unused": start_line_abs,
+                "orig_lineno_end_unused": end_line_abs,
+            }
+
+            body = child.child_by_field_name("body")
+            if body is not None:
+                func_node["children"] = _js_walk(
+                    body,
+                    ctx,
+                    qual_prefix=inner_qual,
+                    scope_state=_new_js_scope_state(is_lambda=False),
+                )
+
+            results.append(func_node)
+            continue
+
+        if t == "method_definition":
+            name_node = child.child_by_field_name("name")
+            method_name = _js_collapse_signature_ws(ctx.node_text(name_node)) or "anonymous"
+            inner_qual = method_name if not qual_prefix else f"{qual_prefix}.{method_name}"
+            ast_qual = ctx.qualify(inner_qual)
+            start_line_local = child.start_point[0] + 1
+            end_line_local = child.end_point[0] + 1
+            start_line_abs = ctx.abs_line(start_line_local)
+            end_line_abs = ctx.abs_line(end_line_local)
+
+            params_node = child.child_by_field_name("parameters")
+            signature = method_name
+            if params_node is not None:
+                params_text = _js_collapse_signature_ws(ctx.node_text(params_node))
+                signature = f"{method_name}{params_text}"
+
+            note_text = ctx.make_note(ast_qual, start_line_local)
+
+            method_node: Dict[str, Any] = {
+                "name": f"{EMOJI_FUNC} method {signature}",
+                "priority": ctx.next_priority(),
+                "note": note_text,
+                "children": [],
+                "ast_type": "method",
+                "ast_name": method_name,
+                "ast_qualname": ast_qual,
+                "file_path": ctx.file_path,
+                "orig_lineno_start_unused": start_line_abs,
+                "orig_lineno_end_unused": end_line_abs,
+            }
+
+            body = child.child_by_field_name("body")
+            if body is not None:
+                method_node["children"] = _js_walk(
+                    body,
+                    ctx,
+                    qual_prefix=inner_qual,
+                    scope_state=_new_js_scope_state(is_lambda=False),
+                )
+
+            results.append(method_node)
+            continue
+
+        if t in {"lexical_declaration", "variable_declaration"}:
+            decl_text = ctx.node_text(child).lstrip()
+            decl_kind = (decl_text.split(None, 1)[0] if decl_text else "const").strip()
+            if decl_kind not in {"const", "let", "var"}:
+                decl_kind = "const"
+
+            for decl_child in child.children:
+                if decl_child.type != "variable_declarator":
+                    continue
+                name_node = decl_child.child_by_field_name("name")
+                if name_node is None:
+                    continue
+                if getattr(name_node, "type", None) != "identifier":
+                    continue
+                var_name = ctx.node_text(name_node).strip()
+                if not var_name:
+                    continue
+
+                value_node = decl_child.child_by_field_name("value")
+                setup_body = None
+                options_obj = None
+                if value_node is not None:
+                    if ctx.is_function_like(value_node):
+                        setup_body = value_node.child_by_field_name("body")
+                    else:
+                        setup_body = ctx.find_function_wrapper_body(value_node)
+                        if setup_body is None:
+                            setup_body = ctx.find_define_store_setup_body(value_node)
+                            if setup_body is None:
+                                options_obj = ctx.find_define_store_options_object(value_node)
+
+                in_lambda_scope = bool(isinstance(scope_state, dict) and scope_state.get("is_lambda"))
+                emit_here = (not qual_prefix) or in_lambda_scope or (setup_body is not None) or (options_obj is not None)
+                if not emit_here:
+                    continue
+
+                start_line_local = decl_child.start_point[0] + 1
+                end_line_local = decl_child.end_point[0] + 1
+                start_line_abs = ctx.abs_line(start_line_local)
+                end_line_abs = ctx.abs_line(end_line_local)
+
+                if in_lambda_scope and setup_body is None and options_obj is None:
+                    if not _is_meaningful_js_local_name(var_name):
+                        continue
+
+                if in_lambda_scope:
+                    local_suffix = _js_next_lambda_local_suffix(scope_state, var_name)
+                    inner_qual = f"{qual_prefix}.{var_name}@{local_suffix}"
+                else:
+                    inner_qual = var_name if not qual_prefix else f"{qual_prefix}.{var_name}"
+                ast_qual = ctx.qualify(inner_qual)
+                note_text = ctx.make_note(ast_qual, start_line_local)
+
+                children_local: list[dict[str, Any]] = []
+                if setup_body is not None:
+                    children_local = _js_walk(
+                        setup_body,
+                        ctx,
+                        qual_prefix=inner_qual,
+                        scope_state=_new_js_scope_state(is_lambda=False),
+                    )
+                elif options_obj is not None:
+                    children_local = _js_walk_extract_define_store_options_children(
+                        ctx,
+                        options_obj=options_obj,
+                        store_inner_qual=inner_qual,
+                    )
+
+                node_dict: Dict[str, Any] = {
+                    "name": f"{EMOJI_FUNC} {decl_kind} {var_name}",
+                    "priority": ctx.next_priority(),
+                    "note": note_text,
+                    "children": children_local,
+                    "ast_type": f"{decl_kind}_decl",
+                    "ast_name": var_name,
+                    "ast_qualname": ast_qual,
+                    "file_path": ctx.file_path,
+                    "orig_lineno_start_unused": start_line_abs,
+                    "orig_lineno_end_unused": end_line_abs,
+                }
+                results.append(node_dict)
+
+            continue
+
+        next_prefix = qual_prefix
+        next_scope_state = scope_state
+        if t in {"arrow_function", "function", "function_expression"}:
+            anon_scope = _js_next_anonymous_scope_name(scope_state)
+            next_prefix = f"{qual_prefix}.{anon_scope}" if qual_prefix else anon_scope
+            next_scope_state = _new_js_scope_state(is_lambda=True)
+
+        if child.children:
+            results.extend(_js_walk(child, ctx, qual_prefix=next_prefix, scope_state=next_scope_state))
+
+    return results
+
+
+def parse_js_ts_outline_core(file_path: str) -> tuple[List[Dict[str, Any]], List[str]]:
+    ext = os.path.splitext(file_path)[1].lower()
+    language_name = "javascript"
+    if ext == ".ts":
+        language_name = "typescript"
+    elif ext == ".tsx":
+        language_name = "tsx"
+    ctx = JsTsOutlineContext.from_file(file_path, language_name)
+
+    outline_nodes = _js_walk(ctx.root, ctx)
+
+    js_beacons = parse_js_beacon_blocks(ctx.lines)
+    apply_js_beacons(file_path, ctx.lines, outline_nodes, js_beacons)
+    return outline_nodes, ctx.lines
+
+
+def parse_sql_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    beacons: list[dict[str, Any]] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.lstrip()
+        if stripped.startswith("--"):
+            body = stripped.lstrip("-").lstrip()
+            if body.startswith("@beacon["):
+                comment_line = i + 1
+                block_lines = [body]
+                i += 1
+                block_end_line = None
+                while i < n:
+                    next_line = lines[i].lstrip()
+                    if next_line.startswith("--"):
+                        next_body = next_line.lstrip("-").lstrip()
+                    else:
+                        next_body = next_line
+                    block_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        block_end_line = i + 1
+                        i += 1
+                        break
+                    i += 1
+
+                field_texts: list[str] = []
+                inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+                for raw in inner_lines:
+                    text = raw.strip()
+                    if not text or text.startswith("@beacon"):
+                        continue
+                    field_texts.append(text)
+                fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+                kind = (fields.get("kind") or "span").strip().lower() or "span"
+                if kind not in {"ast", "span"}:
+                    if diagnostics is not None:
+                        diagnostics.append(_beacon_block_diagnostic(
+                            comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                        ))
+                    continue
+
+                show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+                beacon = {
+                    "id": fields.get("id"),
+                    "role": fields.get("role"),
+                    "slice_labels": fields.get("slice_labels"),
+                    "kind": kind,
+                    "start_snippet": fields.get("start_snippet"),
+                    "end_snippet": fields.get("end_snippet"),
+                    "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                    "comment_line": comment_line,
+                    "show_span": show_span,
+                    "show_span_explicit": show_span_explicit,
+                }
+                beacons.append(beacon)
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "kept", fields, field_texts,
+                    ))
+                continue
+        i += 1
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1].lstrip()
+            if raw.startswith("--"):
+                body = raw.lstrip("-").lstrip()
+            else:
+                body = raw
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1].lstrip()
+            if raw.startswith("--"):
+                body = raw.lstrip("-").lstrip()
+            else:
+                body = raw
+
+            if "@beacon-close[" in body:
+                close_lines = [body]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1].lstrip()
+                    if next_raw.startswith("--"):
+                        next_body = next_raw.lstrip("-").lstrip()
+                    else:
+                        next_body = next_raw
+                    close_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    cl = cl.strip()
+                    if cl.startswith("id="):
+                        close_id = cl.split("=", 1)[1].strip().strip(",").strip("]")
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons
+
+
+def parse_js_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    beacons: list[dict[str, Any]] = []
+    n = len(lines)
+    i = 0
+
+    def _strip_js_comment_sugar(text: str) -> str:
+        t = text.lstrip()
+        if t.startswith("//"):
+            t = t[2:].lstrip()
+        if t.startswith("/*"):
+            t = t[2:].lstrip()
+        if t.startswith("*/"):
+            t = t[2:].lstrip()
+        if t.startswith("*"):
+            t = t[1:].lstrip()
+        if t.endswith("*/"):
+            t = t[:-2].rstrip()
+        return t
+
+    while i < n:
+        line = lines[i]
+        if "@beacon[" in line:
+            comment_line = i + 1
+            block_lines = [line]
+            i += 1
+            block_end_line = None
+            while i < n:
+                block_lines.append(lines[i])
+                if _strip_js_comment_sugar(lines[i]).strip().startswith("]"):
+                    block_end_line = i + 1
+                    i += 1
+                    break
+                i += 1
+
+            field_texts: list[str] = []
+            inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+            for raw in inner_lines:
+                text = raw.strip()
+                if not text:
+                    continue
+                text = _strip_js_comment_sugar(text)
+                if not text or text.startswith("@beacon"):
+                    continue
+                field_texts.append(text)
+            fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+            kind_raw = fields.get("kind")
+            kind = (kind_raw or "span").strip().lower() or "span"
+            if kind not in {"ast", "span"}:
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                    ))
+                continue
+
+            show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+            beacon = {
+                "id": fields.get("id"),
+                "role": fields.get("role"),
+                "slice_labels": fields.get("slice_labels"),
+                "kind": kind,
+                "start_snippet": fields.get("start_snippet"),
+                "end_snippet": fields.get("end_snippet"),
+                "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                "comment_line": comment_line,
+                "kind_explicit": bool(kind_raw),
+                "show_span": show_span,
+                "show_span_explicit": show_span_explicit,
+            }
+            beacons.append(beacon)
+            if diagnostics is not None:
+                diagnostics.append(_beacon_block_diagnostic(
+                    comment_line, block_end_line, "kept", fields, field_texts,
+                ))
+        else:
+            i += 1
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        if beacon.get("span_lineno_start") is not None and beacon.get("span_lineno_end") is not None:
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1]
+            body = _strip_js_comment_sugar(raw)
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1]
+            body = _strip_js_comment_sugar(raw)
+            if "@beacon-close[" in body:
+                close_lines = [body]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1]
+                    next_body = _strip_js_comment_sugar(next_raw)
+                    close_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    text = cl.strip()
+                    while text and text[-1] in ",]":
+                        text = text[:-1].rstrip()
+                    if text.startswith("id="):
+                        _, val = text.split("=", 1)
+                        close_id = val.strip()
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons
+
+
+def parse_sh_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    beacons: list[dict[str, Any]] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            body = stripped.lstrip("#").lstrip()
+            if body.startswith("@beacon["):
+                comment_line = i + 1
+                block_lines = [body]
+                i += 1
+                block_end_line = None
+                while i < n:
+                    next_line = lines[i].lstrip()
+                    if next_line.startswith("#"):
+                        next_body = next_line.lstrip("#").lstrip()
+                    else:
+                        next_body = next_line
+                    block_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        block_end_line = i + 1
+                        i += 1
+                        break
+                    i += 1
+
+                field_texts: list[str] = []
+                inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+                for raw in inner_lines:
+                    text = raw.strip()
+                    if not text or text.startswith("@beacon"):
+                        continue
+                    field_texts.append(text)
+                fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+                kind = (fields.get("kind") or "span").strip().lower() or "span"
+                if kind not in {"ast", "span"}:
+                    if diagnostics is not None:
+                        diagnostics.append(_beacon_block_diagnostic(
+                            comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                        ))
+                    continue
+
+                show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+                beacon = {
+                    "id": fields.get("id"),
+                    "role": fields.get("role"),
+                    "slice_labels": fields.get("slice_labels"),
+                    "kind": kind,
+                    "start_snippet": fields.get("start_snippet"),
+                    "end_snippet": fields.get("end_snippet"),
+                    "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                    "comment_line": comment_line,
+                    "show_span": show_span,
+                    "show_span_explicit": show_span_explicit,
+                }
+                beacons.append(beacon)
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "kept", fields, field_texts,
+                    ))
+                continue
+        i += 1
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1].lstrip()
+            if raw.startswith("#"):
+                body = raw.lstrip("#").lstrip()
+            else:
+                body = raw
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1].lstrip()
+            if raw.startswith("#"):
+                body = raw.lstrip("#").lstrip()
+            else:
+                body = raw
+
+            if "@beacon-close[" in body:
+                close_lines = [body]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1].lstrip()
+                    if next_raw.startswith("#"):
+                        next_body = next_raw.lstrip("#").lstrip()
+                    else:
+                        next_body = next_raw
+                    close_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    cl = cl.strip()
+                    if cl.startswith("id="):
+                        close_id = cl.split("=", 1)[1].strip().strip(",").strip("]")
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons
+
+
+def parse_yaml_beacon_blocks(
+    lines: list[str], *, diagnostics: list | None = None
+) -> list[dict[str, Any]]:
+    beacons: list[dict[str, Any]] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            body = stripped.lstrip("#").lstrip()
+            if body.startswith("@beacon["):
+                comment_line = i + 1
+                block_lines = [body]
+                i += 1
+                block_end_line = None
+                while i < n:
+                    next_line = lines[i].lstrip()
+                    if next_line.startswith("#"):
+                        next_body = next_line.lstrip("#").lstrip()
+                    else:
+                        next_body = next_line
+                    block_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        block_end_line = i + 1
+                        i += 1
+                        break
+                    i += 1
+
+                field_texts: list[str] = []
+                inner_lines = block_lines[1:-1] if len(block_lines) >= 2 else []
+                for raw in inner_lines:
+                    text = raw.strip()
+                    if not text or text.startswith("@beacon"):
+                        continue
+                    field_texts.append(text)
+                fields: dict[str, str] = parse_beacon_field_lines(field_texts)
+
+                kind = (fields.get("kind") or "span").strip().lower() or "span"
+                if kind not in {"ast", "span"}:
+                    if diagnostics is not None:
+                        diagnostics.append(_beacon_block_diagnostic(
+                            comment_line, block_end_line, "skipped_unknown_kind", fields, field_texts,
+                        ))
+                    continue
+
+                show_span, show_span_explicit = _parse_show_span_fields(fields)
+
+                beacon = {
+                    "id": fields.get("id"),
+                    "role": fields.get("role"),
+                    "slice_labels": fields.get("slice_labels"),
+                    "kind": kind,
+                    "start_snippet": fields.get("start_snippet"),
+                    "end_snippet": fields.get("end_snippet"),
+                    "comment": (fields.get("comment") if fields.get("comment") not in (None, "") else fields.get("comments")),
+                    "comment_line": comment_line,
+                    "show_span": show_span,
+                    "show_span_explicit": show_span_explicit,
+                }
+                beacons.append(beacon)
+                if diagnostics is not None:
+                    diagnostics.append(_beacon_block_diagnostic(
+                        comment_line, block_end_line, "kept", fields, field_texts,
+                    ))
+                continue
+        i += 1
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        if not b_id:
+            continue
+
+        comment_line = beacon.get("comment_line")
+        if not isinstance(comment_line, int) or not (1 <= comment_line <= n):
+            continue
+
+        j = comment_line
+        open_end = comment_line
+        while j <= n:
+            raw = lines[j - 1].lstrip()
+            if raw.startswith("#"):
+                body = raw.lstrip("#").lstrip()
+            else:
+                body = raw
+            if body.strip().startswith("]"):
+                open_end = j
+                break
+            j += 1
+
+        close_comment_line = None
+        k = open_end + 1
+        while k <= n:
+            raw = lines[k - 1].lstrip()
+            if raw.startswith("#"):
+                body = raw.lstrip("#").lstrip()
+            else:
+                body = raw
+
+            if "@beacon-close[" in body:
+                close_lines = [body]
+                k += 1
+                while k <= n:
+                    next_raw = lines[k - 1].lstrip()
+                    if next_raw.startswith("#"):
+                        next_body = next_raw.lstrip("#").lstrip()
+                    else:
+                        next_body = next_raw
+                    close_lines.append(next_body)
+                    if next_body.strip().startswith("]"):
+                        k += 1
+                        break
+                    k += 1
+
+                close_id = None
+                for cl in close_lines:
+                    cl = cl.strip()
+                    if cl.startswith("id="):
+                        close_id = cl.split("=", 1)[1].strip().strip(",").strip("]")
+                        break
+
+                if diagnostics is not None:
+                    diagnostics.append(
+                        {"record": "close", "line": k - len(close_lines), "id": close_id}
+                    )
+                if close_id == b_id:
+                    close_comment_line = k - len(close_lines)
+                    if diagnostics is not None:
+                        diagnostics.append(
+                            {"record": "close_match", "line": close_comment_line, "opener_line": comment_line}
+                        )
+                    break
+
+            k += 1
+
+        if close_comment_line is not None:
+            inner_start = open_end + 1
+            inner_end = close_comment_line - 1
+            if inner_start <= inner_end:
+                beacon["span_lineno_start"] = inner_start
+                beacon["span_lineno_end"] = inner_end
+
+    return beacons
+
+
+def _extract_sql_beacon_context(
+    lines: list[str],
+    comment_line: int,
+    beacon_id: Optional[str] = None,
+) -> List[str]:
+    context: List[str] = []
+
+    n = len(lines)
+    def _sql_body(raw_line: str) -> str:
+        s = raw_line.lstrip()
+        if s.startswith("--"):
+            return s[2:].lstrip()
+        return s
+    def _is_meta_block_end(body: str) -> bool:
+        return body.strip().startswith("]")
+
+    comment_mask: list[bool] = [False] * n
+    cleaned: list[str] = ["" for _ in range(n)]
+    in_block = False
+
+    for idx, raw in enumerate(lines, start=1):
+        stripped = raw.lstrip()
+        if not stripped:
+            continue
+        if "@beacon" in stripped:
+            continue
+
+        is_comment = False
+        text = ""
+
+        if not in_block:
+            if stripped.startswith("--"):
+                is_comment = True
+                text = stripped[2:].lstrip()
+            elif "/*" in stripped:
+                is_comment = True
+                in_block = True
+                after = stripped.split("/*", 1)[1]
+                if "*/" in after:
+                    before_close, _ = after.split("*/", 1)
+                    text = before_close.strip()
+                    in_block = False
+                else:
+                    text = after.strip()
+        else:
+            is_comment = True
+            if "*/" in stripped:
+                before_close, _ = stripped.split("*/", 1)
+                text = before_close.strip()
+                in_block = False
+            else:
+                text = stripped
+
+        if is_comment:
+            comment_mask[idx - 1] = True
+            cleaned[idx - 1] = text
+
+    j = comment_line
+    block_end = comment_line
+    while j <= n:
+        body = _sql_body(lines[j - 1])
+        if _is_meta_block_end(body):
+            block_end = j
+            break
+        j += 1
+
+    j = comment_line - 1
+    while j >= 1:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j -= 1
+            continue
+        if comment_mask[j - 1]:
+            if cleaned[j - 1]:
+                context.insert(0, cleaned[j - 1])
+            j -= 1
+            continue
+        break
+
+    j = block_end + 1
+    while j <= n:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j += 1
+            continue
+        body = _sql_body(raw)
+        if body.startswith("@beacon["):
+            j += 1
+            while j <= n:
+                inner_body = _sql_body(lines[j - 1])
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            continue
+        if body.startswith("@beacon-close["):
+            close_id: Optional[str] = None
+            j += 1
+            while j <= n:
+                inner_body = _sql_body(lines[j - 1]).strip()
+                if inner_body.startswith("id=") and close_id is None:
+                    close_id = inner_body.split("=", 1)[1].strip()
+                    close_id = close_id.rstrip(",").rstrip("]").strip()
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            if beacon_id and close_id and close_id != beacon_id:
+                continue
+            break
+        if comment_mask[j - 1]:
+            if cleaned[j - 1]:
+                context.append(cleaned[j - 1])
+            j += 1
+            continue
+        break
+
+    return _strip_beacon_meta_blocks_from_context(context)
+
+
+def apply_sql_beacons(
+    lines: list[str],
+    file_children: List[Dict[str, Any]],
+    beacons: list[dict[str, Any]],
+) -> None:
+    if not beacons:
+        return
+
+    n = len(lines)
+    _prepend_duplicate_beacon_id_warning_nodes(file_children, beacons, language="SQL")
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "sql-span-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        context_lines = _extract_sql_beacon_context(
+            lines,
+            beacon.get("comment_line") or 0,
+            beacon_id=b_id,
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (SQL SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (SQL):")
+            note_lines.extend(context_lines)
+
+        span_text_lines: List[str] = []
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            span_start = max(1, span_start)
+            span_end = min(n, span_end)
+            if span_start <= span_end:
+                span_text_lines = lines[span_start - 1 : span_end]
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+        }
+
+        file_children.append(span_node)
+
+
+def _extract_sh_beacon_context(
+    lines: list[str],
+    comment_line: int,
+    beacon_id: Optional[str] = None,
+) -> List[str]:
+    n = len(lines)
+    context: List[str] = []
+    def _strip_hash_prefix(raw_line: str) -> str:
+        s = raw_line.lstrip()
+        if s.startswith("#"):
+            return s[1:].lstrip()
+        return s
+    def _is_meta_block_end(body: str) -> bool:
+        return body.strip().startswith("]")
+    open_end = comment_line
+
+    j = comment_line
+    while 1 <= j <= n:
+        body = _strip_hash_prefix(lines[j - 1])
+        if _is_meta_block_end(body):
+            open_end = j
+            break
+        j += 1
+
+    j = comment_line - 1
+    while j >= 1:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j -= 1
+            continue
+        stripped = raw.lstrip()
+        if not stripped.startswith("#"):
+            break
+        body = _strip_hash_prefix(raw)
+        if not body:
+            j -= 1
+            continue
+        if body.startswith("@beacon") or _is_meta_block_end(body):
+            break
+        if set(body.strip()) <= {"#"}:
+            j -= 1
+            continue
+        context.insert(0, body)
+        j -= 1
+
+    j = open_end + 1
+    while j <= n:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j += 1
+            continue
+        stripped = raw.lstrip()
+        if not stripped.startswith("#"):
+            break
+        body = _strip_hash_prefix(raw)
+        if not body:
+            j += 1
+            continue
+        if body.startswith("@beacon["):
+            j += 1
+            while j <= n:
+                inner_body = _strip_hash_prefix(lines[j - 1])
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            continue
+        if body.startswith("@beacon-close["):
+            close_id: Optional[str] = None
+            j += 1
+            while j <= n:
+                inner_body = _strip_hash_prefix(lines[j - 1]).strip()
+                if inner_body.startswith("id=") and close_id is None:
+                    close_id = inner_body.split("=", 1)[1].strip()
+                    close_id = close_id.rstrip(",").rstrip("]").strip()
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            if beacon_id and close_id and close_id != beacon_id:
+                continue
+            break
+        if body.startswith("@beacon"):
+            break
+        if set(body.strip()) <= {"#"}:
+            j += 1
+            continue
+        context.append(body)
+        j += 1
+
+    return _strip_beacon_meta_blocks_from_context(context)
+
+
+def _prepend_duplicate_beacon_id_warning_nodes(
+    children: List[Dict[str, Any]],
+    beacons: list[dict[str, Any]],
+    *,
+    language: str,
+) -> None:
+    if not beacons:
+        return
+    duplicate_beacon_ids = _duplicate_beacon_ids(beacons)
+    if not duplicate_beacon_ids:
+        return
+    warning_nodes: List[Dict[str, Any]] = []
+    for dup_id in duplicate_beacon_ids:
+        warning_nodes.append(
+            {
+                "name": f"🚨 Duplicate beacon ID ({language}): {dup_id}",
+                "note": (
+                    "This file contains multiple @beacon blocks with the same id.\n\n"
+                    "Why this matters:\n"
+                    "- Blocks are matched by their id.\n"
+                    "- Duplicate ids create ambiguous matches and may cause reorder storms.\n\n"
+                    "Fix:\n"
+                    "- Make beacon ids unique (or correct @beacon-close blocks).\n"
+                    "- Then run the check again."
+                ),
+                "children": [],
+                "_position_hint": "top",
+            }
+        )
+    children[:0] = warning_nodes
+
+
+def _duplicate_beacon_ids(beacons: list[dict[str, Any]]) -> list[str]:
+    seen_beacon_ids: set[str] = set()
+    duplicate_beacon_ids: set[str] = set()
+    for b in beacons:
+        bid = (b.get("id") or "").strip()
+        if not bid:
+            continue
+        if bid in seen_beacon_ids:
+            duplicate_beacon_ids.add(bid)
+        seen_beacon_ids.add(bid)
+    return sorted(duplicate_beacon_ids)
+
+
+def apply_sh_beacons(
+    lines: list[str],
+    file_children: List[Dict[str, Any]],
+    beacons: list[dict[str, Any]],
+) -> None:
+    if not beacons:
+        return
+
+    n = len(lines)
+    _prepend_duplicate_beacon_id_warning_nodes(file_children, beacons, language="SH")
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "sh-span-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        context_lines = _extract_sh_beacon_context(
+            lines,
+            beacon.get("comment_line") or 0,
+            beacon_id=b_id,
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (SH SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (SH):")
+            note_lines.extend(context_lines)
+
+        span_text_lines: List[str] = []
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            span_start = max(1, span_start)
+            span_end = min(n, span_end)
+            if span_start <= span_end:
+                span_text_lines = lines[span_start - 1 : span_end]
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+        }
+
+        file_children.append(span_node)
+
+
+def _extract_yaml_beacon_context(
+    lines: list[str],
+    comment_line: int,
+    beacon_id: Optional[str] = None,
+) -> List[str]:
+    n = len(lines)
+    context: List[str] = []
+    def _strip_hash_prefix(raw_line: str) -> str:
+        s = raw_line.lstrip()
+        if s.startswith("#"):
+            return s[1:].lstrip()
+        return s
+    def _is_meta_block_end(body: str) -> bool:
+        return body.strip().startswith("]")
+    open_end = comment_line
+
+    j = comment_line
+    while 1 <= j <= n:
+        body = _strip_hash_prefix(lines[j - 1])
+        if _is_meta_block_end(body):
+            open_end = j
+            break
+        j += 1
+
+    j = comment_line - 1
+    while j >= 1:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j -= 1
+            continue
+        stripped = raw.lstrip()
+        if not stripped.startswith("#"):
+            break
+        body = _strip_hash_prefix(raw)
+        if not body:
+            j -= 1
+            continue
+        if body.startswith("@beacon") or _is_meta_block_end(body):
+            break
+        if set(body.strip()) <= {"#"}:
+            j -= 1
+            continue
+        context.insert(0, body)
+        j -= 1
+
+    j = open_end + 1
+    while j <= n:
+        raw = lines[j - 1]
+        if not raw.strip():
+            j += 1
+            continue
+        stripped = raw.lstrip()
+        if not stripped.startswith("#"):
+            break
+        body = _strip_hash_prefix(raw)
+        if not body:
+            j += 1
+            continue
+        if body.startswith("@beacon["):
+            j += 1
+            while j <= n:
+                inner_body = _strip_hash_prefix(lines[j - 1])
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            continue
+        if body.startswith("@beacon-close["):
+            close_id: Optional[str] = None
+            j += 1
+            while j <= n:
+                inner_body = _strip_hash_prefix(lines[j - 1]).strip()
+                if inner_body.startswith("id=") and close_id is None:
+                    close_id = inner_body.split("=", 1)[1].strip()
+                    close_id = close_id.rstrip(",").rstrip("]").strip()
+                if _is_meta_block_end(inner_body):
+                    j += 1
+                    break
+                j += 1
+            if beacon_id and close_id and close_id != beacon_id:
+                continue
+            break
+        if body.startswith("@beacon"):
+            break
+        if set(body.strip()) <= {"#"}:
+            j += 1
+            continue
+        context.append(body)
+        j += 1
+
+    return _strip_beacon_meta_blocks_from_context(context)
+
+
+def apply_yaml_beacons(
+    lines: list[str],
+    file_children: List[Dict[str, Any]],
+    beacons: list[dict[str, Any]],
+) -> None:
+    if not beacons:
+        return
+
+    n = len(lines)
+    _prepend_duplicate_beacon_id_warning_nodes(file_children, beacons, language="YAML")
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "yaml-span-beacon"
+        display_slice = slice_labels or "-"
+
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        context_lines = _extract_yaml_beacon_context(
+            lines,
+            beacon.get("comment_line") or 0,
+            beacon_id=b_id,
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (YAML SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (YAML):")
+            note_lines.extend(context_lines)
+
+        span_text_lines: List[str] = []
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            span_start = max(1, span_start)
+            span_end = min(n, span_end)
+            if span_start <= span_end:
+                span_text_lines = lines[span_start - 1 : span_end]
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+        }
+
+        file_children.append(span_node)
+
+
+def apply_js_beacons(
+    file_path: str,
+    lines: list[str],
+    outline_nodes: List[Dict[str, Any]],
+    beacons: list[dict[str, Any]],
+) -> None:
+    if not beacons:
+        return
+
+    ast_nodes = list(_iter_ast_outline_nodes(outline_nodes))
+
+    n = len(lines)
+    _prepend_duplicate_beacon_id_warning_nodes(outline_nodes, beacons, language="JS/TS")
+
+    def _js_next_anchor_line_after(line_no: int) -> Optional[int]:
+        for idx in range(line_no + 1, n + 1):
+            raw = lines[idx - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                continue
+            if stripped.startswith("//"):
+                continue
+            if stripped.startswith("/*") or stripped.startswith("*") or stripped.startswith("*/"):
+                continue
+            return idx
+        return None
+
+    def _header_line_for_node(node: dict[str, Any]) -> Optional[str]:
+        ln = node.get("orig_lineno_start_unused")
+        if not isinstance(ln, int) or ln <= 0 or ln > len(lines):
+            return None
+        return lines[ln - 1]
+
+    span_sort_lines: dict[int, int] = {}
+
+    def _node_source_order_line(node: dict[str, Any]) -> int:
+        cached = span_sort_lines.get(id(node))
+        if isinstance(cached, int):
+            return cached
+        ln = node.get("orig_lineno_start_unused") if isinstance(node, dict) else None
+        if isinstance(ln, int):
+            return ln
+        return 10**9
+
+    def _insert_child_in_source_order(
+        siblings: List[Dict[str, Any]],
+        child_node: Dict[str, Any],
+        sort_line: int,
+    ) -> None:
+        span_sort_lines[id(child_node)] = sort_line
+        insert_at = len(siblings)
+        for idx, existing in enumerate(siblings):
+            if _node_source_order_line(existing) > sort_line:
+                insert_at = idx
+                break
+        siblings.insert(insert_at, child_node)
+
+    def _extract_js_beacon_context(comment_line: int) -> List[str]:
+        context: List[str] = []
+
+        comment_mask: list[bool] = [False] * n
+        cleaned: list[str] = ["" for _ in range(n)]
+        in_block = False
+
+        for idx, raw in enumerate(lines, start=1):
+            stripped = raw.lstrip()
+            if not stripped:
+                continue
+
+            is_comment = False
+            text = ""
+
+            if not in_block:
+                if stripped.startswith("//"):
+                    is_comment = True
+                    text = stripped[2:].lstrip()
+                elif "/*" in stripped:
+                    is_comment = True
+                    in_block = True
+                    after = stripped.split("/*", 1)[1]
+                    if "*/" in after:
+                        before_close, _ = after.split("*/", 1)
+                        text = before_close.strip()
+                        in_block = False
+                    else:
+                        text = after.strip()
+            else:
+                is_comment = True
+                if "*/" in stripped:
+                    before_close, _ = stripped.split("*/", 1)
+                    text = before_close.strip()
+                    in_block = False
+                else:
+                    text = stripped
+
+            if is_comment:
+                comment_mask[idx - 1] = True
+                cleaned[idx - 1] = text
+
+        j = comment_line
+        block_end = comment_line
+        while j <= n:
+            raw = lines[j - 1]
+            body = raw.lstrip()
+            if body.startswith("//"):
+                body = body[2:].lstrip()
+            if body.startswith("/*"):
+                body = body[2:].lstrip()
+            if body.startswith("*/"):
+                body = body[2:].lstrip()
+            if body.startswith("*"):
+                body = body[1:].lstrip()
+            if body.rstrip().endswith("*/"):
+                body = body.rstrip()[:-2].rstrip()
+            if body.strip().startswith("]"):
+                block_end = j
+                break
+            j += 1
+
+        j = comment_line - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            if not raw.strip():
+                j -= 1
+                continue
+            if comment_mask[j - 1]:
+                if cleaned[j - 1]:
+                    context.insert(0, cleaned[j - 1])
+                j -= 1
+                continue
+            break
+
+        j = block_end + 1
+        while j <= n:
+            raw = lines[j - 1]
+            if not raw.strip():
+                j += 1
+                continue
+            if comment_mask[j - 1]:
+                if cleaned[j - 1]:
+                    context.append(cleaned[j - 1])
+                j += 1
+                continue
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)
+
+    for beacon in beacons:
+        kind = beacon.get("kind")
+        start_snippet = beacon.get("start_snippet")
+        b_id = beacon.get("id") or "(no-id)"
+        if kind in {"span", "ast"} and not start_snippet:
+            comment_line = beacon.get("comment_line") or 0
+            if isinstance(comment_line, int) and comment_line > 0:
+                anchor = _js_next_anchor_line_after(comment_line)
+            else:
+                anchor = None
+            if anchor is None:
+                continue
+            beacon["_anchor_lineno"] = anchor
+
+            if kind == "span" and isinstance(beacon.get("span_lineno_end"), int):
+                continue
+
+            if kind == "span" and bool(beacon.get("kind_explicit")):
+                continue
+
+            ast_candidates: list[dict[str, Any]] = []
+            for node in ast_nodes:
+                ast_type = node.get("ast_type")
+                if ast_type not in {"class", "function", "method", "const_decl", "let_decl", "var_decl"}:
+                    continue
+                ln = node.get("orig_lineno_start_unused")
+                if isinstance(ln, int) and ln == anchor:
+                    ast_candidates.append(node)
+            if kind == "span" and len(ast_candidates) == 1:
+                beacon["kind"] = "ast"
+
+    for beacon in beacons:
+        if beacon.get("kind") != "ast":
+            continue
+        b_id = beacon.get("id") or "(no-id)"
+        start_snippet = beacon.get("start_snippet")
+        comment_line = beacon.get("comment_line") or 0
+        anchor_lineno = beacon.get("_anchor_lineno")
+
+        chosen: Optional[dict[str, Any]] = None
+
+        if start_snippet:
+            norm_snip = normalize_for_match(start_snippet)
+            if not norm_snip:
+                continue
+
+            candidates: list[dict[str, Any]] = []
+            for node in ast_nodes:
+                header = _header_line_for_node(node)
+                if header is None:
+                    continue
+                if norm_snip in normalize_for_match(header):
+                    candidates.append(node)
+
+            if not candidates:
+                continue
+
+            if len(candidates) == 1:
+                chosen = candidates[0]
+            else:
+                after = [
+                    n
+                    for n in candidates
+                    if isinstance(n.get("orig_lineno_start_unused"), int)
+                    and n["orig_lineno_start_unused"] > comment_line
+                ]
+                if len(after) == 1:
+                    chosen = after[0]
+                else:
+                    continue
+        else:
+            anchor = beacon.get("_anchor_lineno")
+            if not isinstance(anchor, int):
+                continue
+            ast_candidates = [
+                node
+                for node in ast_nodes
+                if node.get("ast_type") in {"class", "function", "method", "const_decl", "let_decl", "var_decl"}
+                and isinstance(node.get("orig_lineno_start_unused"), int)
+                and node["orig_lineno_start_unused"] == anchor
+            ]
+            if len(ast_candidates) == 1:
+                chosen = ast_candidates[0]
+            else:
+                continue
+
+        if not chosen:
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "js-ast-beacon"
+        display_slice = slice_labels or "-"
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+
+        name = chosen.get("name") or "Untitled"
+        if "🔱" not in name:
+            name = f"{name} 🔱"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+        chosen["name"] = name
+
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+        meta_lines = [
+            "BEACON (JS/TS AST)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: ast",
+        ]
+        if comment:
+            meta_lines.append(f"comment: {comment}")
+        note = chosen.get("note") or ""
+        if note:
+            note_lines = note.splitlines()
+            insert_idx = (
+                1
+                if (note_lines and note_lines[0].strip().startswith("AST_QUALNAME:"))
+                else 0
+            )
+            new_note_lines: list[str] = []
+            new_note_lines.extend(note_lines[:insert_idx])
+            new_note_lines.extend(meta_lines)
+            if insert_idx < len(note_lines):
+                if note_lines[insert_idx].strip():
+                    new_note_lines.append("")
+                new_note_lines.extend(note_lines[insert_idx:])
+            chosen["note"] = "\n".join(new_note_lines)
+        else:
+            chosen["note"] = "\n".join(meta_lines)
+
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+        start_snippet = beacon.get("start_snippet")
+        comment_line = beacon.get("comment_line") or 0
+
+        attachment_line: Optional[int] = None
+
+        if start_snippet:
+            norm_snip = normalize_for_match(start_snippet)
+            if not norm_snip:
+                continue
+            start_candidates: list[int] = []
+            for idx, line in enumerate(lines, start=1):
+                stripped = line.lstrip()
+                if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*") or stripped.startswith("*/"):
+                    continue
+                if norm_snip in normalize_for_match(line):
+                    start_candidates.append(idx)
+            if not start_candidates:
+                continue
+            if len(start_candidates) == 1:
+                attachment_line = start_candidates[0]
+            else:
+                after = [ln for ln in start_candidates if ln > comment_line]
+                if len(after) == 1:
+                    attachment_line = after[0]
+                else:
+                    continue
+        else:
+            span_start = beacon.get("span_lineno_start")
+            if isinstance(span_start, int):
+                attachment_line = span_start
+            elif isinstance(comment_line, int) and comment_line > 0:
+                attachment_line = comment_line
+            else:
+                anchor = beacon.get("_anchor_lineno")
+                attachment_line = anchor if isinstance(anchor, int) else None
+
+        if attachment_line is None:
+            continue
+
+        enclosing = _find_enclosing_ast_node_for_line(outline_nodes, attachment_line)
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "js-span-beacon"
+        display_slice = slice_labels or "-"
+        tag_suffix = _slice_label_tags(slice_labels or display_slice)
+
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        context_lines = _extract_js_beacon_context(comment_line)
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (JS/TS SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (JS/TS):")
+            note_lines.extend(context_lines)
+
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        span_text_lines: List[str] = []
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            span_start = max(1, span_start)
+            span_end = min(n, span_end)
+            if span_start <= span_end:
+                span_text_lines = lines[span_start - 1 : span_end]
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+            "orig_lineno_start_unused": attachment_line,
+            "orig_lineno_end_unused": attachment_line,
+        }
+
+        if enclosing is not None:
+            children = enclosing.get("children") or []
+            _insert_child_in_source_order(children, span_node, attachment_line)
+            enclosing["children"] = children
+        else:
+            _insert_child_in_source_order(outline_nodes, span_node, attachment_line)
+
+
+def _token_is_pure_decoration(token: str) -> bool:
+    if not token:
+        return False
+    return not any(ch.isalnum() for ch in token)
+
+
+def split_name_and_tags(raw_name: str) -> tuple[str, list[str]]:
+    name = (raw_name or "").strip()
+    if not name:
+        return "", []
+    tokens = name.split()
+    tags: list[str] = []
+    trident = TRIDENT
+
+    def _is_marker_decoration(tok: str) -> bool:
+        t = tok.strip()
+        return t == trident or t.startswith("\U0001FA9A")
+
+    region_start = len(tokens)
+    i = len(tokens) - 1
+    while i >= 0:
+        candidate = _strip_tag_underline_markup(tokens[i])
+        if candidate.startswith("#") or _is_marker_decoration(candidate):
+            region_start = i
+            i -= 1
+            continue
+        if _token_is_pure_decoration(candidate):
+            i -= 1
+            continue
+        break
+
+    if region_start >= len(tokens):
+        return name, []
+    base = " ".join(tokens[:region_start]).strip()
+    for tok in tokens[region_start:]:
+        candidate = _strip_tag_underline_markup(tok)
+        if candidate.startswith("#"):
+            tags.append(candidate)
+    return base, tags
+
+
+def _indent_beacon_block(block_lines: list[str], source_lines: list[str], insert_idx: int) -> list[str]:
+    indent = ""
+    for idx in range(insert_idx, len(source_lines)):
+        line = source_lines[idx]
+        if line.strip():
+            indent = line[:len(line) - len(line.lstrip())]
+            break
+    return [indent + line for line in block_lines]
+
+
+_BEACON_EXTENT_LINE_PREFIX = {
+    "python": "#",
+    "js_ts": "//",
+    "vue": "//",
+    "sql": "--",
+    "shell": "#",
+    "yaml": "#",
+}
+
+
+def _beacon_block_extent_for_language(
+    language: str,
+    lines: list[str],
+    beacon: dict,
+) -> Optional[tuple[int, int]]:
+    cl = beacon.get("comment_line")
+    if not isinstance(cl, int) or cl <= 0 or cl > len(lines):
+        return None
+    if language == "markdown":
+        start_idx = cl - 1
+        j = cl - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            if "<!--" in raw:
+                start_idx = j - 1
+                break
+            if raw.strip():
+                break
+            j -= 1
+        end_idx = None
+        j = cl
+        while j <= len(lines):
+            raw = lines[j - 1]
+            if "-->" in raw:
+                end_idx = j - 1
+                break
+            j += 1
+        if end_idx is None:
+            return None
+        return start_idx, end_idx
+    prefix = _BEACON_EXTENT_LINE_PREFIX.get(language)
+    if prefix is None:
+        return None
+    start_idx = cl - 1
+    end_idx = None
+    j = cl
+    while j <= len(lines):
+        raw = lines[j - 1]
+        stripped = raw.lstrip()
+        body = stripped[len(prefix):].lstrip() if stripped.startswith(prefix) else stripped
+        if body == "]":
+            end_idx = j - 1
+            break
+        j += 1
+    if end_idx is None:
+        return None
+    return start_idx, end_idx
+
+
+def _python_decorator_ranges_by_definition(
+    lines: list[str], *, tree: Optional[ast.AST] = None,
+) -> dict[int, list[tuple[int, int]]]:
+    import io
+    import tokenize
+
+    source = "\n".join(lines)
+    try:
+        if tree is None:
+            tree = ast.parse(source)
+        targets = [
+            node for node in ast.walk(tree)
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.decorator_list
+        ]
+        if not targets:
+            return {}
+
+        candidates: list[tuple[int, int]] = []
+        last_definition_line = max(node.lineno for node in targets)
+        first = None
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.start[0] >= last_definition_line:
+                break
+            if token.type in (tokenize.NL, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT):
+                continue
+            if token.type == tokenize.NEWLINE:
+                if first is not None and first.type == tokenize.OP and first.string == "@":
+                    candidates.append((first.start[0] - 1, token.end[0] - 1))
+                first = None
+            elif first is None:
+                first = token
+
+        by_definition: dict[int, list[tuple[int, int]]] = {}
+        for target in targets:
+            ranges: list[tuple[int, int]] = []
+            for decorator in target.decorator_list:
+                owned = [
+                    (start, end) for start, end in candidates
+                    if start <= decorator.lineno - 1
+                    and (decorator.end_lineno or decorator.lineno) - 1 <= end
+                    and end < target.lineno - 1
+                ]
+                if len(owned) != 1 or owned[0] in ranges:
+                    break
+                ranges.append(owned[0])
+            else:
+                by_definition[target.lineno - 1] = ranges
+        return by_definition
+    except (SyntaxError, ValueError, tokenize.TokenError):
+        return {}
+
+
+def _build_beacon_block_for_language(
+    language: str,
+    *,
+    bid: str,
+    role: Optional[str],
+    slice_labels: Optional[str],
+    kind: Optional[str],
+    show_span: Optional[bool],
+    comment_text: Optional[str],
+    start_snippet: Optional[str] = None,
+    end_snippet: Optional[str] = None,
+    section: Optional[str] = None,
+) -> list[str]:
+    style = language
+    if language == "vue":
+        style = {"template": "html", "style": "css", "script": "js_line"}.get(
+            section or "script", "js_line"
+        )
+    elif language == "markdown":
+        style = "html"
+    elif language == "js_ts":
+        style = "js_line"
+
+    fields: list[tuple[str, str]] = []
+    if role:
+        fields.append(("role", str(role)))
+    if slice_labels:
+        fields.append(("slice_labels", str(slice_labels)))
+    if kind:
+        fields.append(("kind", str(kind)))
+    if start_snippet:
+        fields.append(("start_snippet", f'"{start_snippet}"'))
+    if end_snippet:
+        fields.append(("end_snippet", f'"{end_snippet}"'))
+    if show_span is not None:
+        fields.append(("show_span", "true" if show_span else "false"))
+    if comment_text:
+        fields.append(("comment", str(comment_text)))
+
+    if style == "html":
+        lines = ["<!--", "@beacon[", f"  id={bid},"]
+        lines += [f"  {k}={v}," for k, v in fields]
+        lines += ["]", "-->"]
+        return lines
+    if style == "css":
+        lines = ["/* @beacon[", f"   id={bid},"]
+        lines += [f"   {k}={v}," for k, v in fields]
+        lines += ["] */"]
+        return lines
+    prefix = {"js_line": "//", "sql": "--"}.get(style) or (
+        "--" if language == "sql" else "#"
+    )
+    lines = [f"{prefix} @beacon[", f"{prefix}   id={bid},"]
+    lines += [f"{prefix}   {k}={v}," for k, v in fields]
+    lines += [f"{prefix} ]"]
+    return lines
+
+
+def _find_beacon_close_block_extent(
+    language: str,
+    lines: list[str],
+    bid: str,
+    search_from_idx: int = 0,
+) -> Optional[tuple[int, int]]:
+    prefix = _BEACON_EXTENT_LINE_PREFIX.get(language)
+    wanted = (bid or "").strip()
+    if not wanted or (prefix is None and language != "markdown"):
+        return None
+    search_from_idx = max(0, search_from_idx)
+    i = 0 if language == "markdown" else search_from_idx
+    fence_char = ""
+    fence_len = 0
+    while i < len(lines):
+        start_idx = i
+        body = lines[i].lstrip()
+        if language == "markdown":
+            fm = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", lines[i])
+            if fm:
+                run, suffix = fm.groups()
+                if not fence_char:
+                    fence_char, fence_len = run[0], len(run)
+                elif run[0] == fence_char and len(run) >= fence_len and not suffix.strip():
+                    fence_char, fence_len = "", 0
+                i += 1
+                continue
+            if fence_char or not body.startswith("<!--"):
+                i += 1
+                continue
+            body = body[4:]
+            block = []
+            j = i
+            while j < len(lines):
+                text, separator, suffix = body.partition("-->")
+                block.append(text.strip())
+                if separator:
+                    break
+                j += 1
+                if j < len(lines):
+                    body = lines[j]
+            i = j + 1
+            if j == len(lines) or suffix.strip() or start_idx < search_from_idx:
+                continue
+            end_idx = j
+            block = [text for text in block if text]
+            if not block or not block[0].startswith("@beacon-close["):
+                continue
+        else:
+            if not body.startswith(prefix):
+                i += 1
+                continue
+            body = body[len(prefix):].lstrip()
+            if not body.startswith("@beacon-close["):
+                i += 1
+                continue
+            block = [body]
+            end_idx = None
+            j = i + 1
+            while j < len(lines):
+                body = lines[j].lstrip()
+                if not body.startswith(prefix):
+                    break
+                body = body[len(prefix):].strip()
+                if body.startswith(("@beacon[", "@beacon-close[")):
+                    break
+                block.append(body)
+                if body.startswith("]"):
+                    end_idx = j
+                    j += 1
+                    break
+                j += 1
+            i = j
+            if end_idx is None:
+                continue
+
+        found_id = None
+        for k, body in enumerate(block[1:], start=1):
+            if body.startswith("]"):
+                if language == "markdown" and (body != "]" or k != len(block) - 1):
+                    break
+                if found_id == wanted:
+                    return (start_idx, end_idx)
+                break
+            if body.startswith(("@beacon[", "@beacon-close[")):
+                break
+            text = body.strip()
+            while text and text[-1] in ",]":
+                text = text[:-1].rstrip()
+            if text.startswith("id="):
+                found_id = (
+                    text.split("=", 1)[1].strip().strip('"').strip("'").strip()
+                )
+    return None
+
+
+BYTES_PER_TOKEN_ESTIMATE = 3
+
+
+def format_snippet_header(
+    header_prefix: str,
+    lines: Sequence[str],
+    span_start: int,
+    span_end: int,
+    *,
+    relative_start: int | None = None,
+) -> str:
+    total_lines = len(lines)
+    span_length = span_end - span_start + 1
+    byte_count = sum(
+        len(line.encode("utf-8")) + 1 for line in lines[span_start - 1 : span_end]
+    )
+    token_estimate = -(-byte_count // BYTES_PER_TOKEN_ESTIMATE)
+    header = (
+        f"[{header_prefix}lines {span_start}-{span_end} of {total_lines} | "
+        f"{span_length} lines, {byte_count} bytes, ~{token_estimate} tokens]"
+    )
+    if relative_start is not None:
+        header = header[:-1] + f" | relative 1 = line {relative_start}]"
+    return header
+
+
+def clamp_span_to_head_tail(
+    span_start: int, span_end: int, max_lines: int
+) -> tuple[int, int, int, int, int]:
+    tail = max_lines // 4
+    head = max_lines - tail
+    return (
+        span_start + head - 1,
+        span_end - tail + 1,
+        span_start + head,
+        span_end - tail,
+        (span_end - span_start + 1) - max_lines,
+    )
+
+
+_TIER_FENCE_BACKTICK_RE = re.compile(r"^ {0,3}`{3,}")
+
+
+_TIER_FENCE_TILDE_RE = re.compile(r"^ {0,3}~{3,}")
+
+
+def _tier_fence_for(body_lines: Sequence[str]) -> str:
+    if any(_TIER_FENCE_BACKTICK_RE.match(line) for line in body_lines):
+        if not any(_TIER_FENCE_TILDE_RE.match(line) for line in body_lines):
+            return "~~~~"
+        return "`" * 12
+    return "```"
+
+
+POSTFIX_SEP = "--"
+
+
+def slice_tag_variant_match(
+    tag_stripped: str,
+    prefix: str,
+    *,
+    postfix_words: Iterable[str],
+) -> dict[str, Any] | None:
+    if not tag_stripped or not prefix:
+        return None
+    if not tag_stripped.startswith(prefix):
+        return None
+    remainder = tag_stripped[len(prefix):]
+
+    matched_postfix = ""
+    middle = remainder
+    for w in postfix_words:
+        if not w:
+            continue
+        suf = POSTFIX_SEP + w
+        if remainder.endswith(suf) and len(remainder) >= len(suf):
+            matched_postfix = w
+            middle = remainder[: -len(suf)]
+            break
+
+    if middle and not middle.startswith("-"):
+        return None
+
+    return {"matched_prefix": prefix, "middle": middle, "postfix": matched_postfix}
+
+
+def parse_mapped_note(note: str) -> list[tuple[str, Any]]:
+    if not isinstance(note, str) or not note:
+        return []
+    lines = note.splitlines()
+    items: list[tuple[str, Any]] = []
+    body_started = False
+    i = 0
+    n = len(lines)
+    _block_keys = ("id", "role", "slice_labels", "kind", "show_span",
+                   "comment", "comments")
+
+    def _is_block_key(text: str) -> bool:
+        head = re.split(r"[:=]", text, 1)[0].strip()
+        return head in _block_keys
+
+    while i < n:
+        s = lines[i].strip()
+
+        if s == "MD_PATH:" or s.startswith("MD_PATH:"):
+            open_line = i
+            i += 1
+            found_sep_md = False
+            while i < n:
+                if lines[i].strip() == "---":
+                    i += 1
+                    found_sep_md = True
+                    break
+                i += 1
+            if body_started:
+                items.append(("md_path_body", lines[open_line:i]))
+            else:
+                block_end = (i - 1) if found_sep_md else i
+                items.append(("md_path", lines[open_line + 1:block_end]))
+                if found_sep_md:
+                    _j = i
+                    while _j < n and not lines[_j].strip():
+                        _j += 1
+                    if not (
+                        _j < n
+                        and (
+                            lines[_j].strip().startswith("BEACON (")
+                            or lines[_j].strip().startswith("@beacon[")
+                        )
+                    ):
+                        body_started = True
+            continue
+
+        if s.startswith("AST_QUALNAME:"):
+            if body_started:
+                raw = [lines[i]]
+                i += 1
+                if i < n and lines[i].strip() == "---":
+                    raw.append(lines[i])
+                    i += 1
+                items.append(("ast_qualname_body", raw))
+                continue
+            i += 1
+            if i < n and lines[i].strip() == "---":
+                _j = i + 1
+                _beacon_flip = True
+                while _j < n and not lines[_j].strip():
+                    _j += 1
+                if _j < n and (
+                    lines[_j].strip().startswith("BEACON (")
+                    or lines[_j].strip().startswith("@beacon[")
+                ):
+                    _k = _j + 1
+                    _closer = -1
+                    while _k < n:
+                        _t = lines[_k].strip()
+                        if _t == "---":
+                            _closer = _k
+                            break
+                        if _t and not _is_block_key(_t):
+                            _closer = _k
+                            break
+                        _k += 1
+                    if _closer < 0:
+                        _beacon_flip = False
+                    else:
+                        _closer_text = lines[_closer].strip()
+                        if _closer_text == "---":
+                            _beacon_flip = False
+                        elif _closer_text in (")", "]"):
+                            _after = _closer + 1
+                            if _after < n and lines[_after].strip() == "---":
+                                _beacon_flip = False
+                            elif _after >= n:
+                                _beacon_flip = False
+                        else:
+                            _beacon_flip = False
+                i += 1
+                if _beacon_flip:
+                    body_started = True
+            continue
+
+        if s.startswith("BEACON (") or s.startswith("@beacon["):
+            open_line = i
+            i += 1
+            found_sep = False
+            record: dict[str, str] = {}
+            while i < n:
+                t = lines[i].strip()
+                if t == "---":
+                    i += 1
+                    found_sep = True
+                    break
+                if t.startswith("comment:"):
+                    record["comment"] = t.split(":", 1)[1].strip()
+                elif t.startswith("comments:"):
+                    record["comment"] = t.split(":", 1)[1].strip()
+                if t and not any(
+                    t.startswith(prefix)
+                    for prefix in (
+                        "id:",
+                        "role:",
+                        "slice_labels:",
+                        "kind:",
+                        "show_span:",
+                        "comment:",
+                        "comments:",
+                    )
+                ):
+                    break
+                if t.startswith("id:"):
+                    record["id"] = t.split(":", 1)[1].strip()
+                elif t.startswith("role:"):
+                    record["role"] = t.split(":", 1)[1].strip()
+                elif t.startswith("slice_labels:"):
+                    record["slice_labels"] = t.split(":", 1)[1].strip()
+                elif t.startswith("kind:"):
+                    record["kind"] = t.split(":", 1)[1].strip()
+                elif t.startswith("show_span:"):
+                    record["show_span"] = t.split(":", 1)[1].strip()
+                i += 1
+            if found_sep:
+                if i < n and not lines[i].strip():
+                    i += 1
+            if body_started:
+                record["_raw_lines"] = lines[open_line:i]
+                items.append(("beacon_body", record))
+            else:
+                items.append(("beacon", record))
+                if found_sep:
+                    body_started = True
+            continue
+
+
+        items.append(("line", lines[i]))
+        if lines[i].strip():
+            body_started = True
+        i += 1
+    return items
+
+
+def _repository_view_span(text: str) -> str:
+    longest = 0
+    run = 0
+    for ch in text:
+        if ch == "`":
+            run += 1
+            if run > longest:
+                longest = run
+        else:
+            run = 0
+    fence = "`" * (longest + 1)
+    pad = " " if (text.startswith("`") or text.endswith("`")) else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
+REPOSITORY_VIEW_ENTRY_MARKERS = ("AST_QUALNAME:", "BEACON (", "MD_PATH:")
+
+
+def repository_view_note_is_entry(note: str) -> bool:
+    if not note:
+        return False
+    return note.split("\n", 1)[0].strip().startswith(REPOSITORY_VIEW_ENTRY_MARKERS)
+
+
+def repository_view_section_title(
+    items: list[tuple[str, Any]], strip_text: Callable[[str], str]
+) -> str:
+    for _kind, payload in items:
+        if _kind != "md_path":
+            continue
+        hash_lines = [
+            str(line).strip()
+            for line in payload
+            if str(line).strip().startswith("#")
+        ]
+        if hash_lines:
+            title = hash_lines[-1].lstrip("#")
+            if title.startswith(" "):
+                title = title[1:]
+            return strip_text(title).strip()
+    return ""
+
+
+def repository_view_body_parts(
+    items: list[tuple[str, Any]], strip_text: Callable[[str], str]
+) -> list[list[str]]:
+    parts: list[list[str]] = []
+    current: list[str] = []
+
+    def _feed(raw_line: str) -> None:
+        nonlocal current
+        stripped = raw_line.strip()
+        if stripped == "SPAN TEXT:" or re.fullmatch(
+            r"CONTEXT COMMENTS \(.*\):", stripped
+        ):
+            if current:
+                parts.append(current)
+                current = []
+            return
+        current.append(raw_line)
+
+    for kind, payload in items:
+        if kind == "line":
+            _feed(str(payload))
+        elif kind == "ast_qualname_body":
+            for _line in payload:
+                _feed(str(_line))
+        elif kind == "md_path_body":
+            for _line in payload:
+                _feed(str(_line))
+        elif kind == "beacon_body":
+            for _line in (payload.get("_raw_lines") or []):
+                _feed(str(_line))
+    if current:
+        parts.append(current)
+    trimmed: list[list[str]] = []
+    for part in parts:
+        while part and not part[0].strip():
+            part.pop(0)
+        while part and not part[-1].strip():
+            part.pop()
+        if part:
+            trimmed.append([strip_text(line) for line in part])
+    return trimmed
+
+
+def repository_view_labels_and_comment(
+    items: list[tuple[str, Any]], strip_text: Callable[[str], str]
+) -> tuple[list[str], str]:
+    beacon_records = [payload for kind, payload in items if kind == "beacon"]
+    first_record = beacon_records[0] if beacon_records else {}
+    raw_labels = first_record.get("slice_labels") or ""
+    labels = (
+        [t[1:] for t in _slice_label_tags(raw_labels).split()]
+        if raw_labels
+        else []
+    )
+    comment_text = strip_text(first_record.get("comment") or "").strip()
+    return labels, comment_text
+
+
+def repository_view_entry_display(
+    name: str,
+    note: str,
+    parent_entry_kind: str | None,
+    *,
+    headings_only: bool,
+    strip_text: Callable[[str], str],
+) -> tuple[str, str]:
+
+    items = parse_mapped_note(note)
+    base, _tags = split_name_and_tags(str(name or ""))
+    base = strip_text(base).strip()
+    tokens = base.split()
+    first = tokens[0] if tokens else ""
+    rest = tokens[1:]
+
+    labels, comment_text = repository_view_labels_and_comment(items, strip_text)
+
+    marker = note.split("\n", 1)[0].strip()
+    if marker.startswith("MD_PATH:"):
+        title = repository_view_section_title(items, strip_text) or base or "section"
+        heading = f"section {title}"
+    elif marker.startswith("BEACON ("):
+        title = " ".join(rest).strip() or "span-beacon"
+        heading = f"region {_repository_view_span(title)}"
+    elif first == EMOJI_CLASS:
+        if rest and rest[0] in ("class", "interface", "type", "enum"):
+            kind = rest[0]
+            title = " ".join(rest[1:]).strip()
+        else:
+            kind = "class"
+            title = " ".join(rest).strip()
+        heading = f"{kind} {_repository_view_span(title)}"
+    elif first == EMOJI_FUNC:
+        if rest and rest[0] in ("function", "method", "const", "let", "var"):
+            kind = rest[0]
+            title = " ".join(rest[1:]).strip()
+        elif parent_entry_kind in ("class", "interface"):
+            kind = "method"
+            title = " ".join(rest).strip()
+        else:
+            kind = "function"
+            title = " ".join(rest).strip()
+        heading = f"{kind} {_repository_view_span(title)}"
+    elif first == EMOJI_ASYNC:
+        if parent_entry_kind in ("class", "interface"):
+            kind = "async method"
+        else:
+            kind = "async function"
+        title = " ".join(rest).strip()
+        heading = f"{kind} {_repository_view_span(title)}"
+    elif first == EMOJI_CONST:
+        heading = f"constant {_repository_view_span(' '.join(rest).strip())}"
+    else:
+        heading = f"symbol {_repository_view_span(base)}"
+
+    pieces: list[str] = []
+    if labels:
+        pieces.append("Labels: " + ", ".join(labels))
+    if comment_text:
+        pieces.append(comment_text)
+    if not headings_only:
+        for part_lines in repository_view_body_parts(items, strip_text):
+            fence = _tier_fence_for(part_lines)
+            pieces.append(
+                fence + "text\n" + "\n".join(part_lines) + "\n" + fence
+            )
+    body = "\n\n".join(pieces)
+    return heading, body
+
+
+def repository_view_heading_kind(heading: str) -> str | None:
+    word = heading.split(" ", 1)[0] if heading else ""
+    return word or None

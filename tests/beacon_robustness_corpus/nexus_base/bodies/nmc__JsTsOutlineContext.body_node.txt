@@ -1,0 +1,6 @@
+    def body_node(self, fn_node: Any) -> Any:
+        """Return the ``body`` field of a function-like tree-sitter node.
+
+        Wrapper around the Phase B.1 module-level ``_js_body_node``.
+        """
+        return _js_body_node(fn_node)

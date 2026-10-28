@@ -1,0 +1,4987 @@
+"""Dependency-light Cartographer region-governance and launch authority.
+
+Phase A1 supplied durable state, locking, footprint, liveness, finalization,
+sweep, and Q3 lease primitives. Phase C wires those primitives through the
+shared admission transaction, CARTO_REFRESH launch authority, prepared-task
+handoff, and detached-worker claim adoption. All default state derives from
+``config.get_cartographer_jobs_dir()``; callers may inject a jobs root for
+isolated tests and detached-worker use.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import errno
+import hashlib
+import inspect
+import json
+import logging
+import math
+import ntpath
+import os
+import re
+import subprocess
+import sys
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import asynccontextmanager, contextmanager, nullcontext
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
+
+import psutil
+
+from .config import get_cartographer_jobs_dir, is_carto_job_terminal, merge_write_carto_job_status
+
+LOGGER = logging.getLogger(__name__)
+
+
+DEFAULT_MUTEX_WAIT_SECONDS = 10.0
+DEFAULT_MUTEX_POLL_SECONDS = 0.05
+DEFAULT_COOLDOWN_SECONDS = 60.0
+DEFAULT_START_GRACE_SECONDS = 30.0
+DEFAULT_SPAWN_GRACE_SECONDS = 60.0
+DEFAULT_ORPHAN_GRACE_SECONDS = 120.0
+CARTO_CANCEL_OUTCOMES = frozenset(
+    {
+        "cooperative",
+        "forced",
+        "already_terminal",
+        "kill_refused_unverified_pid",
+        "kill_refused_in_process_job",
+    }
+)
+
+# Closed §18 registry. A runtime origin is never governed "by analogy": the
+# static matrix fence locks the exact caller sets against these IDs.
+PHASE_C_ORIGIN_MATRIX = {
+    "L1": {
+        "origin": "_handle_refresh_file_node:true_file",
+        "work": "CARTO_REFRESH",
+        "freshness": "PRE",
+    },
+    "L2": {"origin": "_handle_refresh_folder_node", "work": "CARTO_REFRESH", "freshness": "PRE"},
+    "L3": {"origin": "_handle_refresh_file_node:ast", "work": "CARTO_REFRESH", "freshness": "B0"},
+    "L4": {"origin": "_beacon_map_refresh_impl", "work": "CARTO_REFRESH", "freshness": "PRE"},
+    "L5": {"origin": "cartographer_refresh_async", "work": "CARTO_REFRESH", "freshness": "PRE"},
+    "L6": {
+        "origin": "_handle_materialize_markdown_file",
+        "work": "CARTO_REFRESH",
+        "freshness": "B0",
+    },
+    "L7": {
+        "origin": "_handle_bulk_materialize_markdown",
+        "work": "CARTO_REFRESH",
+        "freshness": "B0",
+    },
+    "L8": {
+        "origin": "_handle_generate_markdown_file",
+        "work": "CARTO_MARKDOWN_GENERATE",
+        "freshness": "PRE",
+    },
+    "L9": {
+        "origin": "_handle_bulk_generate_markdown",
+        "work": "CARTO_MARKDOWN_GENERATE",
+        "freshness": "GESTURE",
+    },
+    "L10": {
+        "origin": "websocket_handler:bulk_apply_visible_nodes",
+        "work": "CARTO_BULK_APPLY",
+        "freshness": "PRE",
+    },
+    "L11": {
+        "origin": "_launch_phase8_refresh_via_authority",
+        "work": "CARTO_REFRESH",
+        "freshness": "INHERIT",
+    },
+    "Q1": {"origin": "_lightning_rod_mutate_beacons", "work": "Q3_LEASE", "freshness": "NONE"},
+    "Q2": {"origin": "_beacon_sync_node_impl", "work": "Q3_LEASE", "freshness": "NONE"},
+    "Q3": {"origin": "update_beacon_from_node", "work": "Q3_LEASE", "freshness": "NONE"},
+    "N1": {
+        "origin": "refresh_file_node_beacons:directory_reroute",
+        "work": "NESTED",
+        "freshness": "INHERIT",
+    },
+    "N2": {
+        "origin": "refresh_folder_cartographer_sync:per_file",
+        "work": "NESTED",
+        "freshness": "INHERIT",
+    },
+    "N3": {
+        "origin": "run_markdown_generate_pipeline:bulk_apply",
+        "work": "NESTED",
+        "freshness": "INHERIT",
+    },
+    "N4": {
+        "origin": "_bulk_apply_per_file_inner_loop:reconcile",
+        "work": "NESTED",
+        "freshness": "INHERIT",
+    },
+    "N5": {"origin": "weave_worker:bootstrap", "work": "WORKER", "freshness": "INHERIT"},
+    "N6": {"origin": "_handle_open_node_in_windsurf", "work": "READ_ONLY", "freshness": "NONE"},
+    "R1": {"origin": "retired_file_sync", "work": "RETIRED", "freshness": "NONE"},
+    "R2": {"origin": "retired_folder_sync", "work": "RETIRED", "freshness": "NONE"},
+    "R3": {"origin": "retired_ast_sync", "work": "RETIRED", "freshness": "NONE"},
+    "R4": {"origin": "retired_phase8_direct_spawn", "work": "RETIRED", "freshness": "NONE"},
+    "R5": {"origin": "retired_writer_auto_refresh", "work": "RETIRED", "freshness": "NONE"},
+}
+
+CLAIM_REQUIRED_FIELDS = frozenset(
+    {
+        "claim_id",
+        "job_id",
+        "job_type",
+        "dedupe_key",
+        "account_scope_id",
+        "kind",
+        "path",
+        "root_uuid",
+        "ancestor_chain",
+        "launcher",
+        "parent_job_id",
+        "launched_at",
+        "launcher_pid",
+        "pid",
+        "pid_create_time",
+        "handoff_state",
+        "spawn_started_at",
+        "execution_owner",
+    }
+)
+TOMBSTONE_REQUIRED_FIELDS = frozenset(
+    {
+        "account_scope_id",
+        "kind",
+        "path",
+        "root_uuid",
+        "ancestor_chain",
+        "dedupe_key",
+        "last_terminal_at",
+        "job_id",
+    }
+)
+CANCELLATION_SENTINEL_REQUIRED_FIELDS = frozenset({"requested_at", "requested_by"})
+Q3_LEASE_REQUIRED_FIELDS = frozenset(
+    {
+        "lease_id",
+        "account_scope_id",
+        "kind",
+        "path",
+        "root_uuid",
+        "ancestor_chain",
+        "pid",
+        "pid_create_time",
+        "created_at",
+    }
+)
+
+_HEX_32_RE = re.compile(r"^[0-9a-f]{32}$")
+_HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
+_SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_CARTO_JOB_TYPES = frozenset({"CARTO_REFRESH", "CARTO_MARKDOWN_GENERATE", "CARTO_BULK_APPLY"})
+_SOURCE_REGIMES = frozenset({"standard", "persistent_new", "temp_override"})
+
+
+class GovernanceError(RuntimeError):
+    """Base class for loud, fail-closed governance failures."""
+
+    code = "governance_error"
+
+    def __init__(self, message: str, *, path: str | os.PathLike[str] | None = None):
+        self.path = str(path) if path is not None else None
+        super().__init__(message)
+
+
+class AdmissionUnavailableError(GovernanceError):
+    """The admission mutex path or lock syscall is broken, not merely busy."""
+
+    code = "admission_unavailable"
+
+
+class AdmissionBusyTimeoutError(GovernanceError):
+    """The admission mutex remained routinely busy past its bounded wait."""
+
+    code = "admission_busy_timeout"
+
+
+class MutexWaitCancelledError(GovernanceError):
+    """A cancellation probe stopped a synchronous or asynchronous lock wait."""
+
+    code = "mutex_wait_cancelled"
+
+
+class FootprintUnresolvableError(GovernanceError):
+    """The current cache cannot supply a complete root-to-vault ancestor chain."""
+
+    code = "footprint_unresolvable"
+
+
+class FootprintComparisonError(GovernanceError):
+    """Path normalization/comparison failed for a reason other than cross-drive."""
+
+    code = "footprint_comparison_failed"
+
+
+class GovernanceStateUnclassifiableError(GovernanceError):
+    """A claim, tombstone, or lease cannot safely be decoded."""
+
+    code = "governance_state_unclassifiable"
+
+
+class GovernanceConflictError(GovernanceError):
+    """An active claim, lease, or claimless legacy job blocks ownership."""
+
+    code = "overlap_conflict"
+
+    def __init__(self, message: str, *, conflict: Mapping[str, Any] | None = None):
+        self.conflict = dict(conflict or {})
+        super().__init__(message)
+
+
+class GovernanceCleanupError(GovernanceError):
+    """A live owner could not release governance artifacts after bounded retry."""
+
+    code = "governance_cleanup_required"
+
+    def __init__(self, message: str, *, artifact_paths: Sequence[str] = ()):
+        self.artifact_paths = tuple(str(path) for path in artifact_paths)
+        super().__init__(message, path=self.artifact_paths[0] if self.artifact_paths else None)
+
+
+@dataclass(frozen=True)
+class CleanupAttemptResult:
+    """Token-safe result from one cleanup transaction under admission.mutex."""
+
+    status: Literal[
+        "released",
+        "already_absent",
+        "token_mismatch_or_ambiguous",
+        "blocked",
+    ]
+    artifact_paths: tuple[str, ...] = ()
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class SpawnRollbackResult:
+    """Ownership and exact-cleanup result from one launcher rollback transaction."""
+
+    ownership: Literal[
+        "launcher_owned",
+        "worker_owned",
+        "already_absent",
+        "token_mismatch_or_ambiguous",
+        "unknown_owner",
+    ]
+    claim_id: str
+    cleanup: CleanupAttemptResult | None = None
+    artifact_paths: tuple[str, ...] = ()
+    detail: str | None = None
+
+    @property
+    def outcome(self) -> str:
+        if self.ownership == "worker_owned":
+            return "worker_owned"
+        if self.ownership == "already_absent":
+            return "already_absent"
+        if self.ownership != "launcher_owned":
+            return self.ownership
+        if self.cleanup is None:
+            return "launcher_claim_preserved"
+        if self.cleanup.status == "released":
+            return "finalized"
+        return self.cleanup.status
+
+    def to_dict(self) -> dict[str, Any]:
+        cleanup = self.cleanup
+        return {
+            "ownership": self.ownership,
+            "claim_id": self.claim_id,
+            "outcome": self.outcome,
+            "artifact_paths": list(self.artifact_paths),
+            "detail": self.detail,
+            "cleanup": (
+                {
+                    "status": cleanup.status,
+                    "artifact_paths": list(cleanup.artifact_paths),
+                    "detail": cleanup.detail,
+                }
+                if cleanup is not None
+                else None
+            ),
+        }
+
+
+class _PostClaimAdmissionFailure(BaseException):
+    """Carry a claim-first admission compound failure beyond admission.mutex."""
+
+    def __init__(
+        self,
+        *,
+        primary_error: BaseException,
+        claim: Mapping[str, Any],
+        claim_path: Path,
+        job_file: Path,
+        footprint: Mapping[str, Any],
+        cleanup: CleanupAttemptResult,
+        jobs_root: Path,
+        now_epoch: float,
+        atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any],
+    ):
+        self.primary_error = primary_error
+        self.claim = dict(claim)
+        self.claim_path = Path(claim_path)
+        self.job_file = Path(job_file)
+        self.footprint = dict(footprint)
+        self.cleanup = cleanup
+        self.jobs_root = Path(jobs_root)
+        self.now_epoch = float(now_epoch)
+        self.atomic_writer = atomic_writer
+        super().__init__(str(primary_error))
+
+
+class Q3LeaseAcquisitionError(GovernanceError):
+    """All-or-nothing Q3 lease creation failed before any source mutation."""
+
+    code = "q3_lease_acquisition_failed"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        created_paths: Sequence[str] = (),
+        residual_paths: Sequence[str] = (),
+    ):
+        self.created_paths = tuple(created_paths)
+        self.residual_paths = tuple(residual_paths)
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class GovernancePaths:
+    """All A1 paths derived from one authoritative Cartographer jobs root."""
+
+    jobs_root: Path
+    claims_dir: Path
+    leases_dir: Path
+    tombstones_dir: Path
+    cancel_dir: Path
+    heartbeats_dir: Path
+    admission_mutex: Path
+
+
+@dataclass
+class SweepResult:
+    """Structured output of the one shared governance sweep."""
+
+    live_claims: list[dict[str, Any]] = field(default_factory=list)
+    live_leases: list[dict[str, Any]] = field(default_factory=list)
+    live_tombstones: list[dict[str, Any]] = field(default_factory=list)
+    claimless_conflicts: list[dict[str, Any]] = field(default_factory=list)
+    reaped_claim_ids: list[str] = field(default_factory=list)
+    reaped_lease_ids: list[str] = field(default_factory=list)
+    terminalized_claimless_job_ids: list[str] = field(default_factory=list)
+    unclassifiable_artifacts: list[str] = field(default_factory=list)
+    diagnostics: list[str] = field(default_factory=list)
+
+    @property
+    def blocked_by_unclassifiable_state(self) -> bool:
+        return bool(self.unclassifiable_artifacts)
+
+
+@dataclass
+class _HeldOSLock:
+    path: Path
+    handle: Any
+    released: bool = False
+
+    def release(self) -> None:
+        if self.released:
+            return
+        try:
+            _unlock_handle(self.handle)
+        finally:
+            try:
+                self.handle.close()
+            finally:
+                self.released = True
+
+
+# @beacon[
+#   id=carto-governance@os-lock,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,
+#   kind=ast,
+#   comment=Cross-platform OS mutex authority with per-attempt handles, non-blocking errno-aware contention classification, bounded cancellation-aware sync/async polling, and Windows one-byte locking.,
+# ]
+def get_jobs_root(jobs_root: str | os.PathLike[str] | None = None) -> Path:
+    """Return the exact Cartographer jobs root, never its runtime parent."""
+
+    return Path(jobs_root) if jobs_root is not None else Path(get_cartographer_jobs_dir())
+
+
+def governance_paths(jobs_root: str | os.PathLike[str] | None = None) -> GovernancePaths:
+    root = get_jobs_root(jobs_root)
+    return GovernancePaths(
+        jobs_root=root,
+        claims_dir=root / ".refresh_locks",
+        leases_dir=root / ".q3_leases",
+        tombstones_dir=root / ".refresh_tombstones",
+        cancel_dir=root / ".cancel_requests",
+        heartbeats_dir=root / ".heartbeats",
+        admission_mutex=root / "admission.mutex",
+    )
+
+
+def _busy_errnos(platform_name: str | None = None) -> frozenset[int]:
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name == "nt":
+        return frozenset(
+            value
+            for value in (
+                errno.EACCES,
+                getattr(errno, "EDEADLK", None),
+                getattr(errno, "EWOULDBLOCK", None),
+            )
+            if value is not None
+        )
+    return frozenset({errno.EAGAIN, errno.EWOULDBLOCK})
+
+
+def _is_busy_lock_error(exc: BaseException, platform_name: str | None = None) -> bool:
+    return isinstance(exc, OSError) and exc.errno in _busy_errnos(platform_name)
+
+
+def _open_lock_handle(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b", buffering=0)
+    if os.name == "nt":
+        # msvcrt byte-range locking cannot lock an empty file.  Every attempt
+        # owns this handle, locks byte zero, unlocks byte zero, then closes it.
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() < 1:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+    return handle
+
+
+def _try_lock_handle(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_handle(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _check_cancel(cancel_check: Callable[[], Any] | None, path: Path) -> None:
+    if cancel_check is not None and cancel_check():
+        raise MutexWaitCancelledError(
+            f"Cancelled while waiting for governance mutex '{path}'.", path=path
+        )
+
+
+async def _check_cancel_async(cancel_check: Callable[[], Any] | None, path: Path) -> None:
+    if cancel_check is None:
+        return
+    result = cancel_check()
+    if inspect.isawaitable(result):
+        result = await result
+    if result:
+        raise MutexWaitCancelledError(
+            f"Cancelled while waiting for governance mutex '{path}'.", path=path
+        )
+
+
+def acquire_os_lock(
+    path: str | os.PathLike[str],
+    *,
+    timeout_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    poll_seconds: float = DEFAULT_MUTEX_POLL_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+) -> _HeldOSLock:
+    """Acquire one OS mutex by bounded non-blocking synchronous polling."""
+
+    lock_path = Path(path)
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while True:
+        _check_cancel(cancel_check, lock_path)
+        handle = None
+        try:
+            handle = _open_lock_handle(lock_path)
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            # An open/create failure is always BROKEN.  EACCES is classified
+            # as routine contention on Windows only when LK_NBLCK itself
+            # raised it; conflating these stages would misreport an unwritable
+            # governance directory as merely busy.
+            raise AdmissionUnavailableError(
+                f"Admission mutex is unavailable at '{lock_path}': {exc}",
+                path=lock_path,
+            ) from exc
+        try:
+            _try_lock_handle(handle)
+            return _HeldOSLock(lock_path, handle)
+        except BaseException as exc:
+            try:
+                handle.close()
+            except Exception:
+                pass
+            if not _is_busy_lock_error(exc):
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                raise AdmissionUnavailableError(
+                    f"Admission mutex is unavailable at '{lock_path}': {exc}",
+                    path=lock_path,
+                ) from exc
+            if time.monotonic() >= deadline:
+                raise AdmissionBusyTimeoutError(
+                    f"Admission mutex remained busy past {timeout_seconds:g}s: '{lock_path}'.",
+                    path=lock_path,
+                ) from exc
+            _check_cancel(cancel_check, lock_path)
+            time.sleep(max(0.0, min(float(poll_seconds), deadline - time.monotonic())))
+
+
+async def acquire_os_lock_async(
+    path: str | os.PathLike[str],
+    *,
+    timeout_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    poll_seconds: float = DEFAULT_MUTEX_POLL_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+) -> _HeldOSLock:
+    """Acquire one OS mutex without ever blocking the asyncio event loop."""
+
+    lock_path = Path(path)
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while True:
+        await _check_cancel_async(cancel_check, lock_path)
+        handle = None
+        try:
+            handle = _open_lock_handle(lock_path)
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                raise
+            raise AdmissionUnavailableError(
+                f"Admission mutex is unavailable at '{lock_path}': {exc}",
+                path=lock_path,
+            ) from exc
+        try:
+            _try_lock_handle(handle)
+            return _HeldOSLock(lock_path, handle)
+        except BaseException as exc:
+            try:
+                handle.close()
+            except Exception:
+                pass
+            if not _is_busy_lock_error(exc):
+                if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                    raise
+                raise AdmissionUnavailableError(
+                    f"Admission mutex is unavailable at '{lock_path}': {exc}",
+                    path=lock_path,
+                ) from exc
+            if time.monotonic() >= deadline:
+                raise AdmissionBusyTimeoutError(
+                    f"Admission mutex remained busy past {timeout_seconds:g}s: '{lock_path}'.",
+                    path=lock_path,
+                ) from exc
+            await _check_cancel_async(cancel_check, lock_path)
+            await asyncio.sleep(max(0.0, min(float(poll_seconds), deadline - time.monotonic())))
+
+
+@contextmanager
+def os_lock(
+    path: str | os.PathLike[str],
+    *,
+    timeout_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    poll_seconds: float = DEFAULT_MUTEX_POLL_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+) -> Iterator[_HeldOSLock]:
+    """Synchronous context-manager facade over :func:`acquire_os_lock`."""
+
+    held = acquire_os_lock(
+        path,
+        timeout_seconds=timeout_seconds,
+        poll_seconds=poll_seconds,
+        cancel_check=cancel_check,
+    )
+    try:
+        yield held
+    finally:
+        held.release()
+
+
+@asynccontextmanager
+async def async_os_lock(
+    path: str | os.PathLike[str],
+    *,
+    timeout_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    poll_seconds: float = DEFAULT_MUTEX_POLL_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+):
+    """Async context-manager facade using non-blocking lock attempts only."""
+
+    held = await acquire_os_lock_async(
+        path,
+        timeout_seconds=timeout_seconds,
+        poll_seconds=poll_seconds,
+        cancel_check=cancel_check,
+    )
+    try:
+        yield held
+    finally:
+        held.release()
+
+
+# @beacon-close[
+#   id=carto-governance@os-lock,
+# ]
+
+
+# @beacon[
+#   id=carto-governance@identity-keys,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,
+#   kind=ast,
+#   comment=Canonical JSON-array hashing authority for account scopes, region/artifact identities, preparation digests, and the closed semantic CARTO dedupe key.,
+# ]
+def canonical_json_array(values: Sequence[Any]) -> str:
+    """Encode governance hash ingredients by the one canonical array rule."""
+
+    return json.dumps(list(values), ensure_ascii=False, separators=(",", ":"))
+
+
+def _hash_array(values: Sequence[Any]) -> str:
+    return hashlib.sha256(canonical_json_array(values).encode("utf-8")).hexdigest()
+
+
+def normalize_api_base_url(raw_url: str) -> str:
+    """Trim and normalize scheme/host/default-port/trailing slashes."""
+
+    raw = str(raw_url or "").strip()
+    parsed = urlsplit(raw)
+    if not parsed.scheme or not parsed.hostname:
+        # Credentials are expected to carry an absolute API base URL.  Refuse
+        # ambiguous strings rather than minting split coordination domains.
+        raise ValueError(f"API base URL must be absolute: {raw!r}")
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower()
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"Invalid API base URL port: {raw!r}") from exc
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    if port is not None and not (
+        (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
+    ):
+        host = f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    return urlunsplit((scheme, host, path, parsed.query, parsed.fragment))
+
+
+def derive_account_scope_id(api_base_url: str, api_key: str) -> str:
+    normalized_url = normalize_api_base_url(api_base_url)
+    return _hash_array([normalized_url, str(api_key)])[:32]
+
+
+def canonicalize_path(path: str | os.PathLike[str]) -> str:
+    raw = os.path.expandvars(os.path.expanduser(str(path)))
+    return os.path.normcase(os.path.realpath(os.path.abspath(raw)))
+
+
+def derive_region_key(path: str | os.PathLike[str] | None, root_uuid: str) -> str:
+    material = canonicalize_path(path) if path is not None else f"uuid:{root_uuid}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def derive_artifact_key(account_scope_id: str, region_key_value: str) -> str:
+    return _hash_array([str(account_scope_id), str(region_key_value)])
+
+
+def derive_preparation_input_digest(
+    preparation_kind: Literal["ast_beacon_write", "materialize"],
+    node_uuid: str,
+    *payload_values: Any,
+) -> str:
+    if preparation_kind not in {"ast_beacon_write", "materialize"}:
+        raise ValueError(f"Unsupported preparation kind: {preparation_kind!r}")
+    return _hash_array([preparation_kind, str(node_uuid), *payload_values])
+
+
+def derive_dedupe_key(
+    *,
+    account_scope_id: str,
+    job_type: str,
+    mode: str | None,
+    root_uuid: str,
+    source_regime: str = "standard",
+    source_path_override: str | os.PathLike[str] | None = None,
+    delete_temp_file_after: bool = False,
+    preparation_input_digest: str | None = None,
+) -> str:
+    """Hash the closed semantic launch-intent ingredient list from §6.6."""
+
+    job_type = str(job_type).upper()
+    if job_type not in _CARTO_JOB_TYPES:
+        raise ValueError(f"Unsupported CARTO job type: {job_type!r}")
+    if job_type == "CARTO_REFRESH":
+        normalized_mode = str(mode or "")
+        if normalized_mode not in {"file", "folder"}:
+            raise ValueError("CARTO_REFRESH mode must be 'file' or 'folder'.")
+    elif job_type == "CARTO_BULK_APPLY":
+        normalized_mode = str(mode or "")
+        if normalized_mode not in {"visible", "all"}:
+            raise ValueError("CARTO_BULK_APPLY mode must be 'visible' or 'all'.")
+    else:
+        normalized_mode = ""
+    source_regime = str(source_regime)
+    if source_regime not in _SOURCE_REGIMES:
+        raise ValueError(f"Unsupported source_regime: {source_regime!r}")
+    override = (
+        canonicalize_path(source_path_override)
+        if source_path_override is not None and str(source_path_override) != ""
+        else ""
+    )
+    digest = str(preparation_input_digest or "")
+    if digest:
+        _validate_hex(digest, 64, "preparation_input_digest")
+    ingredients = [
+        str(account_scope_id),
+        job_type,
+        normalized_mode,
+        str(root_uuid),
+        source_regime,
+        override,
+        "true" if bool(delete_temp_file_after) else "false",
+        digest,
+    ]
+    return _hash_array(ingredients)
+
+
+# @beacon-close[
+#   id=carto-governance@identity-keys,
+# ]
+
+
+def utc_now_iso(now_epoch: float | None = None) -> str:
+    epoch = time.time() if now_epoch is None else float(now_epoch)
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+
+
+def _parse_time(value: Any) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError("non-finite timestamp")
+        return parsed
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("missing timestamp")
+    try:
+        parsed = float(raw)
+        if not math.isfinite(parsed):
+            raise ValueError("non-finite timestamp")
+        return parsed
+    except ValueError:
+        pass
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(raw)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _node_parent_id(node: Mapping[str, Any]) -> str | None:
+    parent = node.get("parent_id")
+    if parent is None:
+        parent = node.get("parentId")
+    return str(parent) if parent not in (None, "") else None
+
+
+# @beacon[
+#   id=carto-governance@footprint-overlap,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,
+#   kind=ast,
+#   comment=Fail-closed cache ancestor-chain footprint builder plus symmetric machine-wide disk and same-account Workflowy-graph overlap predicate, including explicit cross-drive non-overlap.,
+# ]
+def compute_footprint(
+    path_or_none: str | os.PathLike[str] | None,
+    root_uuid: str,
+    cache_by_id: Mapping[str, Mapping[str, Any]],
+    *,
+    kind: Literal["file", "folder"] | None = None,
+) -> dict[str, Any]:
+    """Compute a canonical path/graph footprint or fail closed."""
+
+    root = str(root_uuid or "")
+    if not root or root not in cache_by_id:
+        raise FootprintUnresolvableError(
+            f"Cannot resolve footprint for root_uuid={root!r}; run system.cache.refresh and retry."
+        )
+    chain: list[str] = []
+    seen: set[str] = set()
+    current: str | None = root
+    while current is not None:
+        if current in seen:
+            raise FootprintUnresolvableError(
+                f"Ancestor cycle while resolving root_uuid={root!r}; run system.cache.refresh and retry."
+            )
+        node = cache_by_id.get(current)
+        if not isinstance(node, Mapping):
+            raise FootprintUnresolvableError(
+                f"Missing ancestor {current!r} for root_uuid={root!r}; run system.cache.refresh and retry."
+            )
+        seen.add(current)
+        chain.append(current)
+        current = _node_parent_id(node)
+    canonical_path = canonicalize_path(path_or_none) if path_or_none is not None else None
+    resolved_kind = kind
+    if resolved_kind is None:
+        resolved_kind = "folder" if canonical_path and os.path.isdir(canonical_path) else "file"
+    if resolved_kind not in {"file", "folder"}:
+        raise ValueError("Footprint kind must be 'file' or 'folder'.")
+    return {
+        "kind": resolved_kind,
+        "path": canonical_path,
+        "root_uuid": root,
+        "ancestor_chain": chain,
+    }
+
+
+def validate_footprint(value: Mapping[str, Any]) -> dict[str, Any]:
+    if value.get("kind") not in {"file", "folder"}:
+        raise ValueError("invalid footprint kind")
+    path = value.get("path")
+    if path is not None and (
+        not isinstance(path, str) or not (os.path.isabs(path) or ntpath.isabs(path))
+    ):
+        raise ValueError("footprint path must be canonical absolute text or null")
+    root = value.get("root_uuid")
+    chain = value.get("ancestor_chain")
+    if not isinstance(root, str) or not root:
+        raise ValueError("missing footprint root_uuid")
+    if not isinstance(chain, list) or not chain or not all(isinstance(x, str) and x for x in chain):
+        raise ValueError("invalid footprint ancestor_chain")
+    if root not in chain:
+        raise ValueError("footprint ancestor_chain must contain root_uuid")
+    return {
+        "kind": value["kind"],
+        "path": path,
+        "root_uuid": root,
+        "ancestor_chain": list(chain),
+    }
+
+
+def _looks_windows_path(path: str) -> bool:
+    drive, _ = ntpath.splitdrive(path)
+    return bool(drive) or path.startswith("\\\\")
+
+
+def _paths_overlap(path_a: str, path_b: str) -> bool:
+    path_module = ntpath if _looks_windows_path(path_a) or _looks_windows_path(path_b) else os.path
+    a = path_module.normcase(path_module.normpath(path_a))
+    b = path_module.normcase(path_module.normpath(path_b))
+    try:
+        common = path_module.commonpath([a, b])
+    except ValueError as exc:
+        drive_a = path_module.splitdrive(a)[0]
+        drive_b = path_module.splitdrive(b)[0]
+        if drive_a and drive_b and path_module.normcase(drive_a) != path_module.normcase(drive_b):
+            return False
+        raise FootprintComparisonError(
+            f"Cannot compare governance paths {path_a!r} and {path_b!r}: {exc}"
+        ) from exc
+    except Exception as exc:
+        raise FootprintComparisonError(
+            f"Cannot compare governance paths {path_a!r} and {path_b!r}: {exc}"
+        ) from exc
+    return common == a or common == b
+
+
+def footprints_overlap(a: Mapping[str, Any], b: Mapping[str, Any]) -> bool:
+    """Return the symmetric §6.2 overlap decision for two full records."""
+
+    fa = validate_footprint(a)
+    fb = validate_footprint(b)
+    if fa["path"] is not None and fb["path"] is not None:
+        if _paths_overlap(fa["path"], fb["path"]):
+            return True
+    if str(a.get("account_scope_id") or "") == str(b.get("account_scope_id") or ""):
+        a_nodes = set(fa["ancestor_chain"]) | {fa["root_uuid"]}
+        b_nodes = set(fb["ancestor_chain"]) | {fb["root_uuid"]}
+        if fa["root_uuid"] in b_nodes or fb["root_uuid"] in a_nodes:
+            return True
+    return False
+
+
+# @beacon-close[
+#   id=carto-governance@footprint-overlap,
+# ]
+
+
+def _validate_hex(value: Any, length: int, label: str) -> str:
+    raw = str(value or "")
+    matcher = _HEX_32_RE if length == 32 else _HEX_64_RE
+    if not matcher.fullmatch(raw):
+        raise ValueError(f"{label} must be {length} lowercase hex characters")
+    return raw
+
+
+def _validate_safe_component(value: Any, label: str) -> str:
+    raw = str(value or "")
+    if not raw or not _SAFE_COMPONENT_RE.fullmatch(raw):
+        raise ValueError(f"{label} is missing or unsafe")
+    return raw
+
+
+def validate_claim(value: Mapping[str, Any]) -> dict[str, Any]:
+    missing = CLAIM_REQUIRED_FIELDS - set(value)
+    if missing:
+        raise ValueError(f"claim missing required fields: {sorted(missing)}")
+    claim = dict(value)
+    _validate_hex(claim["claim_id"], 32, "claim_id")
+    _validate_safe_component(claim["job_id"], "job_id")
+    if claim["job_type"] not in _CARTO_JOB_TYPES:
+        raise ValueError("invalid claim job_type")
+    _validate_hex(claim["dedupe_key"], 64, "dedupe_key")
+    _validate_hex(claim["account_scope_id"], 32, "account_scope_id")
+    validate_footprint(claim)
+    if claim["launcher"] not in {"agent", "gui", "system"}:
+        raise ValueError("invalid claim launcher")
+    if claim["parent_job_id"] is not None:
+        _validate_safe_component(claim["parent_job_id"], "parent_job_id")
+    _parse_time(claim["launched_at"])
+    if (
+        not isinstance(claim["launcher_pid"], int)
+        or isinstance(claim["launcher_pid"], bool)
+        or claim["launcher_pid"] <= 0
+    ):
+        raise ValueError("invalid launcher_pid")
+    if not isinstance(claim["pid"], int) or isinstance(claim["pid"], bool) or claim["pid"] <= 0:
+        raise ValueError("invalid pid")
+    if (
+        not isinstance(claim["pid_create_time"], (int, float))
+        or isinstance(claim["pid_create_time"], bool)
+        or not math.isfinite(float(claim["pid_create_time"]))
+    ):
+        raise ValueError("invalid pid_create_time")
+    # U01: additive-optional stable-identity fields, validated ONLY when present.
+    if claim.get("pid_start_ticks") is not None and (
+        not isinstance(claim["pid_start_ticks"], int)
+        or isinstance(claim["pid_start_ticks"], bool)
+        or claim["pid_start_ticks"] < 0
+    ):
+        raise ValueError("invalid pid_start_ticks")
+    if claim.get("pid_boot_id") is not None and (
+        not isinstance(claim["pid_boot_id"], str) or not claim["pid_boot_id"]
+    ):
+        raise ValueError("invalid pid_boot_id")
+    if claim["handoff_state"] not in {"preparing", "spawning", "running"}:
+        raise ValueError("invalid handoff_state")
+    if claim["handoff_state"] == "spawning" and claim["spawn_started_at"] is None:
+        raise ValueError("spawning claim requires spawn_started_at")
+    if claim["spawn_started_at"] is not None:
+        _parse_time(claim["spawn_started_at"])
+    if claim["execution_owner"] not in {"launcher", "detached_worker"}:
+        raise ValueError("invalid execution_owner")
+    return claim
+
+
+def validate_tombstone(value: Mapping[str, Any]) -> dict[str, Any]:
+    missing = TOMBSTONE_REQUIRED_FIELDS - set(value)
+    if missing:
+        raise ValueError(f"tombstone missing required fields: {sorted(missing)}")
+    tombstone = dict(value)
+    _validate_hex(tombstone["account_scope_id"], 32, "account_scope_id")
+    _validate_hex(tombstone["dedupe_key"], 64, "dedupe_key")
+    _validate_safe_component(tombstone["job_id"], "job_id")
+    validate_footprint(tombstone)
+    _parse_time(tombstone["last_terminal_at"])
+    return tombstone
+
+
+def validate_cancellation_sentinel(value: Mapping[str, Any]) -> dict[str, Any]:
+    missing = CANCELLATION_SENTINEL_REQUIRED_FIELDS - set(value)
+    if missing:
+        raise ValueError(f"cancellation sentinel missing required fields: {sorted(missing)}")
+    sentinel = dict(value)
+    _parse_time(sentinel["requested_at"])
+    if not isinstance(sentinel["requested_by"], str) or not sentinel["requested_by"]:
+        raise ValueError("invalid requested_by")
+    return sentinel
+
+
+def validate_q3_lease(value: Mapping[str, Any]) -> dict[str, Any]:
+    missing = Q3_LEASE_REQUIRED_FIELDS - set(value)
+    if missing:
+        raise ValueError(f"Q3 lease missing required fields: {sorted(missing)}")
+    lease = dict(value)
+    _validate_hex(lease["lease_id"], 32, "lease_id")
+    _validate_hex(lease["account_scope_id"], 32, "account_scope_id")
+    validate_footprint(lease)
+    if not isinstance(lease["pid"], int) or isinstance(lease["pid"], bool) or lease["pid"] <= 0:
+        raise ValueError("invalid lease pid")
+    if (
+        not isinstance(lease["pid_create_time"], (int, float))
+        or isinstance(lease["pid_create_time"], bool)
+        or not math.isfinite(float(lease["pid_create_time"]))
+    ):
+        raise ValueError("invalid lease pid_create_time")
+    # U01: additive-optional stable-identity fields, validated ONLY when present.
+    if lease.get("pid_start_ticks") is not None and (
+        not isinstance(lease["pid_start_ticks"], int)
+        or isinstance(lease["pid_start_ticks"], bool)
+        or lease["pid_start_ticks"] < 0
+    ):
+        raise ValueError("invalid lease pid_start_ticks")
+    if lease.get("pid_boot_id") is not None and (
+        not isinstance(lease["pid_boot_id"], str) or not lease["pid_boot_id"]
+    ):
+        raise ValueError("invalid lease pid_boot_id")
+    _parse_time(lease["created_at"])
+    return lease
+
+
+# @beacon[
+#   id=carto-governance@durable-writer,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,carto-governance,mci-epoch-paths,
+#   kind=ast,
+#   comment=THE one durable write loop (temp + flush + fsync + atomic replace with bounded Windows PermissionError retry, own-temp cleanup, never in-place) now lives in atomic_write_text; atomic_write_json is its JSON front (compact separators, byte-identical historical contract). W2-extended in place with injectable DurableFileOps seams (the coherence fault harness's named fault points) and an opt-in best-effort parent-directory durability sync; all defaults preserve the historical two-argument contract byte-for-byte.,
+# ]
+@dataclass(frozen=True)
+class DurableFileOps:
+    """Injectable filesystem operations for the durable write loop in :func:`atomic_write_text` (W2).
+
+    Every operation defaults to the real OS primitive.  Fault tests wrap or
+    replace individual operations to inject failures at named boundaries.
+    """
+
+    write_fsync: Callable[[Path, str], None] | None = None
+    replace: Callable[[Path, Path], None] | None = None
+    dir_sync: Callable[[Path], None] | None = None
+    mkdir: Callable[[Path], None] | None = None
+    unlink: Callable[[Path], None] | None = None
+    sleep: Callable[[float], None] | None = None
+    monotonic: Callable[[], float] | None = None
+    tmp_name: Callable[[Path], Path] | None = None
+
+
+def _default_write_fsync(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _default_replace(tmp: Path, target: Path) -> None:
+    os.replace(tmp, target)
+
+
+def _default_dir_sync(directory: Path) -> None:
+    """Best-effort parent-directory durability sync.
+
+    POSIX: fsync the directory fd so the rename itself is durable.  Windows:
+    directory fsync is not supported by the OS/Python; the file-level fsync
+    plus atomic replace remains the durability contract there.  Failures are
+    deliberately swallowed: this step is best-effort hardening on top of the
+    fsynced file, never a new failure mode for an otherwise successful
+    publication.
+    """
+
+    if os.name == "nt":
+        return
+    fd: int | None = None
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _default_mkdir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _default_unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _default_tmp_name(target: Path) -> Path:
+    return target.with_name(f".{target.name}.{os.getpid()}.{uuid4().hex}.tmp")
+
+
+def _resolve_durable_ops(fs_ops: DurableFileOps | None) -> dict[str, Any]:
+    ops = fs_ops or DurableFileOps()
+    return {
+        "write_fsync": ops.write_fsync or _default_write_fsync,
+        "replace": ops.replace or _default_replace,
+        "dir_sync": ops.dir_sync or _default_dir_sync,
+        "mkdir": ops.mkdir or _default_mkdir,
+        "unlink": ops.unlink or _default_unlink,
+        "sleep": ops.sleep or time.sleep,
+        "monotonic": ops.monotonic or time.monotonic,
+        "tmp_name": ops.tmp_name or _default_tmp_name,
+    }
+
+
+def atomic_write_text(
+    path: str | os.PathLike[str],
+    text: str,
+    *,
+    fs_ops: DurableFileOps | None = None,
+    sync_parent_dir: bool = False,
+) -> Path:
+    """Atomically replace one text artifact for lock-free readers.
+
+    THE one durable temp-write-fsync-replace loop: same-directory unique
+    temp naming, flush+fsync, bounded Windows sharing retry, own-temp
+    cleanup, never an in-place fallback.  W2 extension (in place, never a
+    rewrite): optional injectable seams (``fs_ops``) for fault-injection
+    tests and an opt-in best-effort parent-directory durability sync
+    (``sync_parent_dir``; POSIX fsync-dir, documented no-op on Windows).
+
+    ``text`` must be a ``str`` (a non-str raises TypeError before the
+    directory is created).  :func:`atomic_write_json` is this loop's JSON
+    front; callers with a different serialization hand the finished text
+    here directly.
+    """
+
+    if not isinstance(text, str):
+        raise TypeError(
+            f"atomic_write_text text must be str, got {type(text).__name__}"
+        )
+    target = Path(path)
+    ops = _resolve_durable_ops(fs_ops)
+    ops["mkdir"](target.parent)
+    tmp = ops["tmp_name"](target)
+    try:
+        ops["write_fsync"](tmp, text)
+        replace_deadline = ops["monotonic"]() + 2.0
+        while True:
+            try:
+                ops["replace"](tmp, target)
+                break
+            except PermissionError:
+                # Windows readers do not necessarily open with FILE_SHARE_DELETE,
+                # so a lock-free scanner can briefly deny replacement while it
+                # has the old complete file open.  Retry the atomic replace only;
+                # never fall back to an in-place write (which would expose torn
+                # text). POSIX does not normally enter this branch.
+                if ops["monotonic"]() >= replace_deadline:
+                    raise
+                ops["sleep"](0.005)
+        if sync_parent_dir:
+            ops["dir_sync"](target.parent)
+        return target
+    finally:
+        try:
+            ops["unlink"](tmp)
+        except Exception:
+            pass
+
+
+def atomic_write_json(
+    path: str | os.PathLike[str],
+    payload: Mapping[str, Any],
+    *,
+    fs_ops: DurableFileOps | None = None,
+    sync_parent_dir: bool = False,
+) -> Path:
+    """Atomically replace one JSON artifact for lock-free readers.
+
+    The durable loop lives in :func:`atomic_write_text`; this function is
+    its JSON front: same-directory unique temp naming, flush+fsync,
+    bounded Windows sharing retry, own-temp cleanup, never an in-place
+    fallback, with compact separators and no trailing newline -- the
+    historical bytes, unchanged.  ``fs_ops`` and ``sync_parent_dir`` pass
+    through unchanged.
+    """
+
+    text = json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
+    return atomic_write_text(
+        path, text, fs_ops=fs_ops, sync_parent_dir=sync_parent_dir
+    )
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        value = json.load(handle)
+    if not isinstance(value, dict):
+        raise ValueError("JSON artifact must contain an object")
+    return value
+
+
+def _artifact_key_for_record(record: Mapping[str, Any]) -> str:
+    region = derive_region_key(record.get("path"), str(record.get("root_uuid") or ""))
+    return derive_artifact_key(str(record.get("account_scope_id") or ""), region)
+
+
+def build_claim(
+    *,
+    job_id: str,
+    job_type: str,
+    dedupe_key: str,
+    account_scope_id: str,
+    footprint: Mapping[str, Any],
+    launcher: Literal["agent", "gui", "system"],
+    parent_job_id: str | None,
+    launcher_pid: int,
+    pid: int,
+    pid_create_time: float,
+    handoff_state: Literal["preparing", "spawning", "running"],
+    spawn_started_at: str | None,
+    execution_owner: Literal["launcher", "detached_worker"],
+    claim_id: str | None = None,
+    launched_at: str | None = None,
+    pid_start_ticks: int | None = None,
+    pid_boot_id: str | None = None,
+) -> dict[str, Any]:
+    claim = {
+        "claim_id": claim_id or uuid4().hex,
+        "job_id": job_id,
+        "job_type": job_type,
+        "dedupe_key": dedupe_key,
+        "account_scope_id": account_scope_id,
+        **validate_footprint(footprint),
+        "launcher": launcher,
+        "parent_job_id": parent_job_id,
+        "launched_at": launched_at or utc_now_iso(),
+        "launcher_pid": launcher_pid,
+        "pid": pid,
+        "pid_create_time": float(pid_create_time),
+        "pid_start_ticks": pid_start_ticks,
+        "pid_boot_id": pid_boot_id,
+        "handoff_state": handoff_state,
+        "spawn_started_at": spawn_started_at,
+        "execution_owner": execution_owner,
+    }
+    return validate_claim(claim)
+
+
+def claim_path_for(
+    claim: Mapping[str, Any], jobs_root: str | os.PathLike[str] | None = None
+) -> Path:
+    validated = validate_claim(claim)
+    key = _artifact_key_for_record(validated)
+    return governance_paths(jobs_root).claims_dir / f"{key}.{validated['job_id']}.lock.json"
+
+
+def write_claim(
+    claim: Mapping[str, Any],
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+) -> Path:
+    validated = validate_claim(claim)
+    path = claim_path_for(validated, jobs_root)
+    atomic_writer(path, validated)
+    return path
+
+
+def read_claim(path: str | os.PathLike[str]) -> dict[str, Any]:
+    return validate_claim(_read_json(Path(path)))
+
+
+def build_tombstone_from_claim(
+    claim: Mapping[str, Any], *, now_epoch: float | None = None
+) -> dict[str, Any]:
+    validated = validate_claim(claim)
+    return validate_tombstone(
+        {
+            "account_scope_id": validated["account_scope_id"],
+            "kind": validated["kind"],
+            "path": validated["path"],
+            "root_uuid": validated["root_uuid"],
+            "ancestor_chain": list(validated["ancestor_chain"]),
+            "dedupe_key": validated["dedupe_key"],
+            "last_terminal_at": utc_now_iso(now_epoch),
+            "job_id": validated["job_id"],
+        }
+    )
+
+
+def tombstone_path_for(
+    tombstone: Mapping[str, Any], jobs_root: str | os.PathLike[str] | None = None
+) -> Path:
+    validated = validate_tombstone(tombstone)
+    return (
+        governance_paths(jobs_root).tombstones_dir / f"{_artifact_key_for_record(validated)}.json"
+    )
+
+
+def write_tombstone_max_merge(
+    tombstone: Mapping[str, Any],
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+) -> Path:
+    incoming = validate_tombstone(tombstone)
+    path = tombstone_path_for(incoming, jobs_root)
+    selected = incoming
+    if path.exists():
+        existing = validate_tombstone(_read_json(path))
+        if _parse_time(existing["last_terminal_at"]) > _parse_time(incoming["last_terminal_at"]):
+            selected = existing
+    atomic_writer(path, selected)
+    return path
+
+
+def read_tombstone(path: str | os.PathLike[str]) -> dict[str, Any]:
+    return validate_tombstone(_read_json(Path(path)))
+
+
+def cancellation_sentinel_path(
+    job_id: str, jobs_root: str | os.PathLike[str] | None = None
+) -> Path:
+    safe_id = _validate_safe_component(job_id, "job_id")
+    return governance_paths(jobs_root).cancel_dir / f"{safe_id}.cancel"
+
+
+def create_cancellation_sentinel(
+    job_id: str,
+    requested_by: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    requested_at: str | None = None,
+) -> Path:
+    sentinel = validate_cancellation_sentinel(
+        {"requested_at": requested_at or utc_now_iso(), "requested_by": requested_by}
+    )
+    path = cancellation_sentinel_path(job_id, jobs_root)
+    atomic_write_json(path, sentinel)
+    return path
+
+
+def read_cancellation_sentinel(
+    job_id: str, jobs_root: str | os.PathLike[str] | None = None
+) -> dict[str, Any] | None:
+    path = cancellation_sentinel_path(job_id, jobs_root)
+    if not path.exists():
+        return None
+    return validate_cancellation_sentinel(_read_json(path))
+
+
+def delete_cancellation_sentinel(
+    job_id: str, jobs_root: str | os.PathLike[str] | None = None
+) -> None:
+    cancellation_sentinel_path(job_id, jobs_root).unlink(missing_ok=True)
+
+
+def build_q3_lease(
+    *,
+    lease_id: str,
+    account_scope_id: str,
+    footprint: Mapping[str, Any],
+    pid: int,
+    pid_create_time: float,
+    created_at: str | None = None,
+    pid_start_ticks: int | None = None,
+    pid_boot_id: str | None = None,
+) -> dict[str, Any]:
+    return validate_q3_lease(
+        {
+            "lease_id": lease_id,
+            "account_scope_id": account_scope_id,
+            **validate_footprint(footprint),
+            "pid": pid,
+            "pid_create_time": float(pid_create_time),
+            "pid_start_ticks": pid_start_ticks,
+            "pid_boot_id": pid_boot_id,
+            "created_at": created_at or utc_now_iso(),
+        }
+    )
+
+
+def q3_lease_path_for(
+    lease: Mapping[str, Any], jobs_root: str | os.PathLike[str] | None = None
+) -> Path:
+    validated = validate_q3_lease(lease)
+    return governance_paths(jobs_root).leases_dir / (
+        f"{_artifact_key_for_record(validated)}.{validated['lease_id']}.lock.json"
+    )
+
+
+def write_q3_lease(
+    lease: Mapping[str, Any],
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+) -> Path:
+    validated = validate_q3_lease(lease)
+    path = q3_lease_path_for(validated, jobs_root)
+    atomic_writer(path, validated)
+    return path
+
+
+def read_q3_lease(path: str | os.PathLike[str]) -> dict[str, Any]:
+    return validate_q3_lease(_read_json(Path(path)))
+
+
+class ProcessIdentityError(RuntimeError):
+    """A process identity could not be read or was malformed (never fabricated)."""
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    """Clock-independent identity of one process incarnation (U01).
+
+    The AUTHORITY fields are ``start_ticks`` and ``boot_id``, derived ONLY
+    from clock-independent sources: Linux — ``/proc/<pid>/stat`` field 22
+    (unsigned clock ticks since boot) plus ``/proc/sys/kernel/random/boot_id``;
+    Windows — the kernel process creation time as an exact 100-nanosecond
+    integer (no boot token exists there).  ``create_time`` is the legacy
+    psutil epoch float, carried as write-only provenance and NEVER consulted
+    as authority anywhere (the retired 1 ms epoch-epsilon comparison was the
+    live-owner false-death defect repaired in U01).
+    """
+
+    pid: int
+    start_ticks: int | None
+    boot_id: str | None
+    create_time: float | None
+
+
+def _linux_process_identity(pid: int) -> ProcessIdentity:
+    try:
+        process = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        raise
+    except Exception as exc:  # noqa: BLE001 — fail closed, never fabricate
+        raise ProcessIdentityError(f"process {pid} identity unreadable: {exc}") from exc
+    try:
+        epoch_create_time = float(process.create_time())
+    except psutil.NoSuchProcess:
+        raise
+    except Exception as exc:  # noqa: BLE001 — provenance is required on artifacts
+        raise ProcessIdentityError(
+            f"process {pid} create-time provenance unreadable: {exc}"
+        ) from exc
+    try:
+        stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise psutil.NoSuchProcess(pid) from None
+    except OSError as exc:
+        raise ProcessIdentityError(f"process {pid} /proc stat unreadable: {exc}") from exc
+    # Field 22 (starttime, clock ticks since boot) follows the comm, which may
+    # itself contain spaces/parens: parse AFTER the LAST ')' — the remaining
+    # space-separated fields are fields 3.., so field 22 is index 19.
+    close = stat_text.rfind(")")
+    fields = stat_text[close + 1 :].split() if close >= 0 else []
+    if len(fields) < 20:
+        raise ProcessIdentityError(f"process {pid} /proc stat malformed")
+    try:
+        start_ticks = int(fields[19])
+    except ValueError as exc:
+        raise ProcessIdentityError(f"process {pid} start ticks malformed") from exc
+    try:
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ProcessIdentityError(f"boot_id unreadable: {exc}") from exc
+    if not boot_id:
+        raise ProcessIdentityError("boot_id empty")
+    return ProcessIdentity(
+        pid=pid,
+        start_ticks=start_ticks,
+        boot_id=boot_id,
+        create_time=epoch_create_time,
+    )
+
+
+def _windows_process_identity(pid: int) -> ProcessIdentity:
+    try:
+        process = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        raise
+    except Exception as exc:  # noqa: BLE001 — fail closed, never fabricate
+        raise ProcessIdentityError(f"process {pid} identity unreadable: {exc}") from exc
+    try:
+        epoch_create_time = float(process.create_time())
+    except psutil.NoSuchProcess:
+        raise
+    except Exception as exc:  # noqa: BLE001 — provenance is required on artifacts
+        raise ProcessIdentityError(
+            f"process {pid} create-time provenance unreadable: {exc}"
+        ) from exc
+    return ProcessIdentity(
+        pid=pid,
+        # The kernel creation time is absolute and clock-independent: keep it
+        # as an exact 100-ns integer so comparison is integral, never float.
+        start_ticks=int(round(epoch_create_time * 10_000_000)),
+        boot_id=None,
+        create_time=epoch_create_time,
+    )
+
+
+def read_process_identity(pid: int) -> ProcessIdentity:
+    """Probe one process's clock-independent identity (fresh OS reads; NO caching).
+
+    Raises ``psutil.NoSuchProcess`` when the process is absent (reused, so
+    existing ``except psutil.NoSuchProcess`` handlers keep working) and
+    ``ProcessIdentityError`` when the identity is unreadable or malformed.
+    """
+
+    try:
+        parsed = int(pid)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ProcessIdentityError(f"malformed pid {pid!r}") from exc
+    if parsed <= 0:
+        raise ProcessIdentityError(f"malformed pid {parsed}")
+    if sys.platform.startswith("linux"):
+        return _linux_process_identity(parsed)
+    if sys.platform == "win32":
+        return _windows_process_identity(parsed)
+    raise ProcessIdentityError(f"unsupported platform {sys.platform!r}")
+
+
+def current_process_identity() -> ProcessIdentity:
+    """Stamp this process's clock-independent identity; raises instead of fabricating."""
+
+    try:
+        return read_process_identity(os.getpid())
+    except psutil.NoSuchProcess as exc:  # the current process always exists
+        raise ProcessIdentityError(f"current process identity unreadable: {exc}") from exc
+
+
+@dataclass(frozen=True)
+class StoredOwnerIdentity:
+    """The owner-identity fields read back from one governed artifact (U01).
+
+    ``pid_create_time`` is the legacy epoch provenance field: carried through,
+    NEVER consulted as authority.  ``start_ticks``/``boot_id`` are the stable
+    fields; an artifact lacking them is LEGACY and fails closed.
+    """
+
+    pid: Any
+    pid_create_time: Any
+    start_ticks: Any
+    boot_id: Any
+
+    @classmethod
+    def from_claim_dict(cls, claim: Mapping[str, Any]) -> StoredOwnerIdentity:
+        """Read the stored owner identity off a CARTO-claim or Q3-lease mapping."""
+
+        return cls(
+            pid=claim.get("pid"),
+            pid_create_time=claim.get("pid_create_time"),
+            start_ticks=claim.get("pid_start_ticks"),
+            boot_id=claim.get("pid_boot_id"),
+        )
+
+    @classmethod
+    def from_refresh_claim(cls, claim: Any) -> StoredOwnerIdentity:
+        """Read the stored owner identity off a ``RefreshPublicationClaim``."""
+
+        return cls(
+            pid=claim.owner_pid,
+            pid_create_time=claim.owner_pid_create_time,
+            start_ticks=claim.owner_start_ticks,
+            boot_id=claim.owner_boot_id,
+        )
+
+
+# @beacon[
+#   id=carto-governance@pid-liveness,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,
+#   kind=ast,
+#   comment=THE one clock-independent owner-liveness classifier (U01): exact integer start-ticks and boot-id comparison, no epsilon (the retired 1 ms epoch-epsilon classifier is gone); the stored epoch create_time is never consulted; unknown (legacy artifact, unreadable identity, unprobeable current) is treated as live by every caller.,
+# ]
+def classify_owner_liveness(
+    stored: StoredOwnerIdentity,
+    *,
+    identity_reader: Callable[[int], ProcessIdentity] = read_process_identity,
+) -> Literal["dead", "alive", "unknown"]:
+    """Implement the one U01 dead/alive/unknown owner-liveness truth table.
+
+    Clock-independent, exact comparison, no epsilon (the retired 1 ms
+    epoch-epsilon comparison is gone):
+
+    - probe ``psutil.NoSuchProcess`` -> ``dead``;
+    - probe ``ProcessIdentityError`` or any other exception -> ``unknown``;
+    - probed ``start_ticks is None`` -> ``unknown``;
+    - stored ``start_ticks is None`` (LEGACY artifact) -> ``unknown`` — the
+      epoch field is NEVER consulted, so a legacy artifact with a live pid is
+      never reaped (fail closed);
+    - stored ticks present and != current ticks -> ``dead`` (PID reuse);
+    - both boot ids present and != -> ``dead`` (different boot);
+    - otherwise -> ``alive``.
+    """
+
+    try:
+        pid = int(stored.pid)
+        if pid <= 0:
+            raise ValueError("non-positive pid")
+    except (TypeError, ValueError, OverflowError):
+        return "unknown"
+    try:
+        current = identity_reader(pid)
+    except psutil.NoSuchProcess:
+        return "dead"
+    except Exception:  # noqa: BLE001 — unverifiable is live (invariant 18)
+        return "unknown"
+    if current.start_ticks is None:
+        return "unknown"
+    if stored.start_ticks is None:
+        return "unknown"
+    try:
+        stored_ticks = int(stored.start_ticks)
+        if stored_ticks < 0:
+            raise ValueError("negative start ticks")
+    except (TypeError, ValueError, OverflowError):
+        return "unknown"
+    if stored_ticks != current.start_ticks:
+        return "dead"  # same pid, different incarnation — PID reuse
+    if (
+        stored.boot_id is not None
+        and current.boot_id is not None
+        and stored.boot_id != current.boot_id
+    ):
+        return "dead"  # different boot
+    return "alive"
+
+
+def _stored_identity_matches_current(
+    stored: StoredOwnerIdentity, current: ProcessIdentity
+) -> bool:
+    """R2 self-authority comparison (kill verification, phase advance, adoption).
+
+    pid equal AND the artifact's stable fields — WHEN PRESENT — exactly equal
+    the current identity.  A legacy artifact (no stored start ticks) decides
+    on pid equality alone; the epoch create-time is never consulted.
+    """
+
+    try:
+        stored_pid = int(stored.pid)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if stored_pid != current.pid:
+        return False
+    if stored.start_ticks is None:
+        return True
+    try:
+        stored_ticks = int(stored.start_ticks)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if current.start_ticks is None or stored_ticks != current.start_ticks:
+        return False
+    if stored.boot_id is not None and stored.boot_id != current.boot_id:
+        return False
+    return True
+
+
+def _caller_identity_or_defaults(
+    *,
+    pid: int | None,
+    pid_create_time: float | None,
+    pid_start_ticks: int | None,
+    pid_boot_id: str | None,
+) -> ProcessIdentity:
+    """Resolve one stamp-site caller identity (U01).
+
+    With no explicit ``pid`` the CURRENT process's full identity is read.
+    With an explicit ``pid`` the identity comes ENTIRELY from the kwargs —
+    never mixed with the current process's fields: an artifact whose ``pid``
+    and ``pid_start_ticks``/``pid_boot_id`` described different processes
+    would be a spec violation.
+    """
+
+    if pid is None:
+        return current_process_identity()
+    if pid_create_time is None:
+        raise ProcessIdentityError(
+            "an explicit owner pid requires its matching pid_create_time provenance; "
+            "identity fields are never mixed across processes"
+        )
+    return ProcessIdentity(
+        pid=int(pid),
+        start_ticks=pid_start_ticks,
+        boot_id=pid_boot_id,
+        create_time=float(pid_create_time),
+    )
+
+
+def classify_legacy_pid_liveness(
+    pid: Any, *, psutil_module: Any = psutil
+) -> Literal["dead", "alive", "unknown"]:
+    """Degraded claimless-job classifier: PID absence is the sole death proof."""
+
+    try:
+        parsed_pid = int(pid)
+        if parsed_pid <= 0:
+            return "unknown"
+    except (TypeError, ValueError, OverflowError):
+        return "unknown"
+    try:
+        psutil_module.Process(parsed_pid)
+    except psutil_module.NoSuchProcess:
+        return "dead"
+    except Exception:
+        return "unknown"
+    return "alive"
+
+
+# @beacon-close[
+#   id=carto-governance@pid-liveness,
+# ]
+
+
+def _emit(
+    result: SweepResult | None, message: str, diagnostic: Callable[[str], Any] | None
+) -> None:
+    if result is not None:
+        result.diagnostics.append(message)
+    if diagnostic is not None:
+        diagnostic(message)
+    else:
+        LOGGER.warning(message)
+
+
+def _find_claim_files(paths: GovernancePaths) -> list[Path]:
+    if not paths.claims_dir.exists():
+        return []
+    return sorted(paths.claims_dir.glob("*.lock.json"))
+
+
+def _find_lease_files(paths: GovernancePaths) -> list[Path]:
+    if not paths.leases_dir.exists():
+        return []
+    return sorted(paths.leases_dir.glob("*.lock.json"))
+
+
+def _find_tombstone_files(paths: GovernancePaths) -> list[Path]:
+    if not paths.tombstones_dir.exists():
+        return []
+    return sorted(paths.tombstones_dir.glob("*.json"))
+
+
+def _read_carto_jobs(paths: GovernancePaths) -> list[tuple[Path, dict[str, Any]]]:
+    records: list[tuple[Path, dict[str, Any]]] = []
+    if not paths.jobs_root.exists():
+        return records
+    for path in sorted(paths.jobs_root.glob("*.json")):
+        try:
+            value = _read_json(path)
+        except Exception:
+            continue
+        if str(value.get("type") or "").upper().startswith("CARTO_"):
+            records.append((path, value))
+    return records
+
+
+def _job_by_id(
+    jobs: Sequence[tuple[Path, dict[str, Any]]], job_id: str
+) -> tuple[Path, dict[str, Any]] | None:
+    for path, job in jobs:
+        if str(job.get("id") or "") == job_id:
+            return path, job
+    return None
+
+
+# @beacon[
+#   id=carto-governance@finalize-claim,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,
+#   kind=ast,
+#   comment=The one token-safe claim exit door: locked and acquiring variants verify claim_id, max-merge a cooldown tombstone, and only then delete the claim; tombstone failure preserves ownership fail-closed.,
+# ]
+def _finalize_claim_locked_outcome(
+    claim_id: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    write_tombstone: bool = True,
+    now_epoch: float | None = None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> CleanupAttemptResult:
+    """Return an explicit token-safe finalization outcome under admission.mutex."""
+
+    def report(message: str, *, error: bool = False) -> None:
+        if diagnostic is not None:
+            diagnostic(message)
+        elif error:
+            LOGGER.error(message)
+        else:
+            LOGGER.warning(message)
+
+    remover = unlink_fn or (lambda path: path.unlink())
+    paths = governance_paths(jobs_root)
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    unreadable: list[str] = []
+    for path in _find_claim_files(paths):
+        try:
+            claim = read_claim(path)
+        except Exception:
+            unreadable.append(str(path))
+            continue
+        if claim.get("claim_id") == claim_id:
+            matches.append((path, claim))
+    if not matches and not unreadable:
+        message = (
+            f"finalize_claim idempotent no-op: claim_id={claim_id!r} is already absent; "
+            "no claim or tombstone was changed."
+        )
+        report(message)
+        return CleanupAttemptResult("already_absent", (), message)
+    if len(matches) != 1 or unreadable:
+        artifact_paths = tuple([str(path) for path, _claim in matches] + unreadable)
+        message = (
+            f"finalize_claim token mismatch/ambiguous no-op: claim_id={claim_id!r} "
+            f"resolved to {len(matches)} exact claims with {len(unreadable)} unreadable artifacts; "
+            "no claim or tombstone was changed."
+        )
+        report(message)
+        return CleanupAttemptResult(
+            "token_mismatch_or_ambiguous",
+            artifact_paths,
+            message,
+        )
+
+    claim_path, snapshot = matches[0]
+    artifact_paths = (str(claim_path),)
+    try:
+        current = read_claim(claim_path)
+    except FileNotFoundError:
+        return CleanupAttemptResult("already_absent", artifact_paths)
+    except Exception as exc:
+        message = f"finalize_claim could not re-read '{claim_path}': {exc}"
+        report(message, error=True)
+        return CleanupAttemptResult("blocked", artifact_paths, message)
+    if current.get("claim_id") != claim_id:
+        message = f"finalize_claim token mismatch at '{claim_path}'; preserving replacement claim."
+        report(message)
+        return CleanupAttemptResult(
+            "token_mismatch_or_ambiguous",
+            artifact_paths,
+            message,
+        )
+    if write_tombstone:
+        try:
+            tombstone = build_tombstone_from_claim(current, now_epoch=now_epoch)
+            write_tombstone_max_merge(tombstone, paths.jobs_root, atomic_writer=atomic_writer)
+        except Exception as exc:
+            message = (
+                f"finalize_claim tombstone write failed for '{claim_path}'; "
+                f"claim preserved: {exc}"
+            )
+            report(message, error=True)
+            return CleanupAttemptResult("blocked", artifact_paths, message)
+    try:
+        # Re-read immediately before delete so a late token replacement cannot
+        # be released on the stale snapshot's authority.
+        latest = read_claim(claim_path)
+    except FileNotFoundError:
+        return CleanupAttemptResult("already_absent", artifact_paths)
+    except Exception as exc:
+        message = f"finalize_claim could not re-read before delete '{claim_path}': {exc}"
+        report(message, error=True)
+        return CleanupAttemptResult("blocked", artifact_paths, message)
+    if latest.get("claim_id") != snapshot.get("claim_id"):
+        message = f"finalize_claim token changed at '{claim_path}'; preserving replacement claim."
+        report(message)
+        return CleanupAttemptResult(
+            "token_mismatch_or_ambiguous",
+            artifact_paths,
+            message,
+        )
+    try:
+        remover(claim_path)
+    except FileNotFoundError:
+        return CleanupAttemptResult("already_absent", artifact_paths)
+    except Exception as exc:
+        message = f"finalize_claim could not delete '{claim_path}': {exc}"
+        report(message, error=True)
+        return CleanupAttemptResult("blocked", artifact_paths, message)
+    return CleanupAttemptResult("released", artifact_paths)
+
+
+def finalize_claim_locked(
+    claim_id: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    write_tombstone: bool = True,
+    now_epoch: float | None = None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> bool:
+    """Finalize one claim while preserving the historical bool compatibility surface."""
+
+    outcome = _finalize_claim_locked_outcome(
+        claim_id,
+        jobs_root,
+        write_tombstone=write_tombstone,
+        now_epoch=now_epoch,
+        atomic_writer=atomic_writer,
+        unlink_fn=unlink_fn,
+        diagnostic=diagnostic,
+    )
+    return outcome.status == "released"
+
+
+def finalize_claim(
+    claim_id: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    write_tombstone: bool = True,
+    now_epoch: float | None = None,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> bool:
+    paths = governance_paths(jobs_root)
+    with os_lock(
+        paths.admission_mutex,
+        timeout_seconds=mutex_wait_seconds,
+        cancel_check=cancel_check,
+    ):
+        return finalize_claim_locked(
+            claim_id,
+            paths.jobs_root,
+            write_tombstone=write_tombstone,
+            now_epoch=now_epoch,
+            atomic_writer=atomic_writer,
+            unlink_fn=unlink_fn,
+            diagnostic=diagnostic,
+        )
+
+
+# @beacon-close[
+#   id=carto-governance@finalize-claim,
+# ]
+
+
+def _claim_spawn_grace_active(claim: Mapping[str, Any], now_epoch: float, grace: float) -> bool:
+    if claim.get("handoff_state") != "spawning" or claim.get("spawn_started_at") is None:
+        return False
+    try:
+        return now_epoch - _parse_time(claim["spawn_started_at"]) < grace
+    except Exception:
+        return False
+
+
+def _persist_reaped_status(
+    job_record: tuple[Path, dict[str, Any]] | None,
+    *,
+    cancelled: bool,
+    pid: Any,
+    merge_writer: Callable[[str | os.PathLike[str], dict[str, Any]], bool],
+    now_epoch: float,
+    result: SweepResult,
+    diagnostic: Callable[[str], Any] | None,
+) -> None:
+    if job_record is None:
+        return
+    path, job = job_record
+    if is_carto_job_terminal(job.get("status")):
+        return
+    payload = dict(job)
+    payload["status"] = "cancelled" if cancelled else "failed"
+    payload["updated_at"] = utc_now_iso(now_epoch)
+    if not cancelled:
+        payload["error"] = f"worker process vanished (pid {pid})"
+    if not merge_writer(path, payload):
+        _emit(
+            result,
+            f"Failed to persist terminal status for reaped job '{job.get('id')}' at '{path}'; proceeding to claim finalization.",
+            diagnostic,
+        )
+
+
+def _legacy_job_age(job: Mapping[str, Any], now_epoch: float) -> float | None:
+    for key in ("created_at", "updated_at"):
+        try:
+            return max(0.0, now_epoch - _parse_time(job.get(key)))
+        except Exception:
+            continue
+    return None
+
+
+# @beacon[
+#   id=carto-governance@shared-sweep,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,mci-lease-carto,
+#   kind=ast,
+#   comment=Single locked sweep implementation for all future admission/watcher/startup triggers: claims, Q3 leases, tombstones, spawn grace, terminal preservation, claimless fallback, and deny-by-default malformed-artifact preservation.,
+# ]
+def sweep_region_governance_locked(
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    now_epoch: float | None = None,
+    cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+    start_grace_seconds: float = DEFAULT_START_GRACE_SECONDS,
+    spawn_grace_seconds: float = DEFAULT_SPAWN_GRACE_SECONDS,
+    liveness_classifier: Callable[[StoredOwnerIdentity], str] | None = None,
+    legacy_liveness_classifier: Callable[[Any], str] | None = None,
+    merge_writer: Callable[
+        [str | os.PathLike[str], dict[str, Any]], bool
+    ] = merge_write_carto_job_status,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> SweepResult:
+    """Run the one governance sweep while ``admission.mutex`` is already held."""
+
+    paths = governance_paths(jobs_root)
+    now = time.time() if now_epoch is None else float(now_epoch)
+    classify = liveness_classifier or classify_owner_liveness
+    classify_legacy = legacy_liveness_classifier or (lambda pid: classify_legacy_pid_liveness(pid))
+    result = SweepResult()
+    jobs = _read_carto_jobs(paths)
+
+    claims_by_job: dict[str, dict[str, Any]] = {}
+    for claim_path in _find_claim_files(paths):
+        try:
+            claim = read_claim(claim_path)
+        except Exception as exc:
+            result.unclassifiable_artifacts.append(str(claim_path))
+            _emit(
+                result,
+                f"Unclassifiable claim preserved at '{claim_path}': {exc}",
+                diagnostic,
+            )
+            continue
+        state = classify(StoredOwnerIdentity.from_claim_dict(claim))
+        if state == "dead" and not _claim_spawn_grace_active(
+            claim, now, float(spawn_grace_seconds)
+        ):
+            sentinel = cancellation_sentinel_path(claim["job_id"], paths.jobs_root)
+            _persist_reaped_status(
+                _job_by_id(jobs, claim["job_id"]),
+                cancelled=sentinel.exists(),
+                pid=claim["pid"],
+                merge_writer=merge_writer,
+                now_epoch=now,
+                result=result,
+                diagnostic=diagnostic,
+            )
+            if finalize_claim_locked(
+                claim["claim_id"],
+                paths.jobs_root,
+                now_epoch=now,
+                diagnostic=diagnostic,
+            ):
+                result.reaped_claim_ids.append(claim["claim_id"])
+                continue
+            _emit(
+                result,
+                f"Dead claim '{claim['claim_id']}' could not finalize and remains blocking.",
+                diagnostic,
+            )
+        claims_by_job[claim["job_id"]] = claim
+        result.live_claims.append(claim)
+
+    for lease_path in _find_lease_files(paths):
+        try:
+            lease = read_q3_lease(lease_path)
+        except Exception as exc:
+            result.unclassifiable_artifacts.append(str(lease_path))
+            _emit(
+                result,
+                f"Unclassifiable Q3 lease preserved at '{lease_path}': {exc}",
+                diagnostic,
+            )
+            continue
+        state = classify(StoredOwnerIdentity.from_claim_dict(lease))
+        if state == "dead":
+            try:
+                # Plain deletion is intentional: Q3 leases never mint cooldown.
+                lease_path.unlink()
+                result.reaped_lease_ids.append(lease["lease_id"])
+                continue
+            except Exception as exc:
+                _emit(
+                    result,
+                    f"Verified-dead Q3 lease could not be deleted at '{lease_path}': {exc}",
+                    diagnostic,
+                )
+        result.live_leases.append(lease)
+
+    for tombstone_path in _find_tombstone_files(paths):
+        try:
+            tombstone = read_tombstone(tombstone_path)
+        except Exception as exc:
+            result.unclassifiable_artifacts.append(str(tombstone_path))
+            _emit(
+                result,
+                f"Unclassifiable tombstone preserved at '{tombstone_path}': {exc}",
+                diagnostic,
+            )
+            continue
+        age = now - _parse_time(tombstone["last_terminal_at"])
+        if age >= float(cooldown_seconds):
+            try:
+                tombstone_path.unlink()
+                continue
+            except Exception as exc:
+                _emit(
+                    result,
+                    f"Expired tombstone could not be deleted at '{tombstone_path}': {exc}",
+                    diagnostic,
+                )
+        result.live_tombstones.append(tombstone)
+
+    # Claimless legacy/fallback classification.  A live or unknown record has
+    # no trustworthy region and is therefore a global transient conflict.
+    for job_path, job in jobs:
+        job_id = str(job.get("id") or "")
+        if not job_id or job_id in claims_by_job or is_carto_job_terminal(job.get("status")):
+            continue
+        pid = job.get("pid")
+        if pid in (None, ""):
+            age = _legacy_job_age(job, now)
+            state = "dead" if age is not None and age > float(start_grace_seconds) else "unknown"
+        else:
+            state = classify_legacy(pid)
+        if state == "dead":
+            payload = dict(job)
+            sentinel_exists = cancellation_sentinel_path(job_id, paths.jobs_root).exists()
+            payload["status"] = "cancelled" if sentinel_exists else "failed"
+            payload["updated_at"] = utc_now_iso(now)
+            if not sentinel_exists:
+                payload["error"] = f"worker process vanished (pid {pid}); no governance claim"
+            if merge_writer(job_path, payload):
+                result.terminalized_claimless_job_ids.append(job_id)
+            else:
+                _emit(
+                    result,
+                    f"Failed to persist claimless legacy terminal status for '{job_id}' at '{job_path}'.",
+                    diagnostic,
+                )
+            continue
+        result.claimless_conflicts.append(dict(job))
+
+    return result
+
+
+def sweep_region_governance(
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    **sweep_kwargs: Any,
+) -> SweepResult:
+    paths = governance_paths(jobs_root)
+    with os_lock(
+        paths.admission_mutex,
+        timeout_seconds=mutex_wait_seconds,
+        cancel_check=cancel_check,
+    ):
+        return sweep_region_governance_locked(paths.jobs_root, **sweep_kwargs)
+
+
+# @beacon-close[
+#   id=carto-governance@shared-sweep,
+# ]
+
+
+def _claim_candidates_for_job(paths: GovernancePaths, job_id: str) -> list[Path]:
+    if not paths.claims_dir.exists():
+        return []
+    return sorted(paths.claims_dir.glob(f"*.{job_id}.lock.json"))
+
+
+def _read_job_payload(path: str | os.PathLike[str]) -> dict[str, Any]:
+    value = _read_json(Path(path))
+    if not isinstance(value, dict):
+        raise GovernanceStateUnclassifiableError(
+            f"CARTO job JSON is not an object: {path}", path=path
+        )
+    return value
+
+
+# @beacon[
+#   id=carto-governance@scanner-liveness-authority,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-workflowy-cache,
+#   kind=ast,
+#   comment=Read-oriented CARTO job view classifier: claim owner PID identity outranks the job mirror, claimless legacy fallback is degraded conservatively, spawn grace is honored, and sentinel plus live claim overlays cancelling without persisting.,
+# ]
+def inspect_carto_job_liveness(
+    job: Mapping[str, Any],
+    job_file: str | os.PathLike[str],
+    *,
+    jobs_root: str | os.PathLike[str] | None = None,
+    now_epoch: float | None = None,
+    start_grace_seconds: float = DEFAULT_START_GRACE_SECONDS,
+    spawn_grace_seconds: float = DEFAULT_SPAWN_GRACE_SECONDS,
+    liveness_classifier: Callable[[StoredOwnerIdentity], str] | None = None,
+    legacy_liveness_classifier: Callable[[Any], str] | None = None,
+) -> dict[str, Any]:
+    """Classify one scanner view without mutating status, claims, or leases."""
+
+    paths = governance_paths(jobs_root or Path(job_file).parent)
+    now = time.time() if now_epoch is None else float(now_epoch)
+    classify = liveness_classifier or classify_owner_liveness
+    classify_legacy = legacy_liveness_classifier or classify_legacy_pid_liveness
+    job_id = str(job.get("id") or Path(job_file).stem).strip()
+    persisted_status = str(job.get("status") or "").strip().lower()
+    presented_status = job.get("status", "unknown")
+    error = job.get("error")
+    sentinel_present = cancellation_sentinel_path(job_id, paths.jobs_root).exists()
+    candidates = _claim_candidates_for_job(paths, job_id)
+    view: dict[str, Any] = {
+        "job_id": job_id,
+        "claim_present": bool(candidates),
+        "claim_live": False,
+        "claim": None,
+        "liveness": "unknown",
+        "owner_pid": job.get("pid"),
+        "status": presented_status,
+        "error": error,
+        "sentinel_present": sentinel_present,
+        "diagnostic": None,
+    }
+
+    if len(candidates) > 1:
+        view["diagnostic"] = (
+            f"Multiple governance claims found for job '{job_id}'; preserving as active."
+        )
+        return view
+    if candidates:
+        try:
+            claim = read_claim(candidates[0])
+        except Exception as exc:
+            view["diagnostic"] = (
+                f"Unclassifiable governance claim preserved at '{candidates[0]}': {exc}"
+            )
+            return view
+        if str(job.get("claim_id") or claim.get("claim_id")) != str(claim.get("claim_id")):
+            view["diagnostic"] = f"Claim-id mismatch for job '{job_id}'; preserving as active."
+            return view
+        raw_liveness = classify(StoredOwnerIdentity.from_claim_dict(claim))
+        spawn_grace = _claim_spawn_grace_active(claim, now, float(spawn_grace_seconds))
+        effective_liveness = "alive" if raw_liveness == "dead" and spawn_grace else raw_liveness
+        view.update(
+            {
+                "claim": claim,
+                "claim_live": effective_liveness != "dead",
+                "liveness": effective_liveness,
+                "raw_liveness": raw_liveness,
+                "spawn_grace_active": spawn_grace,
+                "owner_pid": claim["pid"],
+            }
+        )
+        if not is_carto_job_terminal(persisted_status):
+            if effective_liveness == "dead":
+                view["status"] = "cancelled" if sentinel_present else "failed"
+                if not sentinel_present:
+                    view["error"] = f"worker process vanished (pid {claim['pid']})"
+            elif sentinel_present:
+                view["status"] = "cancelling"
+        return view
+
+    pid = job.get("pid")
+    if pid in (None, ""):
+        age = _legacy_job_age(job, now)
+        legacy_state = "dead" if age is not None and age > float(start_grace_seconds) else "unknown"
+    else:
+        legacy_state = classify_legacy(pid)
+    view["liveness"] = legacy_state
+    if not is_carto_job_terminal(persisted_status) and legacy_state == "dead":
+        view["status"] = "cancelled" if sentinel_present else "failed"
+        if not sentinel_present:
+            view["error"] = f"worker process vanished (pid {pid}); no governance claim"
+    return view
+
+
+# @beacon-close[
+#   id=carto-governance@scanner-liveness-authority,
+# ]
+
+
+def carto_cancel_requested(job_file: str | os.PathLike[str]) -> bool:
+    """Return cancellation intent with sentinel-first compatibility fallback."""
+
+    path = Path(job_file)
+    try:
+        job = _read_job_payload(path)
+    except Exception:
+        job = {}
+    job_id = str(job.get("id") or path.stem).strip()
+    try:
+        if cancellation_sentinel_path(job_id, path.parent).exists():
+            return True
+    except Exception:
+        pass
+    return str(job.get("status") or "").strip().lower() in {
+        "cancelling",
+        "cancelled",
+    }
+
+
+def finalize_cancelled_job_claim(
+    job_file: str | os.PathLike[str],
+    claim_id: str,
+    *,
+    jobs_root: str | os.PathLike[str] | None = None,
+    allow_legacy_cancelled: bool = False,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> str:
+    """Persist token-verified cancellation outcome before claim release."""
+
+    path = Path(job_file)
+    root = governance_paths(jobs_root or path.parent).jobs_root
+    try:
+        job = _read_job_payload(path)
+    except Exception:
+        job = {"id": path.stem, "type": "CARTO_REFRESH"}
+    job_id = str(job.get("id") or path.stem)
+    sentinel_present = cancellation_sentinel_path(job_id, root).exists()
+    legacy_cancelled = (
+        allow_legacy_cancelled and str(job.get("status") or "").strip().lower() == "cancelled"
+    )
+    if sentinel_present or legacy_cancelled:
+        status = "cancelled"
+    else:
+        status = "failed"
+        job["error"] = "cancellation sentinel vanished before finalization"
+        _emit(None, job["error"], diagnostic)
+    job["status"] = status
+    job["updated_at"] = utc_now_iso()
+    if not merge_write_carto_job_status(path, job):
+        _emit(
+            None,
+            f"Failed to persist '{status}' before finalizing claim '{claim_id}'.",
+            diagnostic,
+        )
+    finalize_claim(claim_id, root, diagnostic=diagnostic)
+    return status
+
+
+async def finalize_cancelled_job_claim_async(
+    job_file: str | os.PathLike[str],
+    claim_id: str,
+    *,
+    jobs_root: str | os.PathLike[str] | None = None,
+    allow_legacy_cancelled: bool = False,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> str:
+    """Persist cancellation, then use async bounded claim finalization."""
+
+    path = Path(job_file)
+    root = governance_paths(jobs_root or path.parent).jobs_root
+    try:
+        job = _read_job_payload(path)
+    except Exception:
+        job = {"id": path.stem, "type": "CARTO_REFRESH"}
+    job_id = str(job.get("id") or path.stem)
+    sentinel_present = cancellation_sentinel_path(job_id, root).exists()
+    legacy_cancelled = (
+        allow_legacy_cancelled and str(job.get("status") or "").strip().lower() == "cancelled"
+    )
+    if sentinel_present or legacy_cancelled:
+        status = "cancelled"
+    else:
+        status = "failed"
+        job["error"] = "cancellation sentinel vanished before finalization"
+        _emit(None, job["error"], diagnostic)
+    job["status"] = status
+    job["updated_at"] = utc_now_iso()
+    if not merge_write_carto_job_status(path, job):
+        _emit(
+            None, f"Failed to persist '{status}' before finalizing claim '{claim_id}'.", diagnostic
+        )
+    await finalize_claim_async(claim_id, root, diagnostic=diagnostic)
+    return status
+
+
+def _exact_job_file_in_cmdline(cmdline: Sequence[Any], job_file: Path) -> bool:
+    expected = str(job_file)
+    values = [str(value) for value in cmdline]
+    return any(
+        values[index] == "--carto-job-file" and values[index + 1] == expected
+        for index in range(max(0, len(values) - 1))
+    )
+
+
+# @beacon[
+#   id=carto-governance@cancellation-controller,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-reconcile,ra-workflowy-cache,
+#   kind=ast,
+#   comment=Shared sentinel-first CARTO cancellation controller for MCP and WebSocket fronts: cancelling persistence, cooperative claim/PID poll, mandatory post-poll ownership reread, launcher kill refusal, exact detached PID argv verification, terminate-to-kill escalation, and shared-sweep forced-death reap.,
+# ]
+async def cancel_carto_job(
+    job_file: str | os.PathLike[str],
+    *,
+    requested_by: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    task_cancel: Callable[[], Any] | None = None,
+    cooperative_timeout_seconds: float = 5.0,
+    poll_interval_seconds: float = 0.1,
+    terminate_wait_seconds: float = 2.0,
+    sleep_fn: Callable[[float], Any] = asyncio.sleep,
+    monotonic_fn: Callable[[], float] = time.monotonic,
+    psutil_module: Any = psutil,
+    identity_reader: Callable[[int], ProcessIdentity] = read_process_identity,
+    sweep_fn: Callable[..., Any] = sweep_region_governance,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> dict[str, Any]:
+    """Cancel one claimed CARTO job without treating presentation as stop truth."""
+
+    path = Path(job_file)
+    root = governance_paths(jobs_root or path.parent).jobs_root
+    job = _read_job_payload(path)
+    job_id = str(job.get("id") or path.stem)
+    if is_carto_job_terminal(job.get("status")):
+        return {"success": True, "job_id": job_id, "outcome": "already_terminal"}
+
+    paths = governance_paths(root)
+    initial_claim_id = str(job.get("claim_id") or "")
+
+    def reap_after_stop() -> None:
+        try:
+            sweep_fn(root, diagnostic=diagnostic)
+        except Exception as exc:
+            _emit(
+                None,
+                f"Post-stop governance sweep failed for '{job_id}'; watcher/startup will retry: {exc}",
+                diagnostic,
+            )
+
+    create_cancellation_sentinel(job_id, requested_by, root)
+    cancelling = dict(job)
+    cancelling["status"] = "cancelling"
+    cancelling["updated_at"] = utc_now_iso()
+    merge_write_carto_job_status(path, cancelling)
+
+    # Authority and presentation are durable before any in-process delivery.
+    if task_cancel is not None:
+        try:
+            task_cancel()
+        except Exception as exc:
+            _emit(
+                None, f"In-process cancellation delivery failed for '{job_id}': {exc}", diagnostic
+            )
+
+    deadline = monotonic_fn() + max(0.0, float(cooperative_timeout_seconds))
+    while True:
+        candidates = _claim_candidates_for_job(paths, job_id)
+        if not candidates:
+            return {"success": True, "job_id": job_id, "outcome": "cooperative"}
+        if len(candidates) == 1:
+            try:
+                claim = read_claim(candidates[0])
+                if initial_claim_id and claim.get("claim_id") != initial_claim_id:
+                    return {
+                        "success": True,
+                        "job_id": job_id,
+                        "outcome": "kill_refused_unverified_pid",
+                    }
+                state = classify_owner_liveness(
+                    StoredOwnerIdentity.from_claim_dict(claim),
+                    identity_reader=identity_reader,
+                )
+                if state == "dead":
+                    reap_after_stop()
+                    return {"success": True, "job_id": job_id, "outcome": "cooperative"}
+            except Exception:
+                pass
+        if monotonic_fn() >= deadline:
+            break
+        awaited = sleep_fn(float(poll_interval_seconds))
+        if inspect.isawaitable(awaited):
+            await awaited
+
+    # Mandatory current-owner reread under the mutex.  Process control begins
+    # only after this critical section has released.
+    async with async_os_lock(paths.admission_mutex):
+        candidates = _claim_candidates_for_job(paths, job_id)
+        if not candidates:
+            return {"success": True, "job_id": job_id, "outcome": "cooperative"}
+        if len(candidates) != 1:
+            return {
+                "success": True,
+                "job_id": job_id,
+                "outcome": "kill_refused_unverified_pid",
+            }
+        try:
+            claim = read_claim(candidates[0])
+        except Exception:
+            return {
+                "success": True,
+                "job_id": job_id,
+                "outcome": "kill_refused_unverified_pid",
+            }
+        if initial_claim_id and claim.get("claim_id") != initial_claim_id:
+            return {
+                "success": True,
+                "job_id": job_id,
+                "outcome": "kill_refused_unverified_pid",
+            }
+        owner = str(claim.get("execution_owner") or "")
+        pid = claim.get("pid")
+
+    if owner == "launcher":
+        return {
+            "success": True,
+            "job_id": job_id,
+            "outcome": "kill_refused_in_process_job",
+        }
+    if owner != "detached_worker":
+        return {
+            "success": True,
+            "job_id": job_id,
+            "outcome": "kill_refused_unverified_pid",
+        }
+
+    # Exact-kill verification (U01 R2): the claim's OWN pre-existing proofs
+    # decide.  A new claim requires the probed stable identity to match the
+    # stored stable fields exactly (pid equal + start ticks, plus boot id
+    # when the artifact carries one); a legacy claim (no stable fields)
+    # requires only that the pid exists.  The epoch create-time is never
+    # consulted.  The argv match is unchanged.
+    try:
+        process = psutil_module.Process(int(pid))
+        probed = identity_reader(int(pid))
+        if not _stored_identity_matches_current(
+            StoredOwnerIdentity.from_claim_dict(claim), probed
+        ):
+            raise ValueError("PID incarnation mismatch")
+        if not _exact_job_file_in_cmdline(process.cmdline(), path):
+            raise ValueError("CARTO job-file argv mismatch")
+    except (psutil_module.NoSuchProcess, psutil.NoSuchProcess):
+        reap_after_stop()
+        return {"success": True, "job_id": job_id, "outcome": "cooperative"}
+    except Exception as exc:
+        _emit(None, f"Exact PID verification refused kill for '{job_id}': {exc}", diagnostic)
+        return {
+            "success": True,
+            "job_id": job_id,
+            "outcome": "kill_refused_unverified_pid",
+        }
+
+    try:
+        process.terminate()
+        try:
+            process.wait(timeout=float(terminate_wait_seconds))
+        except psutil_module.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=float(terminate_wait_seconds))
+            except psutil_module.TimeoutExpired:
+                _emit(
+                    None,
+                    f"Forced kill wait timed out for '{job_id}'; shared sweep will preserve unknown/alive ownership.",
+                    diagnostic,
+                )
+    except psutil_module.NoSuchProcess:
+        reap_after_stop()
+        return {"success": True, "job_id": job_id, "outcome": "cooperative"}
+    except Exception as exc:
+        _emit(None, f"Exact PID process control failed for '{job_id}': {exc}", diagnostic)
+        return {
+            "success": True,
+            "job_id": job_id,
+            "outcome": "kill_refused_unverified_pid",
+        }
+    reap_after_stop()
+    return {"success": True, "job_id": job_id, "outcome": "forced"}
+
+
+# @beacon-close[
+#   id=carto-governance@cancellation-controller,
+# ]
+
+
+# @beacon[
+#   id=carto-governance@auxiliary-artifact-cleanup,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-workflowy-cache,
+#   kind=ast,
+#   comment=Claim-aware sentinel and heartbeat cleanup authority: terminal no-claim cleanup, true-orphan grace cleanup, and deny-by-default preservation when any claim artifact is unclassifiable.,
+# ]
+def cleanup_carto_auxiliary_artifacts_locked(
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    now_epoch: float | None = None,
+    orphan_grace_seconds: float = DEFAULT_ORPHAN_GRACE_SECONDS,
+    diagnostic: Callable[[str], Any] | None = None,
+) -> dict[str, Any]:
+    """Clean terminal/orphan sentinels and heartbeats while mutex is held."""
+
+    paths = governance_paths(jobs_root)
+    now = time.time() if now_epoch is None else float(now_epoch)
+    jobs = {str(job.get("id") or path.stem): job for path, job in _read_carto_jobs(paths)}
+    live_claim_job_ids: set[str] = set()
+    malformed_claims: list[str] = []
+    for claim_path in _find_claim_files(paths):
+        try:
+            live_claim_job_ids.add(str(read_claim(claim_path)["job_id"]))
+        except Exception as exc:
+            malformed_claims.append(str(claim_path))
+            _emit(
+                None,
+                f"Unclassifiable claim preserves auxiliary artifacts: '{claim_path}': {exc}",
+                diagnostic,
+            )
+    result = {"deleted": [], "preserved_unclassifiable": malformed_claims}
+    if malformed_claims:
+        return result
+
+    artifacts: list[tuple[Path, str]] = []
+    if paths.cancel_dir.exists():
+        artifacts.extend((path, path.stem) for path in paths.cancel_dir.glob("*.cancel"))
+    if paths.heartbeats_dir.exists():
+        artifacts.extend((path, path.stem) for path in paths.heartbeats_dir.glob("*.json"))
+    for artifact, job_id in artifacts:
+        if job_id in live_claim_job_ids:
+            continue
+        job = jobs.get(job_id)
+        delete = bool(job and is_carto_job_terminal(job.get("status")))
+        if job is None:
+            try:
+                delete = now - artifact.stat().st_mtime > float(orphan_grace_seconds)
+            except Exception:
+                delete = False
+        if delete:
+            try:
+                artifact.unlink()
+                result["deleted"].append(str(artifact))
+            except Exception as exc:
+                _emit(None, f"Auxiliary artifact cleanup failed at '{artifact}': {exc}", diagnostic)
+    return result
+
+
+def cleanup_carto_auxiliary_artifacts(
+    jobs_root: str | os.PathLike[str] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    paths = governance_paths(jobs_root)
+    with os_lock(paths.admission_mutex):
+        return cleanup_carto_auxiliary_artifacts_locked(paths.jobs_root, **kwargs)
+
+
+# @beacon-close[
+#   id=carto-governance@auxiliary-artifact-cleanup,
+# ]
+
+
+# @beacon[
+#   id=carto-governance@q3-leases,
+#   slice_labels=ra-carto-jobs,nexus-core-v1,
+#   kind=ast,
+#   comment=All-or-nothing multi-target Q3 lease acquisition/release substrate: shared sweep, symmetric claim/lease overlap checks, atomic writes, and same-transaction partial-create rollback before any caller mutation.,
+# ]
+def _acquire_q3_leases_impl(
+    targets: Iterable[Mapping[str, Any]],
+    *,
+    account_scope_id: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    lease_id: str | None = None,
+    pid: int | None = None,
+    pid_create_time: float | None = None,
+    pid_start_ticks: int | None = None,
+    pid_boot_id: str | None = None,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    sweep_kwargs: Mapping[str, Any] | None = None,
+    lock_held: bool = False,
+) -> list[dict[str, Any]]:
+    """Acquire every actionable Q3 target lease or roll back all created here."""
+
+    account = _validate_hex(account_scope_id, 32, "account_scope_id")
+    target_footprints = [validate_footprint(target) for target in targets]
+    if not target_footprints:
+        return []
+    operation_lease_id = lease_id or uuid4().hex
+    _validate_hex(operation_lease_id, 32, "lease_id")
+    identity = _caller_identity_or_defaults(
+        pid=pid,
+        pid_create_time=pid_create_time,
+        pid_start_ticks=pid_start_ticks,
+        pid_boot_id=pid_boot_id,
+    )
+    paths = governance_paths(jobs_root)
+    remover = unlink_fn or (lambda path: path.unlink(missing_ok=True))
+    lock_context = (
+        nullcontext()
+        if lock_held
+        else os_lock(
+            paths.admission_mutex,
+            timeout_seconds=mutex_wait_seconds,
+            cancel_check=cancel_check,
+        )
+    )
+    with lock_context:
+        sweep = sweep_region_governance_locked(paths.jobs_root, **dict(sweep_kwargs or {}))
+        if sweep.unclassifiable_artifacts:
+            artifact = sweep.unclassifiable_artifacts[0]
+            raise GovernanceStateUnclassifiableError(
+                f"Governance state is unclassifiable at '{artifact}'; inspect or remove it manually.",
+                path=artifact,
+            )
+        if sweep.claimless_conflicts:
+            conflict = sweep.claimless_conflicts[0]
+            raise GovernanceConflictError(
+                f"Claimless legacy CARTO job '{conflict.get('id')}' is alive or unverifiable and globally blocks Q3 mutation.",
+                conflict=conflict,
+            )
+        for footprint in target_footprints:
+            candidate = {"account_scope_id": account, **footprint}
+            for active in [*sweep.live_claims, *sweep.live_leases]:
+                if footprints_overlap(candidate, active):
+                    owner = active.get("job_id") or active.get("lease_id")
+                    raise GovernanceConflictError(
+                        f"Q3 target '{footprint.get('path') or footprint['root_uuid']}' overlaps active owner '{owner}'.",
+                        conflict=active,
+                    )
+        leases = [
+            build_q3_lease(
+                lease_id=operation_lease_id,
+                account_scope_id=account,
+                footprint=footprint,
+                pid=identity.pid,
+                pid_create_time=identity.create_time,
+                pid_start_ticks=identity.start_ticks,
+                pid_boot_id=identity.boot_id,
+            )
+            for footprint in target_footprints
+        ]
+        planned = [(lease, q3_lease_path_for(lease, paths.jobs_root)) for lease in leases]
+        planned_paths = [path for _lease, path in planned]
+        if len(set(planned_paths)) != len(planned_paths):
+            raise Q3LeaseAcquisitionError(
+                "Q3 lease acquisition contains duplicate actionable targets; zero leases were created."
+            )
+        for path in planned_paths:
+            if path.exists():
+                raise GovernanceConflictError(
+                    f"Q3 lease artifact already exists at '{path}'; refusing to overwrite another acquisition.",
+                    conflict={"artifact_path": str(path)},
+                )
+        created: list[Path] = []
+        current_path: Path | None = None
+        try:
+            for lease, current_path in planned:
+                write_q3_lease(lease, paths.jobs_root, atomic_writer=atomic_writer)
+                created.append(current_path)
+                current_path = None
+        except Exception as exc:
+            # A writer can theoretically replace the target and then raise
+            # before returning.  Because every planned path was proven absent
+            # under this mutex and carries this acquisition's fresh lease_id,
+            # such a just-appeared current_path is ours and must be rolled back.
+            if current_path is not None and current_path.exists() and current_path not in created:
+                created.append(current_path)
+            residual: list[str] = []
+            for path in reversed(created):
+                try:
+                    remover(path)
+                except Exception:
+                    residual.append(str(path))
+            raise Q3LeaseAcquisitionError(
+                "Q3 lease acquisition failed; every lease created by this acquisition was rolled back before disk mutation."
+                + (
+                    f" Residual blocking leases require manual recovery: {residual}"
+                    if residual
+                    else ""
+                ),
+                created_paths=[str(path) for path in created],
+                residual_paths=residual,
+            ) from exc
+        return leases
+
+
+def acquire_q3_leases(
+    targets: Iterable[Mapping[str, Any]],
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
+    """Synchronous Q3 acquisition for detached-worker and non-async callers."""
+
+    return _acquire_q3_leases_impl(targets, **kwargs)
+
+
+def acquire_q3_leases_locked(
+    targets: Iterable[Mapping[str, Any]],
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
+    """Acquire Q3 leases while the caller already holds ``admission.mutex``."""
+
+    return _acquire_q3_leases_impl(targets, lock_held=True, **kwargs)
+
+
+# @beacon[
+#   id=carto-governance@q3-async-acquire,
+#   slice_labels=carto-governance,ra-carto-jobs,nexus-core-v1,mci-lease-carto,
+#   kind=ast,
+#   comment=Async Q3 admission boundary: acquires admission.mutex with cancel-aware asyncio polling, then runs only the small synchronous locked lease transaction.,
+# ]
+async def acquire_q3_leases_async(
+    targets: Iterable[Mapping[str, Any]],
+    *,
+    account_scope_id: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    lease_id: str | None = None,
+    pid: int | None = None,
+    pid_create_time: float | None = None,
+    pid_start_ticks: int | None = None,
+    pid_boot_id: str | None = None,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    sweep_kwargs: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Acquire Q3 leases without synchronous polling on the event-loop thread."""
+
+    materialized = list(targets)
+    if not materialized:
+        return []
+    identity = _caller_identity_or_defaults(
+        pid=pid,
+        pid_create_time=pid_create_time,
+        pid_start_ticks=pid_start_ticks,
+        pid_boot_id=pid_boot_id,
+    )
+    paths = governance_paths(jobs_root)
+    async with async_os_lock(
+        paths.admission_mutex,
+        timeout_seconds=mutex_wait_seconds,
+        cancel_check=cancel_check,
+    ):
+        return acquire_q3_leases_locked(
+            materialized,
+            account_scope_id=account_scope_id,
+            jobs_root=paths.jobs_root,
+            lease_id=lease_id,
+            pid=identity.pid,
+            pid_create_time=identity.create_time,
+            pid_start_ticks=identity.start_ticks,
+            pid_boot_id=identity.boot_id,
+            mutex_wait_seconds=mutex_wait_seconds,
+            cancel_check=cancel_check,
+            atomic_writer=atomic_writer,
+            unlink_fn=unlink_fn,
+            sweep_kwargs=sweep_kwargs,
+        )
+
+
+def _release_q3_leases_locked_outcomes(
+    leases: Iterable[Mapping[str, Any]],
+    *,
+    jobs_root: str | os.PathLike[str] | None = None,
+    unlink_fn: Callable[[Path], Any] | None = None,
+) -> list[CleanupAttemptResult]:
+    """Classify exact Q3 lease cleanup while admission.mutex is held."""
+
+    validated = [validate_q3_lease(lease) for lease in leases]
+    paths = governance_paths(jobs_root)
+    remover = unlink_fn or (lambda path: path.unlink())
+    outcomes: list[CleanupAttemptResult] = []
+    for lease in validated:
+        path = q3_lease_path_for(lease, paths.jobs_root)
+        artifact_paths = (str(path),)
+        try:
+            current = read_q3_lease(path)
+        except FileNotFoundError:
+            outcomes.append(CleanupAttemptResult("already_absent", artifact_paths))
+            continue
+        except Exception as exc:
+            outcomes.append(CleanupAttemptResult("blocked", artifact_paths, str(exc)))
+            continue
+        if current.get("lease_id") != lease.get("lease_id"):
+            outcomes.append(
+                CleanupAttemptResult(
+                    "token_mismatch_or_ambiguous",
+                    artifact_paths,
+                    "lease_id mismatch; replacement lease preserved",
+                )
+            )
+            continue
+        try:
+            remover(path)
+        except FileNotFoundError:
+            outcomes.append(CleanupAttemptResult("already_absent", artifact_paths))
+        except Exception as exc:
+            outcomes.append(CleanupAttemptResult("blocked", artifact_paths, str(exc)))
+        else:
+            outcomes.append(CleanupAttemptResult("released", artifact_paths))
+    return outcomes
+
+
+def _release_q3_leases_impl(
+    leases: Iterable[Mapping[str, Any]],
+    *,
+    jobs_root: str | os.PathLike[str] | None = None,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    lock_held: bool = False,
+) -> list[str]:
+    """Release only the exact lease artifacts named by this acquisition."""
+
+    validated = [validate_q3_lease(lease) for lease in leases]
+    paths = governance_paths(jobs_root)
+    lock_context = (
+        nullcontext()
+        if lock_held
+        else os_lock(
+            paths.admission_mutex,
+            timeout_seconds=mutex_wait_seconds,
+            cancel_check=cancel_check,
+        )
+    )
+    with lock_context:
+        outcomes = _release_q3_leases_locked_outcomes(
+            validated,
+            jobs_root=paths.jobs_root,
+            unlink_fn=unlink_fn,
+        )
+    return [
+        path
+        for outcome in outcomes
+        if outcome.status in {"blocked", "token_mismatch_or_ambiguous"}
+        for path in outcome.artifact_paths
+    ]
+
+
+_CLEANUP_OBLIGATIONS: dict[str, dict[str, Any]] = {}
+_CLEANUP_TASKS: dict[str, asyncio.Task[Any]] = {}
+_CLEANUP_WAKE_EVENTS: dict[str, asyncio.Event] = {}
+DEFAULT_CLEANUP_RETRY_ATTEMPTS = 3
+DEFAULT_CLEANUP_RETRY_DELAY_SECONDS = 0.02
+DEFAULT_CLEANUP_LATER_DELAY_SECONDS = 0.25
+DEFAULT_CLEANUP_BACKOFF_MAX_SECONDS = 5.0
+
+
+def pending_cleanup_obligations() -> list[dict[str, Any]]:
+    """Return process-local fail-closed cleanup obligations for diagnostics/tests."""
+
+    return [dict(value) for value in _CLEANUP_OBLIGATIONS.values()]
+
+
+def _clear_cleanup_obligation(key: str) -> None:
+    _CLEANUP_OBLIGATIONS.pop(key, None)
+    wake = _CLEANUP_WAKE_EVENTS.get(key)
+    if wake is not None:
+        wake.set()
+
+
+async def _cleanup_obligation_supervisor(key: str, wake: asyncio.Event) -> None:
+    """Retry one exact live-owner obligation until token-safe completion."""
+
+    delay = max(0.0, float(DEFAULT_CLEANUP_LATER_DELAY_SECONDS))
+    try:
+        while key in _CLEANUP_OBLIGATIONS:
+            try:
+                await asyncio.wait_for(wake.wait(), timeout=delay)
+            except TimeoutError:
+                pass
+            else:
+                wake.clear()
+                delay = max(0.0, float(DEFAULT_CLEANUP_LATER_DELAY_SECONDS))
+            if key not in _CLEANUP_OBLIGATIONS:
+                break
+            try:
+                await retry_cleanup_obligations_async(keys=(key,))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception(
+                    "Cleanup supervisor attempt failed for %s; retaining obligation.", key
+                )
+            if key not in _CLEANUP_OBLIGATIONS:
+                break
+            initial = max(0.0, float(DEFAULT_CLEANUP_LATER_DELAY_SECONDS))
+            cap = max(initial, float(DEFAULT_CLEANUP_BACKOFF_MAX_SECONDS))
+            delay = min(cap, max(initial, delay * 2 if delay else initial))
+    finally:
+        current = asyncio.current_task()
+        if _CLEANUP_TASKS.get(key) is current:
+            _CLEANUP_TASKS.pop(key, None)
+        if _CLEANUP_WAKE_EVENTS.get(key) is wake:
+            _CLEANUP_WAKE_EVENTS.pop(key, None)
+
+
+def _cleanup_supervisor_done(key: str, task: asyncio.Task[Any]) -> None:
+    if _CLEANUP_TASKS.get(key) is task:
+        _CLEANUP_TASKS.pop(key, None)
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        LOGGER.exception("Could not retrieve cleanup supervisor result for %s.", key)
+        return
+    if error is not None:
+        LOGGER.error(
+            "Cleanup supervisor for %s exited unexpectedly; obligation remains fail-closed.",
+            key,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
+# @beacon[
+#   id=carto-governance@cleanup-supervisor,
+#   slice_labels=carto-governance,ra-carto-jobs,
+#   kind=ast,
+#   comment=Process-local one-per-key supervisor registration for persistent token-safe live-owner claim and Q3 lease cleanup retries with bounded asynchronous backoff.,
+# ]
+def _schedule_cleanup_obligation(key: str, obligation: Mapping[str, Any]) -> None:
+    _CLEANUP_OBLIGATIONS[key] = dict(obligation)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    existing = _CLEANUP_TASKS.get(key)
+    if existing is not None and not existing.done():
+        wake = _CLEANUP_WAKE_EVENTS.get(key)
+        if wake is not None:
+            wake.set()
+        return
+    if existing is not None:
+        _CLEANUP_TASKS.pop(key, None)
+
+    wake = asyncio.Event()
+    _CLEANUP_WAKE_EVENTS[key] = wake
+    # S03 (H5): the cleanup supervisor is a long-lived NEW operation — spawn
+    # it through the isolated-context helper so it never pins a spawner's
+    # operation generation (asyncio.create_task copies context by default).
+    from .coherence.operation_cache import create_isolated_context_task
+
+    task = create_isolated_context_task(
+        _cleanup_obligation_supervisor(key, wake),
+        name=f"carto-cleanup:{key}",
+    )
+    _CLEANUP_TASKS[key] = task
+    task.add_done_callback(
+        lambda done, obligation_key=key: _cleanup_supervisor_done(obligation_key, done)
+    )
+
+
+def release_q3_leases(
+    leases: Iterable[Mapping[str, Any]],
+    **kwargs: Any,
+) -> list[str]:
+    """Synchronous Q3 release for detached-worker and non-async callers."""
+
+    return _release_q3_leases_impl(leases, **kwargs)
+
+
+def release_q3_leases_locked(
+    leases: Iterable[Mapping[str, Any]],
+    **kwargs: Any,
+) -> list[str]:
+    """Release Q3 leases while the caller already holds ``admission.mutex``."""
+
+    return _release_q3_leases_impl(leases, lock_held=True, **kwargs)
+
+
+def _queue_q3_release_obligations(
+    leases: Sequence[Mapping[str, Any]],
+    paths: GovernancePaths,
+    unlink_fn: Callable[[Path], Any] | None,
+    *,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+) -> None:
+    for lease in leases:
+        lease_path = q3_lease_path_for(lease, paths.jobs_root)
+        key = f"q3:{lease_path.name}"
+        _schedule_cleanup_obligation(
+            key,
+            {
+                "key": key,
+                "kind": "q3_release",
+                "jobs_root": str(paths.jobs_root),
+                "leases": [dict(lease)],
+                "unlink_fn": unlink_fn,
+                "mutex_wait_seconds": float(mutex_wait_seconds),
+                "artifact_paths": [str(lease_path)],
+            },
+        )
+
+
+def _queue_claim_finalize_obligation(
+    *,
+    claim_id: str,
+    paths: GovernancePaths,
+    write_tombstone: bool,
+    now_epoch: float | None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any],
+    unlink_fn: Callable[[Path], Any] | None,
+    diagnostic: Callable[[str], Any] | None,
+    artifact_paths: Sequence[str],
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+) -> None:
+    key = f"claim:{claim_id}"
+    _schedule_cleanup_obligation(
+        key,
+        {
+            "key": key,
+            "kind": "claim_finalize",
+            "claim_id": claim_id,
+            "jobs_root": str(paths.jobs_root),
+            "write_tombstone": write_tombstone,
+            "now_epoch": now_epoch,
+            "atomic_writer": atomic_writer,
+            "unlink_fn": unlink_fn,
+            "diagnostic": diagnostic,
+            "mutex_wait_seconds": float(mutex_wait_seconds),
+            "artifact_paths": list(artifact_paths),
+        },
+    )
+
+
+# @beacon[
+#   id=carto-governance@q3-release-recovery,
+#   slice_labels=carto-governance,ra-carto-jobs,nexus-core-v1,
+#   kind=ast,
+#   comment=Live-owner Q3 release authority with async lock acquisition, bounded immediate retry, loud residual-artifact failure, exact-token outcomes, and one persistent process-local cleanup supervisor per obligation.,
+# ]
+async def release_q3_leases_async(
+    leases: Iterable[Mapping[str, Any]],
+    *,
+    jobs_root: str | os.PathLike[str] | None = None,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    immediate_attempts: int = DEFAULT_CLEANUP_RETRY_ATTEMPTS,
+    retry_delay_seconds: float = DEFAULT_CLEANUP_RETRY_DELAY_SECONDS,
+    sleep_fn: Callable[[float], Any] = asyncio.sleep,
+    queue_on_failure: bool = True,
+    raise_on_failure: bool = True,
+) -> list[str]:
+    """Release Q3 leases with bounded retry and persistent automatic supervision."""
+
+    materialized = [validate_q3_lease(lease) for lease in leases]
+    if not materialized:
+        return []
+    paths = governance_paths(jobs_root)
+    known_paths = [str(q3_lease_path_for(lease, paths.jobs_root)) for lease in materialized]
+    failures = list(known_paths)
+    blocked_leases = list(materialized)
+    try:
+        for attempt in range(max(1, int(immediate_attempts))):
+            async with async_os_lock(
+                paths.admission_mutex,
+                timeout_seconds=mutex_wait_seconds,
+                cancel_check=cancel_check,
+            ):
+                outcomes = _release_q3_leases_locked_outcomes(
+                    materialized,
+                    jobs_root=paths.jobs_root,
+                    unlink_fn=unlink_fn,
+                )
+            failures = [
+                path
+                for outcome in outcomes
+                if outcome.status == "blocked"
+                for path in outcome.artifact_paths
+            ]
+            blocked_names = {Path(path).name for path in failures}
+            blocked_leases = [
+                lease
+                for lease in materialized
+                if q3_lease_path_for(lease, paths.jobs_root).name in blocked_names
+            ]
+            for lease, outcome in zip(materialized, outcomes, strict=True):
+                key = f"q3:{q3_lease_path_for(lease, paths.jobs_root).name}"
+                if outcome.status != "blocked":
+                    _clear_cleanup_obligation(key)
+                if outcome.status == "token_mismatch_or_ambiguous":
+                    LOGGER.warning(
+                        "Q3 release token mismatch at %s; exact original lease is absent and replacement is preserved.",
+                        outcome.artifact_paths[0],
+                    )
+            if not failures:
+                return []
+            if attempt + 1 < max(1, int(immediate_attempts)):
+                awaited = sleep_fn(float(retry_delay_seconds))
+                if inspect.isawaitable(awaited):
+                    await awaited
+    except asyncio.CancelledError:
+        if queue_on_failure:
+            _queue_q3_release_obligations(
+                blocked_leases or materialized,
+                paths,
+                unlink_fn,
+                mutex_wait_seconds=mutex_wait_seconds,
+            )
+        raise
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        if queue_on_failure:
+            _queue_q3_release_obligations(
+                blocked_leases or materialized,
+                paths,
+                unlink_fn,
+                mutex_wait_seconds=mutex_wait_seconds,
+            )
+        message = (
+            "Q3 mutation may have completed but admission-lock acquisition or lease cleanup failed; "
+            "region ownership remains fail-closed at blocking lease artifacts "
+            f"{', '.join(known_paths)}: {exc}"
+        )
+        if raise_on_failure:
+            raise GovernanceCleanupError(message, artifact_paths=known_paths) from exc
+        return known_paths
+    if queue_on_failure:
+        _queue_q3_release_obligations(
+            blocked_leases,
+            paths,
+            unlink_fn,
+            mutex_wait_seconds=mutex_wait_seconds,
+        )
+    message = (
+        "Q3 mutation completed but lease release remains fail-closed after bounded retry; "
+        f"blocking artifacts: {failures}. Automatic cleanup retry remains active."
+    )
+    if raise_on_failure:
+        raise GovernanceCleanupError(message, artifact_paths=failures)
+    return failures
+
+
+# @beacon[
+#   id=carto-governance@claim-finalize-recovery,
+#   slice_labels=carto-governance,ra-carto-jobs,nexus-core-v1,mci-lease-carto,
+#   kind=ast,
+#   comment=Live-owner CARTO claim finalization authority with explicit released/already-absent/token-mismatch/blocked outcomes, async lock acquisition, tombstone-before-delete, bounded immediate retry, and persistent fail-closed cleanup supervision.,
+# ]
+async def finalize_claim_async(
+    claim_id: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    *,
+    write_tombstone: bool = True,
+    now_epoch: float | None = None,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+    unlink_fn: Callable[[Path], Any] | None = None,
+    diagnostic: Callable[[str], Any] | None = None,
+    immediate_attempts: int = DEFAULT_CLEANUP_RETRY_ATTEMPTS,
+    retry_delay_seconds: float = DEFAULT_CLEANUP_RETRY_DELAY_SECONDS,
+    sleep_fn: Callable[[float], Any] = asyncio.sleep,
+    queue_on_failure: bool = True,
+    raise_on_failure: bool = True,
+) -> bool:
+    """Finalize a live-owned claim with persistent token-safe recovery."""
+
+    paths = governance_paths(jobs_root)
+    key = f"claim:{claim_id}"
+    artifact_paths = [
+        str(path) for path in _find_claim_files(paths) if _safe_claim_id(path) == claim_id
+    ]
+    outcome = CleanupAttemptResult("blocked", tuple(artifact_paths))
+    try:
+        for attempt in range(max(1, int(immediate_attempts))):
+            async with async_os_lock(
+                paths.admission_mutex,
+                timeout_seconds=mutex_wait_seconds,
+                cancel_check=cancel_check,
+            ):
+                outcome = _finalize_claim_locked_outcome(
+                    claim_id,
+                    paths.jobs_root,
+                    write_tombstone=write_tombstone,
+                    now_epoch=now_epoch,
+                    atomic_writer=atomic_writer,
+                    unlink_fn=unlink_fn,
+                    diagnostic=diagnostic,
+                )
+            artifact_paths = list(outcome.artifact_paths)
+            if outcome.status in {"released", "already_absent"}:
+                _clear_cleanup_obligation(key)
+                return True
+            if outcome.status == "token_mismatch_or_ambiguous":
+                _clear_cleanup_obligation(key)
+                return False
+            if attempt + 1 < max(1, int(immediate_attempts)):
+                awaited = sleep_fn(float(retry_delay_seconds))
+                if inspect.isawaitable(awaited):
+                    await awaited
+    except asyncio.CancelledError:
+        if queue_on_failure:
+            _queue_claim_finalize_obligation(
+                claim_id=claim_id,
+                paths=paths,
+                write_tombstone=write_tombstone,
+                now_epoch=now_epoch,
+                atomic_writer=atomic_writer,
+                unlink_fn=unlink_fn,
+                diagnostic=diagnostic,
+                artifact_paths=artifact_paths,
+                mutex_wait_seconds=mutex_wait_seconds,
+            )
+        raise
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        if queue_on_failure:
+            _queue_claim_finalize_obligation(
+                claim_id=claim_id,
+                paths=paths,
+                write_tombstone=write_tombstone,
+                now_epoch=now_epoch,
+                atomic_writer=atomic_writer,
+                unlink_fn=unlink_fn,
+                diagnostic=diagnostic,
+                artifact_paths=artifact_paths,
+                mutex_wait_seconds=mutex_wait_seconds,
+            )
+        message = (
+            f"Claim finalization for {claim_id} could not acquire or use admission.mutex; "
+            f"region ownership remains fail-closed at {artifact_paths or [str(paths.claims_dir)]}: {exc}"
+        )
+        if raise_on_failure:
+            raise GovernanceCleanupError(message, artifact_paths=artifact_paths) from exc
+        return False
+    if queue_on_failure:
+        _queue_claim_finalize_obligation(
+            claim_id=claim_id,
+            paths=paths,
+            write_tombstone=write_tombstone,
+            now_epoch=now_epoch,
+            atomic_writer=atomic_writer,
+            unlink_fn=unlink_fn,
+            diagnostic=diagnostic,
+            artifact_paths=artifact_paths,
+            mutex_wait_seconds=mutex_wait_seconds,
+        )
+    message = (
+        f"Claim finalization for {claim_id} remains fail-closed after bounded retry; "
+        f"blocking artifacts: {artifact_paths or ['exact claim remains unreadable']}. "
+        "Automatic cleanup retry remains active."
+    )
+    if raise_on_failure:
+        raise GovernanceCleanupError(message, artifact_paths=artifact_paths)
+    return False
+
+
+def _safe_claim_id(path: Path) -> str | None:
+    try:
+        return str(read_claim(path).get("claim_id") or "") or None
+    except Exception:
+        return None
+
+
+async def retry_cleanup_obligations_async(
+    *,
+    keys: Sequence[str] | None = None,
+) -> dict[str, list[str]]:
+    """Retry queued live-owner obligations once through async locked authorities."""
+
+    selected = list(keys) if keys is not None else list(_CLEANUP_OBLIGATIONS)
+    released: list[str] = []
+    remaining: list[str] = []
+    for key in selected:
+        obligation = _CLEANUP_OBLIGATIONS.get(key)
+        if obligation is None:
+            continue
+        try:
+            if obligation["kind"] == "q3_release":
+                failures = await release_q3_leases_async(
+                    obligation["leases"],
+                    jobs_root=obligation["jobs_root"],
+                    mutex_wait_seconds=obligation.get(
+                        "mutex_wait_seconds", DEFAULT_MUTEX_WAIT_SECONDS
+                    ),
+                    unlink_fn=obligation.get("unlink_fn"),
+                    immediate_attempts=1,
+                    queue_on_failure=False,
+                    raise_on_failure=False,
+                )
+                success = not failures
+            else:
+                success = await finalize_claim_async(
+                    obligation["claim_id"],
+                    obligation["jobs_root"],
+                    write_tombstone=obligation.get("write_tombstone", True),
+                    now_epoch=obligation.get("now_epoch"),
+                    mutex_wait_seconds=obligation.get(
+                        "mutex_wait_seconds", DEFAULT_MUTEX_WAIT_SECONDS
+                    ),
+                    atomic_writer=obligation.get("atomic_writer", atomic_write_json),
+                    unlink_fn=obligation.get("unlink_fn"),
+                    diagnostic=obligation.get("diagnostic"),
+                    immediate_attempts=1,
+                    queue_on_failure=False,
+                    raise_on_failure=False,
+                )
+                if not success and key not in _CLEANUP_OBLIGATIONS:
+                    success = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("Cleanup obligation retry failed for %s.", key)
+            success = False
+        if success:
+            _clear_cleanup_obligation(key)
+            released.append(key)
+        else:
+            remaining.append(key)
+    return {"released": released, "remaining": remaining}
+
+
+# @beacon-close[
+#   id=carto-governance@q3-leases,
+# ]
+
+
+class AdmissionRefusal(GovernanceError):
+    """Structured, fail-closed CARTO admission refusal."""
+
+    def __init__(self, kind: str, message: str, **details: Any):
+        self.kind = str(kind)
+        self.details = dict(details)
+        super().__init__(message, path=details.get("path"))
+
+    def to_result(self) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error_kind": self.kind,
+            "error": str(self),
+            **self.details,
+        }
+
+
+def _find_job_file_by_id(paths: GovernancePaths, job_id: str) -> Path | None:
+    for path, payload in _read_carto_jobs(paths):
+        if str(payload.get("id") or "") == str(job_id):
+            return path
+    return None
+
+
+def _job_ack_from_claim(
+    claim: Mapping[str, Any],
+    paths: GovernancePaths,
+    *,
+    deduplicated: bool,
+) -> dict[str, Any]:
+    job_path = _find_job_file_by_id(paths, str(claim["job_id"]))
+    payload: dict[str, Any] = {}
+    if job_path is not None:
+        try:
+            payload = _read_json(job_path)
+        except Exception:
+            payload = {}
+    return {
+        "success": True,
+        "job_id": claim["job_id"],
+        "pid": payload.get("pid", claim.get("pid")),
+        "detached": claim.get("job_type") != "CARTO_BULK_APPLY",
+        "deduplicated": bool(deduplicated),
+        "root_uuid": claim["root_uuid"],
+        "job_file": str(job_path) if job_path is not None else None,
+        "log_file": payload.get("logs_path"),
+        "freshness_disposition": payload.get("freshness_disposition"),
+        "note": (
+            "Existing active governed job reused; no second preparation ran."
+            if deduplicated
+            else "Governed CARTO job admitted."
+        ),
+    }
+
+
+def _raise_for_sweep_blockers(sweep: SweepResult) -> None:
+    if sweep.unclassifiable_artifacts:
+        artifact = sweep.unclassifiable_artifacts[0]
+        raise AdmissionRefusal(
+            "governance_state_unclassifiable",
+            f"Governance state is unclassifiable at '{artifact}'; inspect or remove it manually.",
+            path=artifact,
+        )
+    if sweep.claimless_conflicts:
+        conflict = sweep.claimless_conflicts[0]
+        raise AdmissionRefusal(
+            "overlap_conflict",
+            f"Claimless legacy CARTO job '{conflict.get('id')}' is alive or unverifiable and globally blocks admission.",
+            conflict=conflict,
+        )
+
+
+# @beacon[
+#   id=carto-governance@admission-authority,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-reconcile,ra-workflowy-cache,
+#   kind=ast,
+#   comment=Phase-C admission authority: negative-only exact-intent gate plus the one mutex-serialized sweep/dedupe/overlap/cooldown/co-claim/claim-and-job transaction.,
+# ]
+def negative_exact_intent_gate_locked(
+    *,
+    dedupe_key: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    now_epoch: float | None = None,
+    cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+    sweep_kwargs: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Return only a predetermined negative outcome; never admit or overlap-decide."""
+
+    paths = governance_paths(jobs_root)
+    now = time.time() if now_epoch is None else float(now_epoch)
+    sweep = sweep_region_governance_locked(
+        paths.jobs_root,
+        now_epoch=now,
+        cooldown_seconds=cooldown_seconds,
+        **dict(sweep_kwargs or {}),
+    )
+    _raise_for_sweep_blockers(sweep)
+    for claim in sweep.live_claims:
+        if claim.get("dedupe_key") == dedupe_key:
+            return _job_ack_from_claim(claim, paths, deduplicated=True)
+    for tombstone in sweep.live_tombstones:
+        if tombstone.get("dedupe_key") != dedupe_key:
+            continue
+        elapsed = max(0.0, now - _parse_time(tombstone["last_terminal_at"]))
+        retry_after = max(0.0, float(cooldown_seconds) - elapsed)
+        return {
+            "success": False,
+            "error_kind": "cooldown_active",
+            "error": "An identical CARTO intent is inside the post-terminal cooldown.",
+            "retry_after": retry_after,
+            "conflict": tombstone,
+        }
+    return None
+
+
+async def negative_exact_intent_gate(
+    *,
+    dedupe_key: str,
+    jobs_root: str | os.PathLike[str] | None = None,
+    now_epoch: float | None = None,
+    cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+    mutex_wait_seconds: float = DEFAULT_MUTEX_WAIT_SECONDS,
+    cancel_check: Callable[[], Any] | None = None,
+    sweep_kwargs: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    paths = governance_paths(jobs_root)
+    async with async_os_lock(
+        paths.admission_mutex,
+        timeout_seconds=mutex_wait_seconds,
+        cancel_check=cancel_check,
+    ):
+        return negative_exact_intent_gate_locked(
+            dedupe_key=dedupe_key,
+            jobs_root=paths.jobs_root,
+            now_epoch=now_epoch,
+            cooldown_seconds=cooldown_seconds,
+            sweep_kwargs=sweep_kwargs,
+        )
+
+
+def _validated_continuation_parent(
+    *,
+    parent_job_id: str | None,
+    child_job_type: str,
+    account_scope_id: str,
+    footprint: Mapping[str, Any],
+    live_claims: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    if not parent_job_id or child_job_type != "CARTO_REFRESH":
+        return None
+    parent = next(
+        (claim for claim in live_claims if claim.get("job_id") == parent_job_id),
+        None,
+    )
+    if parent is None:
+        return None
+    if parent.get("job_type") != "CARTO_MARKDOWN_GENERATE":
+        return None
+    if parent.get("account_scope_id") != account_scope_id:
+        return None
+    parent_path = parent.get("path")
+    child_path = footprint.get("path")
+    if parent_path is not None and child_path is not None:
+        return parent if canonicalize_path(parent_path) == canonicalize_path(child_path) else None
+    return parent if parent.get("root_uuid") == footprint.get("root_uuid") else None
+
+
+# @beacon[
+#   id=auto-beacon@admit_carto_job_locked-5te7,
+#   role=admit_carto_job_locked,
+#   slice_labels=mci-lease-carto,
+#   kind=ast,
+#   comment=Cartographer admission with one synchronous held-node-lock consult against the current view; head-currency, claim/Q3 overlap and cooldown gates remain.,
+# ]
+def admit_carto_job_locked(
+    *,
+    job_file: str | os.PathLike[str],
+    job_payload: Mapping[str, Any],
+    job_type: str,
+    dedupe_key: str,
+    account_scope_id: str,
+    footprint: Mapping[str, Any],
+    launcher: str,
+    parent_job_id: str | None,
+    prepared: bool,
+    jobs_root: str | os.PathLike[str] | None = None,
+    now_epoch: float | None = None,
+    cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+    sweep_kwargs: Mapping[str, Any] | None = None,
+    atomic_writer: Callable[[str | os.PathLike[str], Mapping[str, Any]], Any] = atomic_write_json,
+    footprint_basis_sequence: int | None = None,
+    footprint_basis_epoch_id: str | None = None,
+    live_mutation_lease_view: Mapping[str, Any] | None = None,
+    mutation_lease_retry_after_seconds: float = 1.0,
+) -> dict[str, Any]:
+    """Run the complete admission decision while admission.mutex is held.
+
+    CUT-1: one synchronous consult of the process-local held-node-lock
+    snapshot rehydrates every key against the caller's current adopted view.
+    This is admission-time protection only, with no lifetime hold. The kept
+    head-currency gate refuses a footprint whose topology basis predates the
+    current manifest head (the caller then adopts + re-derives + retries).
+    """
+
+    paths = governance_paths(jobs_root)
+    now = time.time() if now_epoch is None else float(now_epoch)
+    normalized_footprint = validate_footprint(footprint)
+    sweep = sweep_region_governance_locked(
+        paths.jobs_root,
+        now_epoch=now,
+        cooldown_seconds=cooldown_seconds,
+        **dict(sweep_kwargs or {}),
+    )
+    _raise_for_sweep_blockers(sweep)
+
+    for claim in sweep.live_claims:
+        if claim.get("dedupe_key") == dedupe_key:
+            return _job_ack_from_claim(claim, paths, deduplicated=True)
+
+    # S05 (A1c): the head-currency validity invariant — the overlap decision
+    # must not rest on a topology basis older than THIS admission.  The
+    # manifest read is lock-free (never a nested coherence mutex under
+    # admission.mutex, invariant 12).
+    if footprint_basis_sequence is not None:
+        from .coherence.paths import coherence_paths as _coherence_paths
+        from .coherence.schema import read_manifest as _read_coherence_manifest
+
+        _coh = _coherence_paths(account_scope_id, jobs_root=paths.jobs_root)
+        _manifest = _read_coherence_manifest(_coh, required=False)
+        if _manifest is not None and (
+            (
+                footprint_basis_epoch_id is not None
+                and _manifest.epoch_id != footprint_basis_epoch_id
+            )
+            or _manifest.journal_head_seq > int(footprint_basis_sequence)
+        ):
+            raise AdmissionRefusal(
+                "head_basis_stale",
+                "The manifest journal head advanced past the CARTO footprint's "
+                "basis view; adopt the head and re-derive the footprint before "
+                "retrying (S05 A1c head-currency).",
+                retry_after=0.0,
+                conflict={
+                    "current_epoch_id": _manifest.epoch_id,
+                    "current_head": _manifest.journal_head_seq,
+                    "basis_epoch_id": footprint_basis_epoch_id,
+                    "basis_sequence": footprint_basis_sequence,
+                },
+            )
+
+    continuation_parent = _validated_continuation_parent(
+        parent_job_id=parent_job_id,
+        child_job_type=job_type,
+        account_scope_id=account_scope_id,
+        footprint=normalized_footprint,
+        live_claims=sweep.live_claims,
+    )
+    candidate = {"account_scope_id": account_scope_id, **normalized_footprint}
+    for active in [*sweep.live_claims, *sweep.live_leases]:
+        if not footprints_overlap(candidate, active):
+            continue
+        if continuation_parent is not None and active.get("claim_id") == continuation_parent.get(
+            "claim_id"
+        ):
+            continue
+        owner = active.get("job_id") or active.get("lease_id")
+        message = f"Active owner '{owner}' overlaps '{normalized_footprint.get('path') or normalized_footprint['root_uuid']}'."
+        if job_payload.get("preparation_input_digest"):
+            message += (
+                " Your latest name/note changes were NOT synchronized; the running "
+                "disk-authoritative refresh may overwrite current Workflowy edits. "
+                "Verify after terminal and retry; use F12+2 Bulk Apply for several nodes."
+            )
+        raise AdmissionRefusal("overlap_conflict", message, conflict=dict(active))
+
+    # Admission-time only; continuation co-claims do not exempt held keys.
+    from .mutation_locks import registry_held_keys
+
+    held = registry_held_keys()
+    if held:
+        from .mutation_lease_governance import (
+            MutationRegionError,
+            build_region_exact_node,
+            mutation_regions_intersect_carto_claim,
+        )
+
+        if live_mutation_lease_view is None:
+            raise AdmissionRefusal(
+                "governance_state_unclassifiable",
+                "Held mutation-lock keys exist but no current adopted view was supplied "
+                "for chain rehydration; refusing to admit on unproved topology. "
+                "Retry with a current admission view.",
+            )
+        regions = []
+        for key in sorted(held):
+            try:
+                regions.append(build_region_exact_node(key, cache_by_id=live_mutation_lease_view))
+            except MutationRegionError:
+                raise AdmissionRefusal(
+                    "overlap_conflict",
+                    f"Held mutation lock '{key[:8]}' cannot be placed in the current "
+                    f"admission view for CARTO candidate '{normalized_footprint.get('path') or normalized_footprint['root_uuid']}'; "
+                    "retry shortly (refuse, never queue).",
+                    retry_after=float(mutation_lease_retry_after_seconds),
+                    conflict={
+                        "owner_kind": "mutation_lock", "node_id": key, "region": None,
+                        "reason": "held_key_not_in_admission_view",
+                    },
+                )
+        region = mutation_regions_intersect_carto_claim(
+            regions, candidate, cache_by_id=live_mutation_lease_view
+        )
+        if region is not None:
+            raise AdmissionRefusal(
+                "overlap_conflict",
+                f"Active mutation lock '{region.node_uuid[:8]}' overlaps CARTO candidate "
+                f"'{normalized_footprint.get('path') or normalized_footprint['root_uuid']}'; "
+                "retry shortly (refuse, never queue).",
+                retry_after=float(mutation_lease_retry_after_seconds),
+                conflict={
+                    "owner_kind": "mutation_lock", "node_id": region.node_uuid,
+                    "region": region.to_dict(),
+                },
+            )
+
+    for tombstone in sweep.live_tombstones:
+        if continuation_parent is not None:
+            continue
+        if not footprints_overlap(candidate, tombstone):
+            continue
+        elapsed = max(0.0, now - _parse_time(tombstone["last_terminal_at"]))
+        retry_after = max(0.0, float(cooldown_seconds) - elapsed)
+        raise AdmissionRefusal(
+            "cooldown_active",
+            "The target overlaps a recently-terminal CARTO region; retry after cooldown. "
+            "For several node beacon edits, use F12+2 Bulk Apply.",
+            retry_after=retry_after,
+            conflict=tombstone,
+        )
+
+    launcher_identity = current_process_identity()
+    initial_state = "preparing" if prepared else "spawning"
+    spawn_started = None if prepared else utc_now_iso(now)
+    claim = build_claim(
+        job_id=str(job_payload["id"]),
+        job_type=job_type,
+        dedupe_key=dedupe_key,
+        account_scope_id=account_scope_id,
+        footprint=normalized_footprint,
+        launcher=launcher,
+        parent_job_id=parent_job_id,
+        launcher_pid=launcher_identity.pid,
+        pid=launcher_identity.pid,
+        pid_create_time=launcher_identity.create_time,
+        pid_start_ticks=launcher_identity.start_ticks,
+        pid_boot_id=launcher_identity.boot_id,
+        handoff_state=initial_state,
+        spawn_started_at=spawn_started,
+        execution_owner="launcher",
+        launched_at=utc_now_iso(now),
+    )
+    claim_path = write_claim(claim, paths.jobs_root, atomic_writer=atomic_writer)
+    payload = dict(job_payload)
+    payload.update(
+        {
+            "claim_id": claim["claim_id"],
+            "dedupe_key": dedupe_key,
+            "account_scope_id": account_scope_id,
+            "footprint": normalized_footprint,
+            "launcher": launcher,
+            "parent_job_id": parent_job_id,
+            "status": initial_state,
+            "handoff_state": initial_state,
+            "spawn_started_at": spawn_started,
+            "execution_owner": "launcher",
+            "pid": launcher_identity.pid,
+            "pid_create_time": launcher_identity.create_time,
+            "pid_start_ticks": launcher_identity.start_ticks,
+            "pid_boot_id": launcher_identity.boot_id,
+        }
+    )
+    try:
+        atomic_writer(job_file, payload)
+    except BaseException as exc:
+        # This transaction is already under admission.mutex. Preserve the
+        # structured result and let the async wrapper register any live-owner
+        # cleanup obligation only after the mutex has been released.
+        cleanup = _finalize_claim_locked_outcome(
+            claim["claim_id"],
+            paths.jobs_root,
+            now_epoch=now,
+            atomic_writer=atomic_writer,
+        )
+        raise _PostClaimAdmissionFailure(
+            primary_error=exc,
+            claim=claim,
+            claim_path=claim_path,
+            job_file=Path(job_file),
+            footprint=normalized_footprint,
+            cleanup=cleanup,
+            jobs_root=paths.jobs_root,
+            now_epoch=now,
+            atomic_writer=atomic_writer,
+        ) from exc
+    return {
+        "success": True,
+        "admitted": True,
+        "deduplicated": False,
+        "claim": claim,
+        "claim_path": str(claim_path),
+        "job_file": str(job_file),
+        "job_payload": payload,
+        "continuation_parent": dict(continuation_parent) if continuation_parent else None,
+    }
+
+
+# @beacon[
+#   id=auto-beacon@admit_carto_job-2yqp,
+#   role=admit_carto_job,
+#   slice_labels=mci-lease-carto,
+#   kind=ast,
+# ]
+async def admit_carto_job(**kwargs: Any) -> dict[str, Any]:
+    paths = governance_paths(kwargs.get("jobs_root"))
+    mutex_wait = float(kwargs.pop("mutex_wait_seconds", DEFAULT_MUTEX_WAIT_SECONDS))
+    cancel_check = kwargs.pop("cancel_check", None)
+    # S05 (A1c): the caller-supplied adoption hook — adopts the manifest head
+    # and returns {"view": nodes_by_id, "basis_sequence": int,
+    # "basis_epoch_id": str}.  On a head-stale refusal the wrapper ITSELF
+    # re-derives the footprint from the fresh view via compute_footprint over
+    # the candidate's stored canonical path/root/kind (the disk path does not
+    # move with graph topology), then retries the admission ONCE (the chosen
+    # A1c shape: re-derive + rerun the overlap scan BEFORE proceeding).
+    adopt_fn = kwargs.pop("adopt_fn", None)
+    kwargs["jobs_root"] = paths.jobs_root
+    try:
+        attempt = 0
+        max_attempts = 2 if adopt_fn is not None else 1
+        while True:
+            attempt += 1
+            try:
+                async with async_os_lock(
+                    paths.admission_mutex,
+                    timeout_seconds=mutex_wait,
+                    cancel_check=cancel_check,
+                ):
+                    return admit_carto_job_locked(**kwargs)
+            except AdmissionRefusal as refusal:
+                if (
+                    refusal.kind == "head_basis_stale"
+                    and adopt_fn is not None
+                    and attempt < max_attempts
+                ):
+                    # admission.mutex is released: adopt + re-derive + retry once.
+                    refreshed = adopt_fn()
+                    if inspect.isawaitable(refreshed):
+                        refreshed = await refreshed
+                    if refreshed is None:
+                        raise
+                    fresh_view = refreshed["view"]
+                    current = validate_footprint(kwargs["footprint"])
+                    kwargs["footprint"] = compute_footprint(
+                        current.get("path"),
+                        current["root_uuid"],
+                        fresh_view,
+                        kind=current["kind"],
+                    )
+                    kwargs["live_mutation_lease_view"] = fresh_view
+                    kwargs["footprint_basis_sequence"] = refreshed.get("basis_sequence")
+                    kwargs["footprint_basis_epoch_id"] = refreshed.get("basis_epoch_id")
+                    continue
+                raise
+    except _PostClaimAdmissionFailure as failure:
+        primary = failure.primary_error
+        cleanup = failure.cleanup
+        target = failure.footprint.get("path") or failure.footprint.get("root_uuid")
+        primary_text = (
+            f"Initial CARTO job JSON write failed after claim admission for "
+            f"claim_id={failure.claim['claim_id']} at {failure.claim_path}; "
+            f"affected region={target!r}: {primary}"
+        )
+        if failure.job_file.exists():
+            _persist_terminal_job(failure.job_file, "failed", primary_text)
+
+        if cleanup.status == "blocked":
+            # admission.mutex is no longer held here. The existing exact-token
+            # supervisor is the sole live-owner recovery authority.
+            _queue_claim_finalize_obligation(
+                claim_id=str(failure.claim["claim_id"]),
+                paths=governance_paths(failure.jobs_root),
+                write_tombstone=True,
+                now_epoch=failure.now_epoch,
+                atomic_writer=failure.atomic_writer,
+                unlink_fn=None,
+                diagnostic=None,
+                artifact_paths=cleanup.artifact_paths or (str(failure.claim_path),),
+                mutex_wait_seconds=mutex_wait,
+            )
+            cleanup_error = GovernanceCleanupError(
+                f"{primary_text}. Governance cleanup required; exact claim finalization "
+                f"remains blocked: {cleanup.detail or 'no additional diagnostic'}. "
+                "Automatic cleanup retry remains active.",
+                artifact_paths=cleanup.artifact_paths or (str(failure.claim_path),),
+            )
+            if failure.job_file.exists():
+                _persist_governance_cleanup_failure(
+                    failure.job_file,
+                    cleanup_error,
+                    primary_error=primary,
+                )
+            raise cleanup_error from primary
+
+        if cleanup.status == "token_mismatch_or_ambiguous":
+            conflict = {
+                "claim_id": failure.claim["claim_id"],
+                "artifact_paths": list(cleanup.artifact_paths),
+                "cleanup_outcome": cleanup.status,
+                "primary_error": str(primary),
+            }
+            message = (
+                f"{primary_text}. Exact rollback was token-mismatched or ambiguous; "
+                f"all artifacts were preserved: {cleanup.detail or cleanup.artifact_paths}."
+            )
+            if failure.job_file.exists():
+                _persist_terminal_job(failure.job_file, "failed", message)
+            raise GovernanceConflictError(message, conflict=conflict) from primary
+
+        raise primary.with_traceback(primary.__traceback__) from None
+
+
+def load_usable_nodes_export_snapshot(
+    path: str | os.PathLike[str],
+    *,
+    expected_lineage: Mapping[str, Any] | None = None,
+    allow_legacy: bool = False,
+) -> dict[str, Any]:
+    """Load one launcher-selected snapshot or fail before mutation/spawn.
+
+    S02 §13.2: S02 lineage wrappers are strictly validated and their lineage
+    metadata is returned under ``snapshot_lineage``.  Legacy lineage-less
+    wrappers are accepted ONLY with ``allow_legacy=True`` (the one-time
+    coherence bootstrap path); every governed worker/job load must carry
+    lineage.  When ``expected_lineage`` is supplied, the wrapper's
+    account/epoch/watermark must match it exactly.
+    """
+
+    from .coherence.snapshot_store import read_snapshot_envelope, validate_snapshot_lineage
+
+    envelope = read_snapshot_envelope(path, allow_legacy=allow_legacy)
+    if expected_lineage is not None:
+        validate_snapshot_lineage(
+            envelope,
+            account_scope_id=str(expected_lineage.get("account_scope_id") or ""),
+            epoch_number=expected_lineage.get("epoch_number"),
+            epoch_id=expected_lineage.get("epoch_id"),
+            incorporated_through_seq=expected_lineage.get("incorporated_through_seq"),
+        )
+    nodes = envelope.nodes_export.get("nodes", [])
+    if not isinstance(nodes, list):
+        raise ValueError(f"Snapshot '{path}' has no usable nodes list.")
+    result: dict[str, Any] = {
+        "snapshot_path": envelope.path,
+        "payload": {
+            "snapshot_timestamp": envelope.snapshot_timestamp,
+            "nodes_export": envelope.nodes_export,
+        },
+        "nodes": nodes,
+    }
+    if not envelope.legacy:
+        result["snapshot_lineage"] = envelope.lineage_dict()
+    return result
+
+
+def _merge_job_identity(job_file: Path, updates: Mapping[str, Any]) -> None:
+    try:
+        current = _read_json(job_file)
+    except Exception:
+        current = {}
+    current.update(dict(updates))
+    current["updated_at"] = utc_now_iso()
+    merge_write_carto_job_status(job_file, current)
+
+
+def _persist_terminal_job(
+    job_file: Path, status: str, error: str | None = None, **extra: Any
+) -> None:
+    try:
+        payload = _read_json(job_file)
+    except Exception:
+        payload = {}
+    payload.update(extra)
+    payload["status"] = status
+    payload["updated_at"] = utc_now_iso()
+    if error is not None:
+        payload["error"] = str(error)
+        summary = payload.setdefault("result_summary", {})
+        if isinstance(summary, dict):
+            summary.setdefault("errors", []).append(str(error))
+    merge_write_carto_job_status(job_file, payload)
+
+
+def _persist_governance_cleanup_failure(
+    job_file: Path,
+    cleanup_error: GovernanceCleanupError,
+    *,
+    primary_error: BaseException | str | None = None,
+    terminal_status: Literal["failed", "cancelled"] = "failed",
+) -> str:
+    """Persist a loud terminal state while ownership remains blocking."""
+
+    cleanup_text = (
+        "Governance cleanup required; region ownership remains blocking: " f"{cleanup_error}"
+    )
+    if primary_error is None:
+        combined = cleanup_text
+    else:
+        combined = f"Primary operation failed: {primary_error}. {cleanup_text}"
+    _persist_terminal_job(job_file, terminal_status, combined)
+    return combined
+
+
+async def _transition_to_spawning(
+    claim_id: str,
+    job_file: Path,
+    jobs_root: Path,
+    *,
+    cancel_check: Callable[[], Any] | None = None,
+) -> dict[str, Any]:
+    paths = governance_paths(jobs_root)
+    async with async_os_lock(paths.admission_mutex, cancel_check=cancel_check):
+        matches = []
+        for path in _find_claim_files(paths):
+            try:
+                claim = read_claim(path)
+            except Exception:
+                continue
+            if claim.get("claim_id") == claim_id:
+                matches.append((path, claim))
+        if len(matches) != 1:
+            raise RuntimeError("Governed claim vanished before spawn handoff.")
+        path, claim = matches[0]
+        claim["handoff_state"] = "spawning"
+        claim["spawn_started_at"] = utc_now_iso()
+        claim["execution_owner"] = "launcher"
+        write_claim(claim, paths.jobs_root)
+        _merge_job_identity(
+            job_file,
+            {
+                "status": "spawning",
+                "handoff_state": "spawning",
+                "spawn_started_at": claim["spawn_started_at"],
+                "execution_owner": "launcher",
+            },
+        )
+        return claim
+
+
+def _find_spawn_claim_locked(
+    claim_id: str,
+    jobs_root: Path,
+) -> tuple[Path, dict[str, Any]] | None:
+    """Resolve one exact spawn claim while ``admission.mutex`` is held."""
+
+    paths = governance_paths(jobs_root)
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    for path in _find_claim_files(paths):
+        try:
+            claim = read_claim(path)
+        except Exception:
+            continue
+        if claim.get("claim_id") == claim_id:
+            matches.append((path, claim))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _detached_worker_owns_claim(claim: Mapping[str, Any]) -> bool:
+    return claim.get("execution_owner") == "detached_worker"
+
+
+async def _record_spawned_worker(
+    claim_id: str,
+    job_file: Path,
+    jobs_root: Path,
+    pid: int,
+) -> None:
+    paths = governance_paths(jobs_root)
+
+    # Adoption may beat the launcher's post-Popen bookkeeping. Check ownership
+    # before the failure-prone child metadata lookup; an adopted worker needs no
+    # launcher repair and must never be rolled back because that lookup failed.
+    async with async_os_lock(paths.admission_mutex):
+        target = _find_spawn_claim_locked(claim_id, jobs_root)
+        if target is None or _detached_worker_owns_claim(target[1]):
+            return
+        if target[1].get("handoff_state") != "spawning":
+            return
+
+    # U01 S10: probe the CHILD through the ONE identity primitive (never a
+    # bare psutil create-time call); an unreadable child identity
+    # (psutil.NoSuchProcess / ProcessIdentityError) propagates exactly as
+    # today's create_time() failure does into the post-Popen rollback.
+    child_identity = read_process_identity(int(pid))
+    async with async_os_lock(paths.admission_mutex):
+        target = _find_spawn_claim_locked(claim_id, jobs_root)
+        if target is None:
+            return
+        _path, claim = target
+        if _detached_worker_owns_claim(claim):
+            return
+        if claim.get("handoff_state") != "spawning" or claim.get("execution_owner") != "launcher":
+            return
+        # All four owner fields come from the SAME ProcessIdentity — a claim
+        # whose pid and stable fields described different processes would be
+        # a spec violation.
+        claim["pid"] = child_identity.pid
+        claim["pid_create_time"] = float(child_identity.create_time)
+        claim["pid_start_ticks"] = child_identity.start_ticks
+        claim["pid_boot_id"] = child_identity.boot_id
+        claim["execution_owner"] = "detached_worker"
+        write_claim(claim, paths.jobs_root)
+        # Identity-only mirror: never write status from this stale post-Popen side.
+        _merge_job_identity(
+            job_file,
+            {
+                "pid": child_identity.pid,
+                "pid_create_time": float(child_identity.create_time),
+                "pid_start_ticks": child_identity.start_ticks,
+                "pid_boot_id": child_identity.boot_id,
+                "execution_owner": "detached_worker",
+            },
+        )
+
+
+async def _rollback_spawn_failure_if_launcher_owned(
+    *,
+    claim_id: str,
+    job_file: Path,
+    jobs_root: Path,
+    error: BaseException,
+    cancelled: bool,
+) -> SpawnRollbackResult:
+    """Classify ownership and rollback one exact launcher claim under the mutex."""
+
+    paths = governance_paths(jobs_root)
+    async with async_os_lock(paths.admission_mutex):
+        matches: list[tuple[Path, dict[str, Any]]] = []
+        unreadable: list[str] = []
+        try:
+            job_id = str(_read_json(job_file).get("id") or "")
+        except Exception:
+            job_id = ""
+        suffix_candidates = set(_claim_candidates_for_job(paths, job_id)) if job_id else set()
+        replacement_paths: list[str] = []
+        for path in _find_claim_files(paths):
+            try:
+                candidate = read_claim(path)
+            except Exception:
+                unreadable.append(str(path))
+                continue
+            if candidate.get("claim_id") == claim_id:
+                matches.append((path, candidate))
+            elif path in suffix_candidates:
+                replacement_paths.append(str(path))
+
+        if not matches and not unreadable and not replacement_paths:
+            return SpawnRollbackResult(
+                "already_absent",
+                claim_id,
+                cleanup=CleanupAttemptResult("already_absent"),
+            )
+        if len(matches) != 1 or unreadable or replacement_paths:
+            artifact_paths = tuple(
+                [str(path) for path, _claim in matches] + unreadable + replacement_paths
+            )
+            return SpawnRollbackResult(
+                "token_mismatch_or_ambiguous",
+                claim_id,
+                artifact_paths=artifact_paths,
+                detail=(
+                    f"claim_id resolved to {len(matches)} exact claims with "
+                    f"{len(unreadable)} unreadable and {len(replacement_paths)} "
+                    "replacement claim artifacts"
+                ),
+            )
+
+        claim_path, current = matches[0]
+        artifact_paths = (str(claim_path),)
+        if _detached_worker_owns_claim(current):
+            # C.3 or worker adoption won. The detached worker now owns terminal
+            # status and claim finalization; stale launcher state is nonfatal.
+            return SpawnRollbackResult(
+                "worker_owned",
+                claim_id,
+                artifact_paths=artifact_paths,
+            )
+        if current.get("execution_owner") != "launcher":
+            return SpawnRollbackResult(
+                "unknown_owner",
+                claim_id,
+                artifact_paths=artifact_paths,
+                detail=f"unexpected execution_owner={current.get('execution_owner')!r}",
+            )
+
+        # Seal the launcher-owned terminal decision against a late worker
+        # adoption before attempting tombstone publication. ``running`` with a
+        # launcher owner is already the valid in-process-owner shape, and worker
+        # adoption therefore rejects it if exact cleanup remains blocked.
+        current["handoff_state"] = "running"
+        try:
+            write_claim(current, paths.jobs_root)
+        except Exception as exc:
+            return SpawnRollbackResult(
+                "unknown_owner",
+                claim_id,
+                artifact_paths=artifact_paths,
+                detail=f"could not seal launcher rollback against adoption: {exc}",
+            )
+
+        if cancelled:
+            _persist_terminal_job(job_file, "cancelled", str(error))
+        else:
+            _persist_terminal_job(job_file, "failed", f"Worker spawn failed: {error}")
+        cleanup = _finalize_claim_locked_outcome(claim_id, paths.jobs_root)
+        return SpawnRollbackResult(
+            "launcher_owned",
+            claim_id,
+            cleanup=cleanup,
+            artifact_paths=cleanup.artifact_paths or artifact_paths,
+            detail=cleanup.detail,
+        )
+
+
+async def _spawn_governed_worker(
+    *,
+    claim: Mapping[str, Any],
+    job_file: Path,
+    log_file: Path,
+    jobs_root: Path,
+    worker_script: str | os.PathLike[str],
+    worker_mode: str,
+    env: Mapping[str, str],
+    popen_factory: Callable[..., Any],
+) -> dict[str, Any]:
+    process: Any | None = None
+    try:
+        if carto_cancel_requested(job_file):
+            raise asyncio.CancelledError("CARTO cancellation requested before spawn")
+        await _transition_to_spawning(str(claim["claim_id"]), job_file, jobs_root)
+        log_handle = open(log_file, "a", encoding="utf-8")
+        cmd = [
+            sys.executable,
+            str(worker_script),
+            "--mode",
+            worker_mode,
+            "--carto-job-file",
+            str(job_file),
+        ]
+        process = popen_factory(
+            cmd,
+            env=dict(env),
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            start_new_session=sys.platform != "win32",
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+        )
+        await _record_spawned_worker(str(claim["claim_id"]), job_file, jobs_root, int(process.pid))
+        return {"success": True, "pid": int(process.pid)}
+    except BaseException as exc:
+        cancelled = isinstance(exc, asyncio.CancelledError) or carto_cancel_requested(job_file)
+        rollback = await _rollback_spawn_failure_if_launcher_owned(
+            claim_id=str(claim["claim_id"]),
+            job_file=job_file,
+            jobs_root=jobs_root,
+            error=exc,
+            cancelled=cancelled,
+        )
+        rollback_payload = rollback.to_dict()
+        if rollback.ownership == "worker_owned":
+            LOGGER.warning(
+                "Launcher bookkeeping failed after detached worker ownership for claim %s; "
+                "worker lifecycle preserved: %s",
+                claim["claim_id"],
+                exc,
+            )
+            return {
+                "success": True,
+                "pid": int(process.pid) if process is not None else None,
+                "launcher_bookkeeping_warning": str(exc),
+                "rollback_outcome": rollback_payload,
+            }
+
+        cleanup = rollback.cleanup
+        if rollback.ownership == "launcher_owned" and cleanup is not None:
+            if cleanup.status == "blocked":
+                paths = governance_paths(jobs_root)
+                # admission.mutex was released by the rollback transaction.
+                # Register only the exact claim token; the existing persistent
+                # supervisor remains the sole process-local recovery authority.
+                _queue_claim_finalize_obligation(
+                    claim_id=str(claim["claim_id"]),
+                    paths=paths,
+                    write_tombstone=True,
+                    now_epoch=None,
+                    atomic_writer=atomic_write_json,
+                    unlink_fn=None,
+                    diagnostic=None,
+                    artifact_paths=cleanup.artifact_paths or rollback.artifact_paths,
+                )
+                cleanup_error = GovernanceCleanupError(
+                    f"Worker spawn/bookkeeping failed for claim {claim['claim_id']}: {exc}. "
+                    f"Exact launcher rollback remains blocked: "
+                    f"{cleanup.detail or 'no additional diagnostic'}. "
+                    "Automatic cleanup retry remains active.",
+                    artifact_paths=cleanup.artifact_paths or rollback.artifact_paths,
+                )
+                combined = _persist_governance_cleanup_failure(
+                    job_file,
+                    cleanup_error,
+                    primary_error=exc,
+                    terminal_status="cancelled" if cancelled else "failed",
+                )
+                if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                    raise
+                return {
+                    "success": False,
+                    "error_kind": "governance_cleanup_required",
+                    "error": combined,
+                    "blocking_artifacts": list(cleanup_error.artifact_paths),
+                    "rollback_outcome": rollback_payload,
+                }
+            if cleanup.status == "token_mismatch_or_ambiguous":
+                rollback = SpawnRollbackResult(
+                    "token_mismatch_or_ambiguous",
+                    rollback.claim_id,
+                    cleanup=cleanup,
+                    artifact_paths=cleanup.artifact_paths,
+                    detail=cleanup.detail,
+                )
+                rollback_payload = rollback.to_dict()
+
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+            raise
+        if rollback.ownership in {"token_mismatch_or_ambiguous", "unknown_owner"}:
+            return {
+                "success": False,
+                "error_kind": "governance_state_unclassifiable",
+                "error": (
+                    f"Worker spawn failed: {exc}. Launcher rollback preserved all artifacts: "
+                    f"{rollback.detail or rollback.artifact_paths}."
+                ),
+                "blocking_artifacts": list(rollback.artifact_paths),
+                "rollback_outcome": rollback_payload,
+            }
+        return {
+            "success": False,
+            "error": f"Worker spawn failed: {exc}",
+            "rollback_outcome": rollback_payload,
+        }
+
+
+def _governance_cleanup_launch_result(
+    exc: GovernanceCleanupError,
+    *,
+    root_uuid: str,
+    mode: str,
+) -> dict[str, Any]:
+    """Preserve cleanup-required classification at the public launch boundary."""
+
+    result: dict[str, Any] = {
+        "success": False,
+        "error_kind": exc.code,
+        "error": str(exc),
+        "blocking_artifacts": list(exc.artifact_paths),
+        "root_uuid": str(root_uuid),
+        "mode": str(mode),
+    }
+    if exc.__cause__ is not None:
+        result["primary_error"] = str(exc.__cause__)
+    return result
+
+
+def _isolated_task_factory(coro: Any) -> Any:
+    """S03 (H5): default production task spawner for governed background work.
+
+    Background preparation/preparation-runner tasks are NEW operations and
+    must not pin the spawner's operation generation; tests may inject their
+    own factory (``task_factory=``) and are unaffected.
+    """
+
+    from .coherence.operation_cache import create_isolated_context_task
+
+    return create_isolated_context_task(coro)
+
+
+# @beacon[
+#   id=carto-governance@refresh-launch-authority,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-reconcile,ra-workflowy-cache,
+#   kind=ast,
+#   comment=Only CARTO_REFRESH detached-worker launch authority: exact negative gate, PRE/B0/INHERIT freshness, admission, prepared background task, structured launcher rollback with exact blocked-cleanup supervision, public governance_cleanup_required classification with blocking artifacts, universal finalize, and launcher-to-worker handoff; the prepared task terminalizes a coherence hard-stop refusal as typed coherence_barrier_active diagnostics + exact-token finalize with zero preparation side effects and no worker spawn (S04 Remediation Chain 2).,
+# ]
+async def launch_carto_refresh_job(
+    *,
+    root_uuid: str,
+    mode: Literal["file", "folder"],
+    account_scope_id: str,
+    footprint_factory: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+    jobs_root: str | os.PathLike[str],
+    worker_script: str | os.PathLike[str],
+    env: Mapping[str, str],
+    launcher: str = "system",
+    extra_job_fields: Mapping[str, Any] | None = None,
+    parent_job_id: str | None = None,
+    preparation: Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None = None,
+    preparation_gate: Callable[[Any], Mapping[str, Any]] | None = None,
+    frozen_payload: Mapping[str, Any] | None = None,
+    preparation_input_digest: str | None = None,
+    source_regime: str = "standard",
+    source_path_override: str | os.PathLike[str] | None = None,
+    delete_temp_file_after: bool = False,
+    freshness_callback: Callable[[], Any] | None = None,
+    inherited_snapshot_path: str | os.PathLike[str] | None = None,
+    freshness_disposition: str | None = None,
+    initial_footprint: Mapping[str, Any] | None = None,
+    popen_factory: Callable[..., Any] = subprocess.Popen,
+    task_factory: Callable[[Any], Any] = _isolated_task_factory,
+    cancel_scope_factory: Callable[[Callable[[], Any]], Any] | None = None,
+    task_observer: Callable[[str, Any], Any] | None = None,
+    now_epoch: float | None = None,
+    footprint_basis_sequence: int | None = None,
+    footprint_basis_epoch_id: str | None = None,
+    live_mutation_lease_view: Mapping[str, Any] | None = None,
+    adopt_fn: Callable[[], Any] | None = None,
+) -> dict[str, Any]:
+    """Admit and launch one CARTO_REFRESH worker; prepared work returns immediately."""
+
+    if mode not in {"file", "folder"}:
+        return {"success": False, "error_kind": "invalid_mode", "error": f"Invalid mode {mode!r}."}
+    jobs = get_jobs_root(jobs_root)
+    jobs.mkdir(parents=True, exist_ok=True)
+    prepared = preparation is not None
+    override = source_path_override
+    if override is None and extra_job_fields:
+        override = extra_job_fields.get("source_path_override")
+    delete_after = bool(
+        delete_temp_file_after or (extra_job_fields or {}).get("delete_temp_file_after", False)
+    )
+    dedupe_key = derive_dedupe_key(
+        account_scope_id=account_scope_id,
+        job_type="CARTO_REFRESH",
+        mode=mode,
+        root_uuid=root_uuid,
+        source_regime=source_regime,
+        source_path_override=override,
+        delete_temp_file_after=delete_after,
+        preparation_input_digest=preparation_input_digest,
+    )
+    now = time.time() if now_epoch is None else float(now_epoch)
+    job_id = f"carto-refresh-{mode}-{uuid4().hex[:8]}"
+    prefix = datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
+    job_file = jobs / f"{prefix}_{job_id}.json"
+    log_file = jobs / f"{prefix}_{job_id}.log"
+    worker_path = Path(worker_script)
+    if not worker_path.exists():
+        return {
+            "success": False,
+            "error_kind": "worker_missing",
+            "error": f"weave_worker.py not found: {worker_path}",
+        }
+
+    job_payload: dict[str, Any] = {
+        "id": job_id,
+        "type": "CARTO_REFRESH",
+        "mode": mode,
+        "root_uuid": str(root_uuid),
+        "created_at": utc_now_iso(now),
+        "updated_at": utc_now_iso(now),
+        "cache_refresh_required": True,
+        "freshness_disposition": freshness_disposition,
+        "snapshot_path": str(inherited_snapshot_path) if inherited_snapshot_path else None,
+        # S02 §13: the manifest lineage of the selected snapshot, recorded so
+        # the detached worker validates the exact lineage it loads.
+        "snapshot_lineage": None,
+        "preparation_input_digest": str(preparation_input_digest or ""),
+        "source_regime": source_regime,
+        "progress": {
+            "total_files": 1 if mode == "file" else 0,
+            "completed_files": 0,
+            "current_file": None,
+            "current_phase": "preparing" if prepared else "spawning",
+        },
+        "result_summary": {"files_refreshed": 0, "files_deleted": 0, "errors": []},
+        "error": None,
+        "logs_path": str(log_file),
+    }
+    for key, value in dict(extra_job_fields or {}).items():
+        if key not in job_payload and key not in {"status", "pid", "claim_id"}:
+            job_payload[key] = value
+
+    async def obtain_freshness() -> Mapping[str, Any]:
+        if inherited_snapshot_path is not None:
+            usable = load_usable_nodes_export_snapshot(inherited_snapshot_path)
+            return {**usable, "freshness_disposition": "inherited_parent"}
+        if freshness_callback is None:
+            raise RuntimeError("No freshness authority was supplied for this launch.")
+        selected = freshness_callback()
+        if inspect.isawaitable(selected):
+            selected = await selected
+        if not isinstance(selected, Mapping) or not selected.get("snapshot_path"):
+            raise RuntimeError("Freshness authority did not select a usable snapshot.")
+        usable = load_usable_nodes_export_snapshot(str(selected["snapshot_path"]))
+        return {
+            **usable,
+            **dict(selected),
+            "freshness_disposition": str(
+                selected.get("freshness_disposition")
+                or ("performed" if not prepared else "performed")
+            ),
+        }
+
+    if not prepared:
+        try:
+            early = await negative_exact_intent_gate(
+                dedupe_key=dedupe_key,
+                jobs_root=jobs,
+            )
+            if early is not None:
+                return early
+            selection = await obtain_freshness()
+            footprint = validate_footprint(footprint_factory(selection))
+            job_payload["freshness_disposition"] = selection["freshness_disposition"]
+            job_payload["snapshot_path"] = selection["snapshot_path"]
+            job_payload["snapshot_lineage"] = selection.get("snapshot_lineage")
+            admission = await admit_carto_job(
+                job_file=job_file,
+                job_payload=job_payload,
+                job_type="CARTO_REFRESH",
+                dedupe_key=dedupe_key,
+                account_scope_id=account_scope_id,
+                footprint=footprint,
+                launcher=launcher,
+                parent_job_id=parent_job_id,
+                prepared=False,
+                jobs_root=jobs,
+                footprint_basis_sequence=footprint_basis_sequence,
+                footprint_basis_epoch_id=footprint_basis_epoch_id,
+                live_mutation_lease_view=live_mutation_lease_view,
+                adopt_fn=adopt_fn,
+            )
+        except AdmissionRefusal as exc:
+            return exc.to_result()
+        except GovernanceCleanupError as exc:
+            return _governance_cleanup_launch_result(
+                exc,
+                root_uuid=root_uuid,
+                mode=mode,
+            )
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                raise
+            return {"success": False, "error_kind": "launch_preflight_failed", "error": str(exc)}
+        if admission.get("deduplicated"):
+            return admission
+        claim = admission["claim"]
+        spawned = await _spawn_governed_worker(
+            claim=claim,
+            job_file=job_file,
+            log_file=log_file,
+            jobs_root=jobs,
+            worker_script=worker_path,
+            worker_mode="carto_refresh",
+            env=env,
+            popen_factory=popen_factory,
+        )
+        if not spawned.get("success"):
+            return spawned
+        return {
+            **_job_ack_from_claim(claim, governance_paths(jobs), deduplicated=False),
+            "pid": spawned["pid"],
+            "mode": "carto_refresh",
+            "freshness_disposition": selection["freshness_disposition"],
+        }
+
+    if initial_footprint is None:
+        return {
+            "success": False,
+            "error_kind": "footprint_unresolvable",
+            "error": "Prepared launch requires a pre-B0 footprint.",
+        }
+    try:
+        admission = await admit_carto_job(
+            job_file=job_file,
+            job_payload=job_payload,
+            job_type="CARTO_REFRESH",
+            dedupe_key=dedupe_key,
+            account_scope_id=account_scope_id,
+            footprint=initial_footprint,
+            launcher=launcher,
+            parent_job_id=parent_job_id,
+            prepared=True,
+            jobs_root=jobs,
+            footprint_basis_sequence=footprint_basis_sequence,
+            footprint_basis_epoch_id=footprint_basis_epoch_id,
+            live_mutation_lease_view=live_mutation_lease_view,
+            adopt_fn=adopt_fn,
+        )
+    except AdmissionRefusal as exc:
+        return exc.to_result()
+    except GovernanceCleanupError as exc:
+        return _governance_cleanup_launch_result(
+            exc,
+            root_uuid=root_uuid,
+            mode=mode,
+        )
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+            raise
+        return {"success": False, "error_kind": "admission_failed", "error": str(exc)}
+    if admission.get("deduplicated"):
+        return admission
+    claim = admission["claim"]
+
+    async def prepared_runner() -> None:
+        def cancel_check() -> bool:
+            return carto_cancel_requested(job_file)
+
+        scope = cancel_scope_factory(cancel_check) if cancel_scope_factory else nullcontext()
+        try:
+            with scope:
+                if cancel_check():
+                    raise asyncio.CancelledError("Prepared CARTO cancellation requested before B0")
+                selection = await obtain_freshness()
+                if cancel_check():
+                    raise asyncio.CancelledError("Prepared CARTO cancellation requested after B0")
+                _merge_job_identity(
+                    job_file,
+                    {
+                        "freshness_disposition": selection["freshness_disposition"],
+                        "snapshot_path": selection["snapshot_path"],
+                        "snapshot_lineage": selection.get("snapshot_lineage"),
+                    },
+                )
+                prepared_payload = dict(frozen_payload or {})
+                prepared_payload["_job_file"] = str(job_file)
+                prepared_payload["_claim_id"] = str(claim["claim_id"])
+                value = preparation(prepared_payload, selection)
+                if inspect.isawaitable(value):
+                    value = await value
+                gate = dict(preparation_gate(value) if preparation_gate else {"proceed": True})
+                if not gate.get("proceed"):
+                    status = str(gate.get("status") or "failed")
+                    _persist_terminal_job(
+                        job_file,
+                        status,
+                        gate.get("error"),
+                        result_summary=gate.get("result_summary") or {"preparation": value},
+                    )
+                    try:
+                        await finalize_claim_async(str(claim["claim_id"]), jobs)
+                    except GovernanceCleanupError as cleanup_error:
+                        _persist_governance_cleanup_failure(job_file, cleanup_error)
+                    return
+                spawned = await _spawn_governed_worker(
+                    claim=claim,
+                    job_file=job_file,
+                    log_file=log_file,
+                    jobs_root=jobs,
+                    worker_script=worker_path,
+                    worker_mode="carto_refresh",
+                    env=env,
+                    popen_factory=popen_factory,
+                )
+                if not spawned.get("success"):
+                    return
+        except BaseException as exc:
+            if isinstance(exc, asyncio.CancelledError) or cancel_check():
+                try:
+                    await finalize_cancelled_job_claim_async(
+                        job_file,
+                        str(claim["claim_id"]),
+                        jobs_root=jobs,
+                        diagnostic=lambda message: LOGGER.warning(message),
+                    )
+                except GovernanceCleanupError as cleanup_error:
+                    _persist_governance_cleanup_failure(
+                        job_file,
+                        cleanup_error,
+                        primary_error=exc,
+                    )
+            else:
+                # S04 Remediation Chain 2 (work-order item 2): a coherence
+                # hard-stop refusal from the prepared task's execution-side
+                # recheck persists TYPED coherence_barrier_active job
+                # diagnostics (mirroring the detached worker's recheck
+                # shape); zero preparation disk/API/cache mutation occurred
+                # and the worker is never spawned.  Lazy import: this module
+                # must stay import-clean of the coherence package (circular
+                # via coherence.durable_io -> this module).
+                from .coherence.errors import CoherenceBarrierActiveError
+
+                if isinstance(exc, CoherenceBarrierActiveError):
+                    # S04 Remediation Chain 5 (work-order item 1): persist
+                    # the standard refusal_extra() payload alongside the
+                    # typed code so system.job.status exposes the recovery
+                    # contract for this execution-side refusal too.
+                    _persist_terminal_job(
+                        job_file,
+                        "failed",
+                        f"coherence_barrier_active: {exc}",
+                        error_kind="coherence_barrier_active",
+                        error_extra=exc.refusal_extra(),
+                    )
+                else:
+                    _persist_terminal_job(job_file, "failed", str(exc))
+                try:
+                    await finalize_claim_async(str(claim["claim_id"]), jobs)
+                except GovernanceCleanupError as cleanup_error:
+                    _persist_governance_cleanup_failure(
+                        job_file,
+                        cleanup_error,
+                        primary_error=exc,
+                    )
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+
+    try:
+        task = task_factory(prepared_runner())
+        if task_observer is not None:
+            task_observer(job_id, task)
+    except BaseException as exc:
+        scheduling_error = f"Prepared task scheduling failed: {exc}"
+        _persist_terminal_job(job_file, "failed", scheduling_error)
+        try:
+            await finalize_claim_async(str(claim["claim_id"]), jobs)
+        except GovernanceCleanupError as cleanup_error:
+            combined = _persist_governance_cleanup_failure(
+                job_file,
+                cleanup_error,
+                primary_error=scheduling_error,
+            )
+            if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                raise
+            return {
+                "success": False,
+                "error_kind": "governance_cleanup_required",
+                "error": combined,
+                "blocking_artifacts": list(cleanup_error.artifact_paths),
+            }
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+            raise
+        return {"success": False, "error_kind": "scheduling_failed", "error": str(exc)}
+
+    ack = _job_ack_from_claim(claim, governance_paths(jobs), deduplicated=False)
+    ack.update(
+        {
+            "mode": "carto_refresh",
+            "preparing": True,
+            "note": "Prepared CARTO_REFRESH admitted; background freshness and preparation scheduled.",
+        }
+    )
+    return ack
+
+
+# @beacon[
+#   id=carto-governance@worker-claim-adoption,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-reconcile,mci-lease-carto,
+#   kind=ast,
+#   comment=Detached-worker first-action claim adoption by job-id suffix plus claim-id verification, serialized against sweep/reap before client construction or cache bootstrap.,
+# ]
+def adopt_carto_worker_claim(
+    job_file: str | os.PathLike[str],
+    *,
+    pid: int | None = None,
+    pid_create_time: float | None = None,
+    pid_start_ticks: int | None = None,
+    pid_boot_id: str | None = None,
+) -> dict[str, Any]:
+    job_path = Path(job_file)
+    job = _read_json(job_path)
+    job_id = str(job.get("id") or "")
+    claim_id = str(job.get("claim_id") or "")
+    if not job_id or not claim_id:
+        raise GovernanceConflictError("CARTO job JSON lacks id/claim_id; worker adoption refused.")
+    paths = governance_paths(job_path.parent)
+    candidates = (
+        list(paths.claims_dir.glob(f"*.{job_id}.lock.json")) if paths.claims_dir.exists() else []
+    )
+    if len(candidates) != 1:
+        raise GovernanceConflictError(
+            f"Expected one claim suffix match for job '{job_id}', found {len(candidates)}; zero mutation work allowed."
+        )
+    owner_identity = _caller_identity_or_defaults(
+        pid=pid,
+        pid_create_time=pid_create_time,
+        pid_start_ticks=pid_start_ticks,
+        pid_boot_id=pid_boot_id,
+    )
+    with os_lock(paths.admission_mutex):
+        claim = read_claim(candidates[0])
+        if claim.get("claim_id") != claim_id:
+            raise GovernanceConflictError(
+                "Claim-id mismatch during worker adoption; zero mutation work allowed."
+            )
+        # U01 C5 (R2 self-authority): pid equal AND the claim's stable fields
+        # — when present — exactly equal the adopting worker's; a legacy claim
+        # (no stable fields) decides on pid equality alone; the epoch
+        # create-time is never consulted.
+        same_owner = _stored_identity_matches_current(
+            StoredOwnerIdentity.from_claim_dict(claim), owner_identity
+        ) and claim.get("execution_owner") == "detached_worker"
+        if claim.get("handoff_state") in {"preparing", "spawning"}:
+            # U01 S3: all four owner fields from the ONE worker identity.
+            claim["pid"] = owner_identity.pid
+            claim["pid_create_time"] = float(owner_identity.create_time)
+            claim["pid_start_ticks"] = owner_identity.start_ticks
+            claim["pid_boot_id"] = owner_identity.boot_id
+            claim["handoff_state"] = "running"
+            claim["execution_owner"] = "detached_worker"
+            write_claim(claim, paths.jobs_root)
+        elif claim.get("handoff_state") == "running" and same_owner:
+            pass
+        else:
+            raise GovernanceConflictError(
+                "Claim belongs to another worker identity; zero mutation work allowed."
+            )
+        _merge_job_identity(
+            job_path,
+            {
+                "status": "running",
+                "handoff_state": "running",
+                "pid": owner_identity.pid,
+                "pid_create_time": float(owner_identity.create_time),
+                "pid_start_ticks": owner_identity.start_ticks,
+                "pid_boot_id": owner_identity.boot_id,
+                "execution_owner": "detached_worker",
+            },
+        )
+        return {"job": _read_json(job_path), "claim": claim, "claim_path": str(candidates[0])}
+
+
+__all__ = [
+    "AdmissionBusyTimeoutError",
+    "AdmissionRefusal",
+    "AdmissionUnavailableError",
+    "CARTO_CANCEL_OUTCOMES",
+    "CANCELLATION_SENTINEL_REQUIRED_FIELDS",
+    "CLAIM_REQUIRED_FIELDS",
+    "DEFAULT_COOLDOWN_SECONDS",
+    "DEFAULT_MUTEX_WAIT_SECONDS",
+    "DEFAULT_ORPHAN_GRACE_SECONDS",
+    "DEFAULT_SPAWN_GRACE_SECONDS",
+    "DEFAULT_START_GRACE_SECONDS",
+    "FootprintComparisonError",
+    "FootprintUnresolvableError",
+    "GovernanceConflictError",
+    "GovernanceCleanupError",
+    "GovernancePaths",
+    "GovernanceStateUnclassifiableError",
+    "MutexWaitCancelledError",
+    "PHASE_C_ORIGIN_MATRIX",
+    "ProcessIdentity",
+    "ProcessIdentityError",
+    "Q3LeaseAcquisitionError",
+    "Q3_LEASE_REQUIRED_FIELDS",
+    "StoredOwnerIdentity",
+    "SweepResult",
+    "TOMBSTONE_REQUIRED_FIELDS",
+    "acquire_os_lock",
+    "acquire_os_lock_async",
+    "acquire_q3_leases",
+    "acquire_q3_leases_async",
+    "acquire_q3_leases_locked",
+    "admit_carto_job",
+    "admit_carto_job_locked",
+    "adopt_carto_worker_claim",
+    "async_os_lock",
+    "atomic_write_json",
+    "build_claim",
+    "build_q3_lease",
+    "build_tombstone_from_claim",
+    "cancel_carto_job",
+    "carto_cancel_requested",
+    "canonical_json_array",
+    "canonicalize_path",
+    "cancellation_sentinel_path",
+    "claim_path_for",
+    "classify_legacy_pid_liveness",
+    "classify_owner_liveness",
+    "cleanup_carto_auxiliary_artifacts",
+    "cleanup_carto_auxiliary_artifacts_locked",
+    "compute_footprint",
+    "create_cancellation_sentinel",
+    "current_process_identity",
+    "delete_cancellation_sentinel",
+    "derive_account_scope_id",
+    "derive_artifact_key",
+    "derive_dedupe_key",
+    "derive_preparation_input_digest",
+    "derive_region_key",
+    "finalize_cancelled_job_claim",
+    "finalize_cancelled_job_claim_async",
+    "finalize_claim",
+    "finalize_claim_async",
+    "finalize_claim_locked",
+    "footprints_overlap",
+    "get_jobs_root",
+    "governance_paths",
+    "normalize_api_base_url",
+    "negative_exact_intent_gate",
+    "negative_exact_intent_gate_locked",
+    "os_lock",
+    "q3_lease_path_for",
+    "read_cancellation_sentinel",
+    "read_claim",
+    "read_process_identity",
+    "read_q3_lease",
+    "read_tombstone",
+    "release_q3_leases",
+    "release_q3_leases_async",
+    "release_q3_leases_locked",
+    "retry_cleanup_obligations_async",
+    "pending_cleanup_obligations",
+    "inspect_carto_job_liveness",
+    "launch_carto_refresh_job",
+    "load_usable_nodes_export_snapshot",
+    "sweep_region_governance",
+    "sweep_region_governance_locked",
+    "tombstone_path_for",
+    "utc_now_iso",
+    "validate_cancellation_sentinel",
+    "validate_claim",
+    "validate_footprint",
+    "validate_q3_lease",
+    "validate_tombstone",
+    "write_claim",
+    "write_q3_lease",
+    "write_tombstone_max_merge",
+]

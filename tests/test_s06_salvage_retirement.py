@@ -1,0 +1,269 @@
+"""S06 Gate C — salvageable-subtrees retirement (per-file refresh).
+
+Proves refresh_file_node_beacons no longer collects/restores/parks any
+emoji-prefixed subtree, that identity-seed preserve_ids still flow into
+source_json (while emoji alone adds nothing), that the parse-error promotion
+runs on the narrow sentinel predicate, and that dry-run performs zero
+salvage moves/creates.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import nexus_map_codebase
+from workflowy_mcp.client import api_client_nexus, workflowy_move_reconcile
+from workflowy_mcp.client.api_client_nexus import (
+    WorkFlowyClientNexus,
+    _is_cartographer_parse_error_sentinel,
+)
+
+REPO = Path(__file__).resolve().parents[1]
+NEXUS = REPO / "src" / "workflowy_mcp" / "client" / "api_client_nexus.py"
+
+_PY_FIXTURE = b"""# @beacon[
+#   id=first,
+#   slice_labels=alpha,
+#   kind=ast,
+# ]
+def target():
+    return 1
+"""
+
+# A Python file with a genuine syntax error: Cartographer emits a
+# "⚠️ Parse Error" sentinel child.
+_PY_BROKEN = b"""def broken(:
+    return
+"""
+
+_MD_USER_HEADING = "# 📝 Parse error analysis\n\nSome user prose.\n"
+
+_MD_SAME_EMOJI_USER_HEADING = "# ⚠️ My parse error analysis\n\nSome user prose.\n"
+
+
+def _run_refresh(
+    monkeypatch,
+    tmp_path: Path,
+    fixture_bytes: bytes,
+    fixture_name: str,
+    *,
+    diagnostic_parent_id: str | None = None,
+    dry_run: bool = False,
+    extra_nodes: list[dict] | None = None,
+    seed_report: dict | None = None,
+):
+    """Drive refresh_file_node_beacons with fakes; return (result, observed)."""
+    source_path = tmp_path / fixture_name
+    source_path.write_bytes(fixture_bytes)
+    file_node = {
+        "id": "FILE",
+        "name": fixture_name,
+        "note": f"Path: {source_path}",
+    }
+    flat = [dict(file_node)] + [dict(n) for n in (extra_nodes or [])]
+    observed: dict = {"moves": [], "creates": [], "updates": [], "deletes": []}
+
+    async def fake_export_nodes_impl(_client, node_id=None, **_kwargs):
+        assert node_id in (None, "FILE")
+        return {"nodes": [dict(n) for n in flat]}
+
+    async def fake_reconcile_tree(**kwargs):
+        observed["source_json"] = kwargs["source_json"]
+        return {"success": True, "dry_run": kwargs["dry_run"]}
+
+    def fake_reconcile_trees_cartographer(source_root, ether_root):
+        if seed_report is not None:
+            source_root["_carto_identity_seed_report"] = seed_report
+
+    async def fake_move(_self, node_id, parent, position):
+        observed["moves"].append((node_id, parent, position))
+        return True
+
+    async def fake_create(_self, req, _internal_call=False, **_kw):
+        observed["creates"].append({"name": req.name, "parent_id": req.parent_id})
+
+        class _Created:
+            id = f"NEW-{len(observed['creates'])}"
+
+        return _Created()
+
+    async def fake_update(_self, node_id, req):
+        observed["updates"].append(node_id)
+        return None
+
+    async def fake_delete(_self, node_id):
+        observed["deletes"].append(node_id)
+        return True
+
+    monkeypatch.setattr(api_client_nexus, "export_nodes_impl", fake_export_nodes_impl)
+    monkeypatch.setattr(workflowy_move_reconcile, "reconcile_tree", fake_reconcile_tree)
+    monkeypatch.setattr(
+        nexus_map_codebase,
+        "reconcile_trees_cartographer",
+        fake_reconcile_trees_cartographer,
+    )
+    monkeypatch.setattr(WorkFlowyClientNexus, "move_node", fake_move)
+    monkeypatch.setattr(WorkFlowyClientNexus, "create_node", fake_create)
+    monkeypatch.setattr(WorkFlowyClientNexus, "update_node", fake_update)
+    monkeypatch.setattr(WorkFlowyClientNexus, "delete_node", fake_delete)
+    monkeypatch.setattr(
+        WorkFlowyClientNexus,
+        "_mark_nodes_export_dirty",
+        lambda _self, _ids: None,
+    )
+    monkeypatch.setenv("CARTO_JOB_DIR", str(tmp_path))
+    monkeypatch.delenv("CARTO_JOB_FILE", raising=False)
+
+    client = object.__new__(WorkFlowyClientNexus)
+    result = asyncio.run(
+        client.refresh_file_node_beacons(
+            "FILE",
+            dry_run=dry_run,
+            diagnostic_parent_id=diagnostic_parent_id,
+        )
+    )
+    return result, observed
+
+
+def test_salvage_methods_are_gone_from_the_class() -> None:
+    assert not hasattr(WorkFlowyClientNexus, "_collect_notes_salvage_context_for_file")
+    assert not hasattr(WorkFlowyClientNexus, "_restore_notes_for_file")
+    assert not hasattr(WorkFlowyClientNexus, "_stash_notes_node")
+    assert not hasattr(api_client_nexus, "NotesSalvageContext")
+    assert not hasattr(api_client_nexus, "_is_notes_name")
+    assert not hasattr(api_client_nexus, "NOTES_MARKER_PREFIXES")
+    assert not hasattr(api_client_nexus, "NOTES_MARKER_FIRST_CODEPOINTS")
+
+
+def test_no_collect_or_restore_calls_or_result_keys(monkeypatch, tmp_path) -> None:
+    result, observed = _run_refresh(monkeypatch, tmp_path, _PY_FIXTURE, "fixture.py")
+    assert result["success"] is True
+    assert "notes_restore" not in result
+    # No salvage moves/creates/deletes of any kind.
+    assert observed["moves"] == []
+    assert observed["deletes"] == []
+    assert observed["source_json"].get("protect_notes_emoji_delete_guard") is None
+    assert "protect_notes_emoji_delete_guard" not in observed["source_json"]
+
+
+def test_identity_seed_preserve_ids_flow_but_emoji_adds_nothing(monkeypatch, tmp_path) -> None:
+    extra = [
+        {"id": "X", "name": "ambiguous identity node", "note": "", "parent_id": "FILE"},
+        {"id": "E", "name": "📝 user notes root", "note": "", "parent_id": "FILE"},
+    ]
+    seed = {"preserve_ids": ["X"], "seeded_count": 0, "ambiguous_count": 0, "preserve_count": 1}
+    _, observed = _run_refresh(
+        monkeypatch, tmp_path, _PY_FIXTURE, "fixture.py",
+        extra_nodes=extra, seed_report=seed,
+    )
+    source_json = observed["source_json"]
+    assert "X" in source_json["explicitly_preserved_ids"]
+    # The 📝-prefixed ordinary node is NOT preserved merely because of emoji.
+    assert "E" not in source_json["explicitly_preserved_ids"]
+    # original_ids_seen still carries every pre-existing node.
+    assert set(source_json["original_ids_seen"]) >= {"FILE", "X", "E"}
+
+
+def test_parse_error_sentinel_still_promotes(monkeypatch, tmp_path) -> None:
+    from j_counterfactual import install_j_counterfactual
+    install_j_counterfactual(monkeypatch)
+    result, observed = _run_refresh(
+        monkeypatch, tmp_path, _PY_BROKEN, "broken.py",
+        diagnostic_parent_id="FOLDER",
+    )
+    # Diagnostics remain outside the retained FILE; there is no empty replacement.
+    assert result["status"] == "failed" and result["reconcile_children"] is None
+    assert "source_json" not in observed
+    assert observed["updates"] == observed["deletes"] == observed["moves"] == []
+    assert observed["creates"], "no diagnostic create occurred"
+    diag = observed["creates"][0]
+    assert diag["parent_id"] == "FOLDER"
+    assert "Parse error" in diag["name"]
+
+
+def test_emoji_prefixed_user_heading_does_not_promote(monkeypatch, tmp_path) -> None:
+    """A Markdown heading '📝 Parse error analysis' matched the OLD broad
+    heuristic (emoji + 'parse error' + nonstructural note); the narrow
+    sentinel predicate must NOT classify it."""
+    _, observed = _run_refresh(
+        monkeypatch, tmp_path, _MD_USER_HEADING.encode("utf-8"), "doc.md",
+        diagnostic_parent_id="FOLDER",
+    )
+    assert observed["creates"] == []
+    new_children = observed["source_json"]["nodes"]
+    assert any("Parse error analysis" in str(c.get("name", "")) for c in new_children)
+
+
+def test_same_emoji_user_heading_does_not_promote(monkeypatch, tmp_path) -> None:
+    """THE dangerous boundary (A1): a user-authored ⚠️-prefixed heading that
+    merely TALKS about parse errors is not a Cartographer sentinel — it must
+    remain under the Markdown file and create no folder diagnostic."""
+    _, observed = _run_refresh(
+        monkeypatch, tmp_path, _MD_SAME_EMOJI_USER_HEADING.encode("utf-8"), "doc.md",
+        diagnostic_parent_id="FOLDER",
+    )
+    assert observed["creates"] == []
+    new_children = observed["source_json"]["nodes"]
+    assert any("My parse error analysis" in str(c.get("name", "")) for c in new_children)
+
+
+def test_sentinel_predicate_shape() -> None:
+    # All five producer forms, bare and with the _warn_name timestamp suffix.
+    for base in (
+        "⚠️ MD Parse Error",
+        "⚠️ Parse Error",
+        "⚠️ Parse Error (JS/TS)",
+        "⚠️ Parse Error (VUE script JS/TS)",
+        "⚠️ Parse Error (VUE)",
+    ):
+        assert _is_cartographer_parse_error_sentinel(base), base
+        assert _is_cartographer_parse_error_sentinel(f"{base} [2026-08-28 03:20:19]"), base
+    # Producer-exact: same-emoji user headings that merely mention parse
+    # errors are NOT sentinels (A1 — the dangerous boundary).
+    assert not _is_cartographer_parse_error_sentinel("⚠️ My parse error analysis")
+    assert not _is_cartographer_parse_error_sentinel("⚠️ Please review this parse error later")
+    assert not _is_cartographer_parse_error_sentinel("⚠️ Parse error in my thought process")
+    # Narrow by design (other emoji / no emoji / different warning kinds).
+    assert not _is_cartographer_parse_error_sentinel("📝 Parse error analysis")
+    assert not _is_cartographer_parse_error_sentinel("Parse Error")
+    assert not _is_cartographer_parse_error_sentinel("⚠️ something else")
+    assert not _is_cartographer_parse_error_sentinel("⚠️ Cartographer virtual group marker error")
+    assert not _is_cartographer_parse_error_sentinel("")
+    assert not _is_cartographer_parse_error_sentinel("🚨 Parse error: x.py")  # 🚨 ≠ ⚠
+    # Suffix tolerance is timestamp-shaped only — bracketed prose does NOT
+    # turn a non-sentinel into one.
+    assert not _is_cartographer_parse_error_sentinel("⚠️ My parse error analysis [2026-08-28 03:20:19]")
+
+
+def test_dry_run_performs_zero_salvage_or_diagnostic_moves_creates(monkeypatch, tmp_path) -> None:
+    _, observed = _run_refresh(
+        monkeypatch, tmp_path, _PY_BROKEN, "broken.py",
+        diagnostic_parent_id="FOLDER", dry_run=True,
+    )
+    assert observed["moves"] == []
+    assert observed["creates"] == []
+    assert observed["deletes"] == []
+    assert observed["updates"] == []
+
+
+def test_nexus_module_has_no_salvage_vocabulary() -> None:
+    source = NEXUS.read_text(encoding="utf-8")
+    for token in (
+        "NotesSalvageContext",
+        "_collect_notes_salvage_context_for_file",
+        "_restore_notes_for_file",
+        "NOTES_MARKER_PREFIXES",
+        "NOTES_MARKER_FIRST_CODEPOINTS",
+        "_is_notes_name(",
+        "protect_notes_emoji_delete_guard",
+        "_stash_notes_node",
+        "stashed_notes_by_abs_path",
+        "Notes (salvaged)",
+        "notes_stashed",
+        "notes_moved_to_root",
+        "notes_reattached",
+        "notes_unmatched",
+        "ra-notes-salvage",
+    ):
+        assert token not in source, f"retired salvage token {token!r} still in api_client_nexus.py"

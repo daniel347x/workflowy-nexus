@@ -1,0 +1,674 @@
+"""Operation-boundary cache authority and the transition COW bridge (S03 §4/§6/§7).
+
+Every cache-backed operation adopts exactly ONCE at its async boundary,
+captures one immutable :class:`OperationCacheSnapshot`, and sees that one
+generation end-to-end (invariants 2/3).  Nested calls reuse the task-local
+snapshot; they never re-check the manifest.  Synchronous pure helpers
+receive the captured map explicitly (or read the task-local snapshot in
+transitional adapters) and never perform manifest/replay I/O.
+
+The transition COW bridge (:func:`publish_local_cache_view`, §6.2) wraps
+the surviving legacy eager cache patchers: each transform runs against a
+PRIVATE working copy (containers copied by the bridge; node dicts cloned
+by the transform before mutation — the H4-sanctioned extraction), the
+successor publishes atomically with UNCHANGED adopted markers, and legacy
+dirty-ID bookkeeping commits under the same publisher mutex (§6.2 dirty
+coupling).
+
+Read-your-writes (§6.3, task-scoped per W1): a successful COW publication
+from the current operation replaces that TASK's snapshot with a same
+operation-id / same-epoch / same-sequence snapshot carrying the new
+content, so sequential post-mutation verifiers observe their own writes.
+Other already-running operations remain pinned to their prior immutable
+views; subtasks spawned AFTER the publication inherit the advanced
+snapshot; concurrently-running sibling subtasks legitimately keep the
+prior same-generation snapshot.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextvars
+import inspect
+import secrets
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass, replace
+from typing import Any
+
+from .cache_view import is_unpopulated_view
+from .cache_view import CacheView, CacheViewPublisher, prepare_cow_payload
+from .errors import CacheViewError, CoherenceStateMissingError
+from .transition_effects import (
+    TransitionEffect,
+    apply_transition_effects_to_nodes,
+    derive_transition_effects,
+)
+
+# ---------------------------------------------------------------------------
+# Operation snapshot + task-local transport
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@OperationCacheSnapshot-o0hg,
+#   role=OperationCacheSnapshot,
+#   slice_labels=mci-cache-boundary,
+#   kind=ast,
+# ]
+class OperationCacheSnapshot:
+    """One operation's pinned cache generation (S03 §4).
+
+    ``nodes_export`` and ``nodes_by_id`` are the EXACT structures owned by
+    ``view`` — never reacquired independently.
+
+    S03-B1 additions:
+
+    - ``dirty_ids`` (B1.1): the legacy dirty-ID set captured ATOMICALLY with
+      ``view`` under one publisher-synchronized read, so consumers never
+      observe content/dirty bookkeeping half-transitioned.  Empty for
+      coherence-internal/test publishers with no dirty bookkeeping.
+    - ``owner`` (B1.2): the originating cache authority identity (the
+      client's ``CacheViewPublisher`` when one exists, else the client).
+      A nested boundary reuses this snapshot ONLY when its own authority
+      is the same object — a cross-client nested call captures a fresh
+      snapshot for its own authority instead of borrowing a foreign
+      generation.
+    - ``boundary_status`` (S04 §7.6): the coherence boundary state
+      (hard barrier + external dirt) captured AT the operation's adoption
+      boundary via the client's optional ``_coherence_boundary_status()``
+      hook — None when the authority provides no hook (coherence-internal
+      and harness-double clients).  Read-advisory shaping consumes this
+      captured value ONLY: no manifest read, journal adoption, or fresh
+      hard-stop query ever happens during result shaping (H4).
+
+    - ``archive`` (Archive Reads U1, §4.3.1): the operation's archive
+      context (an ``ArchiveOperationContext`` from
+      :mod:`workflowy_mcp.archive_context` — mode/reason/overlay/state) or
+      None.  Installed by ``archive_operation_scope`` around the handler
+      invocation; ``_snapshot_for_view`` and ``rebase_during_admission``
+      carry it forward unchanged.  Writes never run with an overlay — the
+      three write guards make any violation loud.
+    """
+
+    operation_id: str
+    label: str
+    view: CacheView
+    nodes_export: Mapping[str, Any]
+    nodes_by_id: Mapping[str, Mapping[str, Any]]
+    dirty_ids: frozenset = frozenset()
+    owner: Any = None
+    boundary_status: Any = None
+    archive: Any = None
+
+
+_OPERATION_CACHE_SNAPSHOT: contextvars.ContextVar[OperationCacheSnapshot | None] = (
+    contextvars.ContextVar("workflowy_operation_cache_snapshot", default=None)
+)
+
+
+def current_operation_cache(*, required: bool = True) -> OperationCacheSnapshot | None:
+    """The current task's captured snapshot (transitional adapters only).
+
+    Never triggers I/O, replay, or adoption.  With ``required=True``
+    (default) a missing snapshot is a loud error — a cache consumer outside
+    an operation boundary is a migration bug.
+    """
+
+    snapshot = _OPERATION_CACHE_SNAPSHOT.get()
+    if snapshot is None and required:
+        raise CacheViewError(
+            "no operation cache snapshot is active in this task "
+            "(cache-backed code must run inside a cache_operation_boundary)"
+        )
+    return snapshot
+
+
+def _authority_identity(client: Any) -> Any:
+    """The cache-authority identity for a client (B1.2).
+
+    The client's ``CacheViewPublisher`` when one exists (two handles to the
+    same publisher are the same authority), else the client object itself.
+    """
+
+    publisher = getattr(client, "_cache_view_publisher", None)
+    return publisher if publisher is not None else client
+
+
+def _snapshot_for_view(
+    snapshot: OperationCacheSnapshot,
+    view: CacheView,
+    *,
+    dirty_ids: frozenset | None = None,
+) -> OperationCacheSnapshot:
+    return OperationCacheSnapshot(
+        operation_id=snapshot.operation_id,
+        label=snapshot.label,
+        view=view,
+        nodes_export=view.nodes_export,
+        nodes_by_id=view.nodes_by_id,
+        dirty_ids=snapshot.dirty_ids if dirty_ids is None else dirty_ids,
+        owner=snapshot.owner,
+        archive=snapshot.archive,
+    )
+
+
+# @beacon[
+#   id=auto-beacon@capture_operation_cache-epxd,
+#   role=capture_operation_cache,
+#   slice_labels=mci-cache-boundary,
+#   kind=ast,
+#   comment=Pins the publisher-current welded view and dirty set without journal adoption; an unpopulated view retains the existing refresh-required refusal.,
+# ]
+async def capture_operation_cache(
+    client: Any, label: str, *, cancel_check: Any = None
+) -> OperationCacheSnapshot:
+    """Capture one immutable publisher-current snapshot without journal adoption.
+
+    Seal item 8: an operation boundary is a CACHE-BACKED contract — the
+    unpopulated sentinel (no populated cache) is never converted into an
+    empty-vault snapshot, which downstream consumers would misread as an
+    authoritative zero-node vault.  The refusal uses the actionable
+    refresh-required dialect, creates no snapshot, and sets no ContextVar.
+    """
+
+    view, dirty = client._capture_view_and_dirty()
+    dirty_ids = frozenset(dirty)
+    if is_unpopulated_view(view):
+        raise CoherenceStateMissingError(
+            "nodes-export cache lineage is not populated (bootstrap state); "
+            "run an explicit cache refresh (system.cache.refresh) before "
+            "cache-backed operations",
+        )
+    # S04 §7.6: capture the coherence boundary status AT this local capture
+    # boundary (lock-free, complete-or-old) through the client's optional
+    # hook.  Clients without the hook (coherence-internal test doubles,
+    # harness fixtures) capture None — the read advisory then no-ops.
+    boundary_status: Any = None
+    status_hook = getattr(client, "_coherence_boundary_status", None)
+    if callable(status_hook):
+        boundary_status = status_hook()
+    return OperationCacheSnapshot(
+        operation_id=secrets.token_hex(8),
+        label=label,
+        view=view,
+        nodes_export=view.nodes_export,
+        nodes_by_id=view.nodes_by_id,
+        dirty_ids=dirty_ids,
+        owner=_authority_identity(client),
+        boundary_status=boundary_status,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Admission proof seams — only the typed-region orchestrator may call them
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=auto-beacon@establish_admission_snapshot-267o,
+#   role=establish_admission_snapshot,
+#   slice_labels=mci-cache-rebase,
+#   kind=ast,
+#   comment=Returns the existing same-authority operation boundary without adoption or suspension; the typed-region orchestrator is the sole production caller.,
+# ]
+async def establish_admission_snapshot(
+    client: Any, label: str, *, cancel_check: Any = None
+) -> OperationCacheSnapshot:
+    """Reuse the existing same-authority boundary, without another adoption.
+
+    Region admission is not a second boundary. ``cancel_check`` is retained
+    for the stable seam signature; unchanged-view admission does not run it.
+    """
+
+    existing = _OPERATION_CACHE_SNAPSHOT.get()
+    if existing is not None and existing.owner is _authority_identity(client):
+        return existing
+    raise CacheViewError("typed-region admission requires an existing same-authority operation boundary")
+
+
+def _capture_current_admission_snapshot(
+    client: Any, basis: OperationCacheSnapshot,
+) -> OperationCacheSnapshot:
+    """Capture publisher-current topology without adoption or a cache copy.
+
+    Boundary status, operation identity and archive context belong to the
+    existing boundary, not to a new live manifest/barrier read.
+    """
+    if basis.owner is not _authority_identity(client):
+        raise CacheViewError("admission proof belongs to a different cache authority")
+    welded = getattr(client, "_capture_view_and_dirty", None)
+    if callable(welded):
+        view, dirty_ids = welded()
+    else:
+        publisher = _authority_identity(client)
+        if not isinstance(publisher, CacheViewPublisher):
+            raise CacheViewError("admission proof requires a cache publisher")
+        view, dirty_ids = publisher.capture(), frozenset()
+    if is_unpopulated_view(view):
+        raise CoherenceStateMissingError("admission view is unpopulated; run system.cache.refresh before retrying")
+    return replace(
+        basis, view=view, nodes_export=view.nodes_export, nodes_by_id=view.nodes_by_id,
+        dirty_ids=frozenset(dirty_ids),
+    )
+
+
+# @beacon[
+#   id=auto-beacon@rebase_during_admission-6hhg,
+#   role=rebase_during_admission,
+#   slice_labels=mci-cache-rebase,
+#   kind=ast,
+#   comment=Captures publisher-current proof topology or installs the exact already-proved snapshot; nested and later per-item admissions are proof-only without repinning execution or re-adopting.,
+# ]
+async def rebase_during_admission(
+    client: Any, label: str, *, snapshot: OperationCacheSnapshot | None = None,
+    install: bool = True, cancel_check: Any = None,
+) -> OperationCacheSnapshot:
+    """Rebase ownership proof without silently importing execution content.
+
+    The first top-level region admission may install its exact proved view.
+    Nested/later admissions request ``install=False``. Supplied proofs are
+    validated and reused byte-for-byte, never recaptured after validation.
+    """
+
+    basis = _OPERATION_CACHE_SNAPSHOT.get()
+    if basis is None or basis.owner is not _authority_identity(client):
+        raise CacheViewError(
+            "rebase_during_admission requires an active admission-phase "
+            "operation snapshot in this task"
+        )
+    if snapshot is None:
+        if cancel_check is not None:
+            checked = cancel_check()
+            if inspect.isawaitable(checked):
+                await checked
+        # A yielding cancellation check always precedes the fresh capture.
+        rebased = _capture_current_admission_snapshot(client, basis)
+    else:
+        if snapshot.operation_id != basis.operation_id or snapshot.owner is not basis.owner:
+            raise CacheViewError("admission snapshot is not a proof for this operation/cache authority")
+        rebased = snapshot
+    if install:
+        _OPERATION_CACHE_SNAPSHOT.set(rebased)
+    return rebased
+
+
+# @beacon[
+#   id=coherence@operation-boundary,
+#   slice_labels=ra-coherence,ra-workflowy-cache,mci-cache-boundary,
+#   kind=ast,
+#   comment=One welded local capture per cache-backed boundary with nested reuse and cancellation-safe reset; the typed-region orchestrator may finalize the first execution admission then uses proof-only snapshots for nested and later per-item admissions; isolated new operations clear both ContextVars and the existing COW bridge retains read-your-writes.,
+# ]
+@asynccontextmanager
+async def cache_operation_boundary(
+    client: Any, label: str, *, cancel_check: Any = None
+) -> AsyncIterator[OperationCacheSnapshot]:
+    """The ONE capture boundary per cache-backed operation.
+
+    A nested boundary reuses the current task-local snapshot unchanged (no
+    second manifest check).  Cancellation before capture leaves no
+    context; cancellation/exception during the operation resets the
+    context but never alters the captured view.
+    """
+
+    existing = _OPERATION_CACHE_SNAPSHOT.get()
+    if existing is not None and existing.owner is _authority_identity(client):
+        # B1.2: nested reuse ONLY within the same cache authority.  A nested
+        # boundary naming a DIFFERENT client captures a fresh snapshot for
+        # its own authority (shadowing the outer one until reset) instead of
+        # borrowing a foreign generation.
+        yield existing
+        return
+    snapshot = await capture_operation_cache(client, label, cancel_check=cancel_check)
+    token = _OPERATION_CACHE_SNAPSHOT.set(snapshot)
+    try:
+        yield snapshot
+    finally:
+        _OPERATION_CACHE_SNAPSHOT.reset(token)
+
+
+# @beacon[
+#   id=nexus-archives@archive-operation-scope,
+#   role=archive_operation_scope(context, view=None),
+#   slice_labels=nexus--archives,ra-coherence,
+#   kind=ast,
+#   comment=THE one new writer of _OPERATION_CACHE_SNAPSHOT beside the boundary itself (Archive Reads U1, §4.3.1): sets the task's snapshot to a copy of the current one carrying archive=context — and, when view is given (an augmented view), that view's view/nodes_export/nodes_by_id — with operation_id, label, owner, dirty_ids and boundary_status copied unchanged; the outer snapshot is restored exactly on exit. _snapshot_for_view and rebase_during_admission carry archive forward unchanged; create_isolated_context_task clears the snapshot, so spawned NEW operations never inherit a context (E41).,
+# ]
+@contextmanager
+def archive_operation_scope(
+    context: Any, *, view: "CacheView | None" = None
+) -> Any:
+    """Run one block with the task's snapshot carrying an archive context.
+
+    Archive Reads (§4.3.1): the ONE new writer of
+    ``_OPERATION_CACHE_SNAPSHOT`` besides the boundary itself.  Sets the
+    task's snapshot to a copy of the current one carrying ``archive =
+    context`` — and, when ``view`` is given (an augmented view), that
+    view's ``view``/``nodes_export``/``nodes_by_id`` — with ``operation_id``,
+    ``label``, ``owner``, ``dirty_ids`` and ``boundary_status`` copied
+    unchanged.  The outer snapshot is restored exactly on exit.  Requires
+    an active operation snapshot (the invoker runs inside the boundary).
+    """
+
+    snapshot = _OPERATION_CACHE_SNAPSHOT.get()
+    if snapshot is None:
+        raise CacheViewError(
+            "archive_operation_scope requires an active operation cache "
+            "snapshot (the archive invoker runs inside the operation boundary)"
+        )
+    if view is not None:
+        augmented = OperationCacheSnapshot(
+            operation_id=snapshot.operation_id,
+            label=snapshot.label,
+            view=view,
+            nodes_export=view.nodes_export,
+            nodes_by_id=view.nodes_by_id,
+            dirty_ids=snapshot.dirty_ids,
+            owner=snapshot.owner,
+            boundary_status=snapshot.boundary_status,
+            archive=context,
+        )
+    else:
+        augmented = replace(snapshot, archive=context)
+    token = _OPERATION_CACHE_SNAPSHOT.set(augmented)
+    try:
+        yield
+    finally:
+        _OPERATION_CACHE_SNAPSHOT.reset(token)
+
+
+# @beacon[
+#   id=auto-beacon@create_isolated_context_task-0jn4,
+#   role=create_isolated_context_task,
+#   slice_labels=mci-cache-boundary,
+#   kind=ast,
+# ]
+def create_isolated_context_task(coro: Any, *, name: str | None = None) -> asyncio.Task[Any]:
+    """Spawn a NEW-operation task with the cache-operation ContextVar cleared.
+
+    ``asyncio.create_task`` COPIES the current context by default (audit
+    amendment F2): a long-lived watcher, an independently dispatched
+    WS/background job, a detached-job runner, or any task representing a
+    NEW operation must be spawned through this helper so it establishes
+    its own boundary instead of silently pinning the spawner's generation.
+    Short-lived subtasks that ARE the same logical operation should use
+    plain ``asyncio.create_task`` and legitimately inherit the snapshot.
+    Python 3.10+.
+    """
+
+    ctx = contextvars.copy_context()
+    ctx.run(_OPERATION_CACHE_SNAPSHOT.set, None)
+    # U01 §6.5 (A6 — the ONE permitted external write to mutation-lock state):
+    # a NEW-operation spawn must never inherit its submitter's held-key set,
+    # or a background job would skip acquisitions it does not actually hold.
+    from ..mutation_locks import MUTATION_LOCK_STATE
+
+    ctx.run(MUTATION_LOCK_STATE.set, None)
+    kwargs: dict[str, Any] = {"name": name} if name is not None else {}
+    return ctx.run(asyncio.create_task, coro, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Transition COW bridge (§6.2) + read-your-writes overlay (§6.3)
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=coherence@publish-local-cache-view,
+#   slice_labels=ra-coherence,ra-workflowy-cache,mci-cache-boundary,
+#   kind=ast,
+#   comment=Transition COW bridge: archive guard first, private outer containers plus detached changed fragments, explicit transferred build sharing unchanged nodes on every CAS attempt. The winning sparse effects and dirty sample commit under the publisher mutex; retries discard losing bookkeeping. Same-authority task overlays preserve pinned markers and apply only own sparse effects across generations.,
+# ]
+def publish_local_cache_view(
+    publisher: CacheViewPublisher,
+    transform: Callable[[dict[str, Any]], None | dict[str, Any]],
+    *,
+    expected_view: CacheView | None = None,
+    reason: str,
+    commit: Callable[[Mapping[str, TransitionEffect]], None] | None = None,
+    snapshot_dirty_ids: Callable[[], frozenset] | None = None,
+    publishing_authority: Any = None,
+    max_attempts: int = 4,
+) -> CacheView:
+    """Run one legacy eager-cache transform copy-on-write and publish it.
+
+    Contract (§6.2):
+
+    - capture the current view;
+    - clone the private working containers (the bridge copies the payload
+      dict and nodes LIST; ``transform`` must clone any NODE dict before
+      mutating it and may replace ``working["nodes"]`` wholesale);
+    - run the legacy transform privately (semantics unchanged — H4);
+    - detach changed fragments against current and explicitly transfer the
+      candidate; share untouched immutable nodes without copying them;
+    - build the successor with epoch and adopted sequence UNCHANGED;
+    - CAS-publish, running ``commit`` (legacy dirty-ID bookkeeping) under
+      the same publisher mutex so content and bookkeeping never appear
+      half-transitioned;
+    - on a lost race, rebase by re-running the transform against the
+      newer current view (bounded); a perpetual race is a loud
+      ``CacheViewError`` and the legacy dirty/refresh healer operates.
+
+    ``expected_view`` documents the caller's basis INTENT (diagnostic
+    optimism for a pre-computed transform); a stale basis never refuses —
+    it selects the sanctioned rebase onto the newer current view (§12.4).
+
+    ``commit`` (S03-CR-02 sparse repair) is EFFECT-AWARE: it receives the
+    WINNING attempt's derived sparse transition effects (a before/after
+    field mask over the owned vocabulary per touched node, a canonical
+    created record per creation, a tombstone per deletion — see
+    ``coherence.transition_effects.derive_transition_effects``), so the
+    caller can weld per-node effect bookkeeping into the same critical
+    section as the swap.  The effects are recomputed per attempt; a
+    CAS-losing attempt's effects are discarded with the iteration.
+
+    On success the current TASK's operation snapshot gains the operation's
+    own write when the publication belongs to the SAME cache authority (the
+    §6.3 read-your-writes overlay).  Two paths (S03-CR-02 sparse repair):
+    an EQUAL-marker successor advances the task to the cumulative
+    same-generation successor (the sealed §6.3 rule); a NEWER-marker
+    successor — a lineage publication raced the transform's basis — never
+    moves the task's pinned markers and instead applies ONLY the
+    operation's own sparse effect onto its pinned view (Contracts A/B;
+    this SUPERSEDES the 4fb06a1 forward-movement amendment, which imported
+    the complete newer publisher generation into the running operation).
+    Foreign-authority publications still never advance the snapshot (A2).
+
+    S03-B audit amendments (A1/A2):
+
+    - A1: the post-commit dirty state (``snapshot_dirty_ids``) is sampled
+      INSIDE the same publisher critical section as the view swap and the
+      dirty ``commit`` — the bridge wraps ``commit`` so the sample lands in
+      attempt-local storage while the mutex is still held.  A dirty state
+      sampled after the lock could belong to a LATER interleaved
+      publication, welding the wrong bookkeeping to this successor.  The
+      per-attempt capture buffer is re-created on every CAS retry, so a
+      losing attempt can never leak a stale sample into the winning one.
+    - A2: ``publishing_authority`` (default: ``publisher`` itself, which is
+      exactly the B1.2 authority token for publisher-owning clients) is
+      threaded into the task-snapshot advance — a publication from a
+      DIFFERENT client/publisher never rewrites this task's snapshot,
+      even when both authorities legitimately carry identical
+      (epoch, adopted_sequence) markers from the same shared manifest.
+
+    Archive Reads (§4.7.1): write guard #2 — this COW bridge is one of the
+    three chokepoints every cache-mutating write passes; the archive write
+    guard refuses loudly when the running operation is augmented
+    (archive-including).  The guard can only fire on a bug: no write
+    operation ever carries an overlay.
+    """
+
+    from ..archive_context import archive_write_guard
+
+    archive_write_guard("publish_local_cache_view")
+
+    authority = publisher if publishing_authority is None else publishing_authority
+    last_error: Exception | None = None
+    for attempt in range(max_attempts):
+        current = publisher.capture()
+        if expected_view is not None and attempt == 0 and current is not expected_view:
+            # Stale expected basis: rebase onto the newer current view by
+            # simply re-running the transform against it (§12.4).
+            pass
+        working = dict(current.nodes_export)
+        working["nodes"] = list(current.nodes_export["nodes"])
+        result = transform(working)
+        if isinstance(result, Mapping):
+            working = dict(result)
+        working = prepare_cow_payload(current, working)
+        # S03-CR-02: this attempt's SPARSE transition effects (the
+        # canonical before/after field mask per touched node + created
+        # records + tombstones — the transition-mode field authority).
+        # Computed from detached fragments BEFORE ownership transfer; consumed
+        # only by the WINNING attempt's commit inside the critical section
+        # and by the task-local read-your-writes overlay.
+        effects = derive_transition_effects(
+            current.nodes_export["nodes"], working["nodes"]
+        )
+        successor = CacheView.build(
+            epoch_number=current.epoch_number,
+            epoch_id=current.epoch_id,
+            adopted_sequence=current.adopted_sequence,
+            nodes_export=working,
+            account_scope_id=current.account_scope_id,
+            ownership="transferred",
+        )
+        # A1: attempt-local dirty-capture buffer — re-created per attempt,
+        # so a CAS-losing attempt's buffer is discarded with the iteration
+        # and can never leak into the winning attempt.
+        captured_dirty: list[frozenset] = []
+        effective_commit = None
+        if commit is not None or snapshot_dirty_ids is not None:
+
+            def _effective_commit(_effects=effects, _captured=captured_dirty) -> None:
+                # Runs INSIDE publish_with_commit's critical section: the
+                # view swap, the effect-aware dirty/overlay bookkeeping,
+                # and the post-transition dirty sample are ONE atomic
+                # publication (B1.1).  Both bindings close over THIS
+                # attempt's values explicitly (default args) so a later
+                # retry's rebinding can never redirect this attempt's call.
+                if commit is not None:
+                    commit(_effects)
+                if snapshot_dirty_ids is not None:
+                    _captured.append(snapshot_dirty_ids())
+
+            effective_commit = _effective_commit
+        try:
+            published = publisher.publish_with_commit(
+                successor, expected_current=current, commit=effective_commit
+            )
+        except CacheViewError as exc:
+            last_error = exc
+            continue
+        _advance_task_snapshot(
+            published,
+            effects=effects,
+            publishing_authority=authority,
+            dirty_ids=captured_dirty[0] if captured_dirty else None,
+        )
+        return published
+    raise CacheViewError(
+        f"publish_local_cache_view: publication raced {max_attempts} times "
+        f"(reason={reason!r})"
+    ) from last_error
+
+
+def _advance_task_snapshot(
+    published: CacheView,
+    *,
+    effects: Mapping[str, TransitionEffect],
+    publishing_authority: Any = None,
+    dirty_ids: frozenset | None = None,
+) -> None:
+    """§6.3 / W1: the PUBLISHING task's snapshot gains its OWN write.
+
+    Fires only when the active snapshot belongs to the SAME cache authority
+    as the publication.  The sole caller is the transition COW bridge, on
+    behalf of the publishing task's OWN transform.  A publication from an
+    unrelated task can never rewrite this task's ContextVar.
+
+    Two paths, chosen by the successor's markers relative to the pinned
+    snapshot:
+
+    - EQUAL markers (the ordinary case — the transform's basis was the
+      pinned generation's own cumulative COW chain): the SEALED §6.3 rule
+      advances the task to the published successor — same operation id,
+      same epoch, same sequence, carrying the new content (the operation's
+      own write plus any racing SAME-generation patches; the equal-marker
+      cumulative-COW rule, seal item 3/4, makes that sound).  Contract A
+      forbids only NEWER-generation imports, never same-generation ones.
+    - NEWER markers (a lineage publication raced the transform's basis,
+      so the §12.4 rebase rebuilt the successor onto the newer
+      generation): S03-CR-02 SPARSE REPAIR (Contracts A/B — this
+      SUPERSEDES the 4fb06a1 forward-movement amendment, which adopted
+      the complete newer publisher generation into the running operation
+      mid-flight, a direct breach of the locked one-generation invariant
+      S03 §1.2/§6.3).  The task snapshot's markers NEVER move; it gains
+      ONLY the operation's own sparse effect applied onto its pinned view
+      (``apply_transition_effects_to_nodes``).  The process publisher
+      carries the newer generation + the operation's sparse effect; the
+      operation carries its pinned generation + the same sparse effect —
+      read-your-writes without re-adoption.
+
+    S03-B audit amendment A2 (B1.2 completion): the authority check is
+    load-bearing, not redundant.  Two distinct publishers for one account
+    can legitimately carry identical (epoch, adopted_sequence) markers
+    from the same shared manifest while owning SEPARATE process-local COW
+    chains; the equal-marker cumulative-COW rule holds only WITHIN one
+    publisher.  ``publishing_authority`` is the same identity token
+    :func:`_authority_identity` derives at capture (the client's
+    ``CacheViewPublisher`` when one exists, else the client); a
+    publication from any other authority never advances this snapshot.
+
+    Sibling tasks remain pinned (W1 task-scoping): the advance rewrites
+    only THIS task's ContextVar. The sparse overlay is prepared against the
+    PINNED view and transferred, sharing its unchanged nodes read-only.
+    On the cross-generation path, non-owned
+    fields (timestamps, ``data``, unknown metadata) are deliberately NOT
+    overlaid — the sparse effect vocabulary is the owned-field vocabulary;
+    the pinned view's other fields stay at their pinned-generation values
+    by design (Contract B).
+    """
+
+    snapshot = _OPERATION_CACHE_SNAPSHOT.get()
+    if snapshot is None:
+        return
+    if publishing_authority is not None and snapshot.owner is not publishing_authority:
+        # A2: a foreign authority's publication never rewrites this task's
+        # snapshot — equal markers do not make another publisher's COW
+        # chain a valid successor of this operation's pinned view.
+        return
+    if (
+        published.epoch_number == snapshot.view.epoch_number
+        and published.epoch_id == snapshot.view.epoch_id
+        and published.adopted_sequence == snapshot.view.adopted_sequence
+    ):
+        # Sealed §6.3 equal-marker rule: advance to the cumulative
+        # same-generation successor (contains this operation's own write).
+        _OPERATION_CACHE_SNAPSHOT.set(
+            _snapshot_for_view(snapshot, published, dirty_ids=dirty_ids)
+        )
+        return
+    # Cross-generation successor: NEVER move the pinned markers — overlay
+    # only the operation's own sparse effect onto the pinned view.
+    if effects:
+        overlaid_nodes = apply_transition_effects_to_nodes(
+            snapshot.view.nodes_export["nodes"], effects
+        )
+        payload = dict(snapshot.view.nodes_export)
+        payload["nodes"] = overlaid_nodes
+        payload = prepare_cow_payload(snapshot.view, payload)
+        overlaid = CacheView.build(
+            epoch_number=snapshot.view.epoch_number,
+            epoch_id=snapshot.view.epoch_id,
+            adopted_sequence=snapshot.view.adopted_sequence,
+            nodes_export=payload,
+            account_scope_id=snapshot.view.account_scope_id,
+            ownership="transferred",
+        )
+    else:
+        overlaid = snapshot.view
+    _OPERATION_CACHE_SNAPSHOT.set(
+        _snapshot_for_view(snapshot, overlaid, dirty_ids=dirty_ids)
+    )

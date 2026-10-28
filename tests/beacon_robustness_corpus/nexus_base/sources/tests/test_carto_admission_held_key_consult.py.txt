@@ -1,0 +1,585 @@
+"""CUT-1: live held-key admission and fixed BASE compatibility witnesses."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import asdict
+
+import pytest
+from mutation_lease_harness import (
+    ACCOUNT_A, append_tx, async_test, cache_of, effects_create,
+    live_identity, make_lease_env, node,
+)
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp.coherence.admission import (
+    barrier_refusal_extra, require_coherence_mutation_admission,
+)
+from workflowy_mcp.coherence.barrier import (
+    hard_stop_state, raise_global_dirty_barrier, read_coherence_boundary_status,
+)
+from workflowy_mcp.coherence.errors import CoherenceBarrierActiveError
+from workflowy_mcp.coherence.read_advisory import (
+    apply_coherence_advisory_to_text, apply_coherence_read_advisory,
+)
+
+_CACHE = cache_of(
+    ("vault", None), ("repo", "vault"), ("file", "repo"),
+    ("f1", "file"), ("g", "vault"), ("p", "g"),
+)
+
+
+def _admit_kwargs(env, root_uuid="g", **overrides):
+    footprint = gov.compute_footprint(None, root_uuid, _CACHE, kind="file")
+    payload = {"id": "job-candidate", "type": "CARTO_REFRESH"}
+    kwargs = {
+        "job_file": env.jobs_root / "job-candidate.json",
+        "job_payload": payload,
+        "job_type": "CARTO_REFRESH",
+        "dedupe_key": "b" * 64,
+        "account_scope_id": env.account,
+        "footprint": footprint,
+        "launcher": "agent",
+        "parent_job_id": None,
+        "prepared": False,
+        "jobs_root": env.jobs_root,
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
+def _write_claim(env, root_uuid="file", **overrides):
+    identity = live_identity()
+    kwargs = {
+        "job_id": "job-x", "job_type": "CARTO_REFRESH", "dedupe_key": "c" * 64,
+        "account_scope_id": env.account,
+        "footprint": gov.compute_footprint(None, root_uuid, _CACHE, kind="file"),
+        "launcher": "agent", "parent_job_id": None,
+        "launcher_pid": identity.pid, "pid": identity.pid,
+        "pid_create_time": identity.create_time, "pid_start_ticks": identity.start_ticks,
+        "pid_boot_id": identity.boot_id, "handoff_state": "running",
+        "spawn_started_at": None, "execution_owner": "launcher",
+    }
+    kwargs.update(overrides)
+    claim = gov.build_claim(**kwargs)
+    gov.write_claim(claim, env.jobs_root)
+    return claim
+
+
+def _mask_incidental(value, env):
+    """Mask generated identities/time and the isolated root, never wire semantics."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                "<generated>" if item is not None and key in {
+                    "claim_id", "epoch_id", "current_epoch_id", "basis_epoch_id",
+                    "pid", "launcher_pid", "pid_create_time", "pid_start_ticks",
+                    "pid_boot_id", "launched_at", "spawn_started_at", "last_terminal_at",
+                } else _mask_incidental(item, env)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_mask_incidental(item, env) for item in value]
+    if isinstance(value, str):
+        return value.replace(str(env.jobs_root.parent), "<root>")
+    return value
+
+
+async def _boundary_observations(root):
+    env = make_lease_env(root, ACCOUNT_A)
+    result = {}
+    for dirty in (False, True):
+        if dirty:
+            raise_global_dirty_barrier(
+                env.paths, reason_code="ambiguous_commit_outcome", transaction_id="tx-1"
+            )
+        status = await hard_stop_state(env.paths)
+        captured = read_coherence_boundary_status(env.paths)
+        retained = asdict(status)
+        retained.pop("hard_dirty_equivalent", None)
+        retained.pop("blocking_artifacts", None)
+        assert captured == status
+        observations = {
+            "status": retained,
+            "text": apply_coherence_advisory_to_text("payload text", status=status),
+            "structured": apply_coherence_read_advisory({"preview_markdown": "# Doc"}, status=status),
+        }
+        try:
+            await require_coherence_mutation_admission(env.paths, operation="test.mutate")
+        except CoherenceBarrierActiveError as exc:
+            observations["refusal"] = {"message": str(exc), "extra": barrier_refusal_extra(status)}
+        else:
+            observations["refusal"] = None
+        result["dirty" if dirty else "clean"] = _mask_incidental(observations, env)
+    return result
+
+
+def _no_key_observations(root):
+    result = {}
+    for branch in ("success", "dedupe", "stale", "active", "cooldown", "unclassifiable", "claimless"):
+        env = make_lease_env(root / branch, ACCOUNT_A, nodes=_CACHE.values())
+        kwargs = _admit_kwargs(env, root_uuid="file", now_epoch=1700000000.0)
+        if branch in {"dedupe", "active"}:
+            _write_claim(env, dedupe_key=("b" if branch == "dedupe" else "c") * 64)
+        elif branch == "stale":
+            append_tx(env, "1" * 32, effects_create(node("T1")))
+            kwargs.update(footprint_basis_sequence=0, footprint_basis_epoch_id=env.manifest.epoch_id)
+        elif branch == "cooldown":
+            claim = _write_claim(env)
+            gov.finalize_claim(claim["claim_id"], env.jobs_root, now_epoch=1700000000.0)
+        elif branch == "unclassifiable":
+            paths = gov.governance_paths(env.jobs_root)
+            paths.claims_dir.mkdir(parents=True, exist_ok=True)
+            (paths.claims_dir / "broken.lock.json").write_text("{not json", encoding="utf-8")
+        elif branch == "claimless":
+            (env.jobs_root / "legacy.json").write_text(json.dumps({
+                "id": "legacy", "type": "CARTO_REFRESH", "status": "running", "pid": live_identity().pid,
+            }), encoding="utf-8")
+        try:
+            value = gov.admit_carto_job_locked(**kwargs)
+        except gov.AdmissionRefusal as exc:
+            value = exc.to_result()
+        result[branch] = _mask_incidental(value, env)
+    return result
+
+
+# Frozen from real BASE 1c0d1d5c before production edits. Only generated
+# identities/timestamps/root prefixes were masked; see _mask_incidental.
+_BASE_FOOTPRINT = {"kind": "file", "path": None, "root_uuid": "file", "ancestor_chain": ["file", "repo", "vault"]}
+_BASE_CLAIM = {
+    **_BASE_FOOTPRINT, "account_scope_id": "a" * 32, "claim_id": "<generated>",
+    "dedupe_key": "b" * 64, "execution_owner": "launcher", "handoff_state": "spawning",
+    "job_id": "job-candidate", "job_type": "CARTO_REFRESH", "launched_at": "<generated>",
+    "launcher": "agent", "launcher_pid": "<generated>", "parent_job_id": None,
+    "pid": "<generated>", "pid_boot_id": "<generated>", "pid_create_time": "<generated>",
+    "pid_start_ticks": "<generated>", "spawn_started_at": "<generated>",
+}
+_BASE_SUCCESS = {
+    "success": True, "admitted": True, "deduplicated": False, "claim": _BASE_CLAIM,
+    "claim_path": "<root>/cartographer_jobs/.refresh_locks/a359ea0e971a877cb2de5426e52554de009d92f0c788d0f746dcf6dd8ee757dd.job-candidate.lock.json",
+    "job_file": "<root>/cartographer_jobs/job-candidate.json", "continuation_parent": None,
+    "job_payload": {
+        "id": "job-candidate", "type": "CARTO_REFRESH", "claim_id": "<generated>",
+        "dedupe_key": "b" * 64, "account_scope_id": "a" * 32, "footprint": _BASE_FOOTPRINT,
+        "launcher": "agent", "parent_job_id": None, "status": "spawning", "handoff_state": "spawning",
+        "spawn_started_at": "<generated>", "execution_owner": "launcher", "pid": "<generated>",
+        "pid_create_time": "<generated>", "pid_start_ticks": "<generated>", "pid_boot_id": "<generated>",
+    },
+}
+_BASE_ADMISSION = {
+    "success": _BASE_SUCCESS,
+    "active": {
+        "success": False, "error_kind": "overlap_conflict", "error": "Active owner 'job-x' overlaps 'file'.",
+        "conflict": {**_BASE_CLAIM, "job_id": "job-x", "dedupe_key": "c" * 64,
+                     "handoff_state": "running", "spawn_started_at": None},
+    },
+    "claimless": {
+        "success": False, "error_kind": "overlap_conflict",
+        "error": "Claimless legacy CARTO job 'legacy' is alive or unverifiable and globally blocks admission.",
+        "conflict": {"id": "legacy", "pid": "<generated>", "status": "running", "type": "CARTO_REFRESH"},
+    },
+    "cooldown": {
+        "success": False, "error_kind": "cooldown_active", "retry_after": 60.0,
+        "error": "The target overlaps a recently-terminal CARTO region; retry after cooldown. For several node beacon edits, use F12+2 Bulk Apply.",
+        "conflict": {**_BASE_FOOTPRINT, "account_scope_id": "a" * 32, "dedupe_key": "c" * 64,
+                     "job_id": "job-x", "last_terminal_at": "<generated>"},
+    },
+    "dedupe": {
+        "success": True, "job_id": "job-x", "pid": "<generated>", "detached": True,
+        "deduplicated": True, "root_uuid": "file", "job_file": None, "log_file": None,
+        "freshness_disposition": None, "note": "Existing active governed job reused; no second preparation ran.",
+    },
+    "stale": {
+        "success": False, "error_kind": "head_basis_stale", "retry_after": 0.0,
+        "error": "The manifest journal head advanced past the CARTO footprint's basis view; adopt the head and re-derive the footprint before retrying (S05 A1c head-currency).",
+        "conflict": {"basis_epoch_id": "<generated>", "basis_sequence": 0,
+                     "current_epoch_id": "<generated>", "current_head": 1},
+    },
+    "unclassifiable": {
+        "success": False, "error_kind": "governance_state_unclassifiable",
+        "error": "Governance state is unclassifiable at '<root>/cartographer_jobs/.refresh_locks/broken.lock.json'; inspect or remove it manually.",
+        "path": "<root>/cartographer_jobs/.refresh_locks/broken.lock.json",
+    },
+}
+_BASE_WARNING = "⚠️ COHERENCE FAILURE — advisory only; NOT part of the returned content. This cache-backed result may be stale; Workflowy mutations are blocked until a full system.cache.refresh succeeds."
+_BASE_STATUS = {
+    "epoch_id": "<generated>", "journal_head_seq": 0, "hard_dirty": False,
+    "hard_generation": 0, "hard_reason_code": None, "hard_transaction_id": None,
+    "external_dirty": False, "external_generation": 0, "external_mutation_kind": None,
+}
+_BASE_BOUNDARY = {
+    "clean": {"status": _BASE_STATUS, "text": "payload text", "structured": {"preview_markdown": "# Doc"}, "refusal": None},
+    "dirty": {
+        "status": {**_BASE_STATUS, "hard_dirty": True, "hard_generation": 1,
+                   "hard_reason_code": "ambiguous_commit_outcome", "hard_transaction_id": "tx-1"},
+        "text": _BASE_WARNING + "\n\npayload text",
+        "structured": {
+            "preview_markdown": _BASE_WARNING + "\n\n# Doc",
+            "coherence_advisory": {"status": "hard_dirty", "refresh_required": True, "dirty_generation": 1,
+                                   "message": _BASE_WARNING, "reason_code": "ambiguous_commit_outcome", "transaction_id": "tx-1"},
+        },
+        "refusal": {
+            "message": "test.mutate: refused before any side effect — the global coherence dirty barrier is active (generation 1, reason ambiguous_commit_outcome); run a full system.cache.refresh to recover [recovery=refresh]",
+            "extra": {"refresh_required": True, "hard_dirty": True, "dirty_generation": 1,
+                      "recovery": {"family": "system", "verb": "cache.refresh", "params": {}},
+                      "reason_code": "ambiguous_commit_outcome", "transaction_id": "tx-1"},
+        },
+    },
+}
+
+
+def test_t4_no_keys_matches_fixed_base(tmp_path):
+    assert _no_key_observations(tmp_path) == _BASE_ADMISSION
+
+
+@async_test
+async def test_clean_machine_is_byte_identical(tmp_path):
+    assert await _boundary_observations(tmp_path) == _BASE_BOUNDARY
+
+
+@async_test
+async def test_boundary_status_retired_fields_are_absent(tmp_path):
+    """N3 deletion fence, separate from the BASE-passing wire control."""
+    status = await hard_stop_state(make_lease_env(tmp_path / "absence", ACCOUNT_A).paths)
+    assert not hasattr(status, "hard_dirty_equivalent")
+    assert not hasattr(status, "blocking_artifacts")
+
+
+async def _assert_holder_refuses(root, key="file", candidate="file"):
+    from workflowy_mcp.mutation_locks import mutation_node_locks
+
+    env = make_lease_env(root, ACCOUNT_A, nodes=_CACHE.values())
+    async with mutation_node_locks(key):
+        with pytest.raises(gov.AdmissionRefusal) as info:
+            gov.admit_carto_job_locked(**_admit_kwargs(env, candidate, live_mutation_lease_view=_CACHE))
+        assert info.value.to_result() == {
+            "success": False, "error_kind": "overlap_conflict",
+            "error": f"Active mutation lock '{key[:8]}' overlaps CARTO candidate '{candidate}'; retry shortly (refuse, never queue).",
+            "retry_after": 1.0,
+            "conflict": {"owner_kind": "mutation_lock", "node_id": key,
+                         "region": {"kind": "exact_node", "node_uuid": key,
+                                    "ancestor_chain": [key, "repo", "vault"] if key == "file" else ["f1", "file", "repo", "vault"]}},
+        }
+        assert not (env.jobs_root / "job-candidate.json").exists()
+        assert list(gov.governance_paths(env.jobs_root).claims_dir.glob("*.lock.json")) == []
+
+
+@async_test
+async def test_t1_same_task_root_holder_refuses(tmp_path):
+    await _assert_holder_refuses(tmp_path)
+
+
+@async_test
+async def test_t2_descendant_holder_refuses(tmp_path):
+    await _assert_holder_refuses(tmp_path, "f1")
+
+
+@async_test
+async def test_t3_unrelated_holder_admits(tmp_path):
+    from workflowy_mcp.mutation_locks import mutation_node_locks
+
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    async with mutation_node_locks("p"):
+        result = gov.admit_carto_job_locked(**_admit_kwargs(env, "file", live_mutation_lease_view=_CACHE))
+    assert result["success"] is True
+    assert gov.read_claim(result["claim_path"])["root_uuid"] == "file"
+
+
+@async_test
+async def test_t5_no_view_with_holder_refuses(tmp_path):
+    from workflowy_mcp.mutation_locks import mutation_node_locks
+
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    async with mutation_node_locks("file"):
+        with pytest.raises(gov.AdmissionRefusal) as info:
+            gov.admit_carto_job_locked(**_admit_kwargs(env))
+    assert info.value.to_result() == {
+        "success": False, "error_kind": "governance_state_unclassifiable",
+        "error": "Held mutation-lock keys exist but no current adopted view was supplied for chain rehydration; refusing to admit on unproved topology. Retry with a current admission view.",
+    }
+    assert not (env.jobs_root / "job-candidate.json").exists()
+    assert list(gov.governance_paths(env.jobs_root).claims_dir.glob("*.lock.json")) == []
+
+
+def test_empty_registry_without_view_admits(tmp_path):
+    """T5's empty/None preservation control has its own BASE answer."""
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    assert gov.admit_carto_job_locked(**_admit_kwargs(env))["success"] is True
+
+
+@pytest.mark.parametrize("bad", ["absent", "parent", "cycle", "sorted"])
+@async_test
+async def test_t6_unplaceable_keys_build_before_overlap_scan(tmp_path, bad):
+    from workflowy_mcp.mutation_locks import mutation_node_locks
+
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    view = dict(_CACHE)
+    if bad == "parent":
+        view["z_missing"] = {"id": "z_missing", "parent_id": "absent"}
+    elif bad == "cycle":
+        view["z_missing"] = {"id": "z_missing", "parent_id": "z_missing"}
+    keys = ["file", "z_missing"]
+    expected_key = "z_missing"
+    if bad == "sorted":
+        keys += ["a_missing"]
+        expected_key = "a_missing"
+    async with mutation_node_locks(*keys):
+        with pytest.raises(gov.AdmissionRefusal) as info:
+            gov.admit_carto_job_locked(**_admit_kwargs(env, "file", live_mutation_lease_view=view))
+    assert info.value.to_result() == {
+        "success": False, "error_kind": "overlap_conflict", "retry_after": 1.0,
+        "error": f"Held mutation lock '{expected_key[:8]}' cannot be placed in the current admission view for CARTO candidate 'file'; retry shortly (refuse, never queue).",
+        "conflict": {"owner_kind": "mutation_lock", "node_id": expected_key, "region": None,
+                     "reason": "held_key_not_in_admission_view"},
+    }
+    assert not (env.jobs_root / "job-candidate.json").exists()
+    assert list(gov.governance_paths(env.jobs_root).claims_dir.glob("*.lock.json")) == []
+
+
+@async_test
+async def test_t7_continuation_parent_does_not_exempt_holder(tmp_path):
+    from workflowy_mcp.mutation_locks import mutation_node_locks
+
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    parent = _write_claim(env, job_id="parent-job", job_type="CARTO_MARKDOWN_GENERATE")
+    async with mutation_node_locks("file"):
+        with pytest.raises(gov.AdmissionRefusal) as info:
+            gov.admit_carto_job_locked(**_admit_kwargs(
+                env, "file", parent_job_id="parent-job", live_mutation_lease_view=_CACHE,
+            ))
+    assert info.value.details["conflict"]["owner_kind"] == "mutation_lock"
+    assert info.value.details["retry_after"] == 1.0
+    assert not (env.jobs_root / "job-candidate.json").exists()
+    assert [gov.read_claim(p)["claim_id"] for p in gov.governance_paths(env.jobs_root).claims_dir.glob("*.lock.json")] == [parent["claim_id"]]
+
+
+async def _assert_two_task_refusal_then_retry(root):
+    from workflowy_mcp.mutation_locks import mutation_node_locks
+
+    env = make_lease_env(root, ACCOUNT_A, nodes=_CACHE.values())
+    held, release = asyncio.Event(), asyncio.Event()
+
+    async def holder():
+        async with mutation_node_locks("f1"):
+            held.set()
+            await release.wait()
+
+    task = asyncio.create_task(holder())
+    await held.wait()
+    try:
+        with pytest.raises(gov.AdmissionRefusal) as info:
+            await gov.admit_carto_job(**_admit_kwargs(env, "repo", live_mutation_lease_view=_CACHE))
+        assert info.value.kind == "overlap_conflict"
+        assert info.value.details["retry_after"] == 1.0
+        assert info.value.details["conflict"] == {
+            "owner_kind": "mutation_lock", "node_id": "f1",
+            "region": {"kind": "exact_node", "node_uuid": "f1", "ancestor_chain": ["f1", "file", "repo", "vault"]},
+        }
+        assert not (env.jobs_root / "job-candidate.json").exists()
+        assert list(gov.governance_paths(env.jobs_root).claims_dir.glob("*.lock.json")) == []
+    finally:
+        release.set()
+        await task
+    assert (await gov.admit_carto_job(**_admit_kwargs(env, "repo", live_mutation_lease_view=_CACHE)))["success"] is True
+
+
+@async_test
+async def test_t8_two_tasks_release_then_retry(tmp_path):
+    await _assert_two_task_refusal_then_retry(tmp_path)
+
+
+@async_test
+async def test_t9_empty_read_neutralization_rejects_t1_and_t8(tmp_path, monkeypatch):
+    from workflowy_mcp import mutation_locks
+
+    for label, witness in (("t1", _assert_holder_refuses), ("t8", _assert_two_task_refusal_then_retry)):
+        with monkeypatch.context() as patch:
+            patch.setattr(mutation_locks, "registry_held_keys", lambda: frozenset())
+            with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
+                await witness(tmp_path / (label + "-neutralized"))
+        await witness(tmp_path / (label + "-restored"))
+
+
+@async_test
+async def test_t10_base_shaped_files_and_inert_residue(tmp_path):
+    from test_coherence_s02_refresh_claim import _fake_claim
+    from workflowy_mcp.coherence import read_manifest, read_refresh_claim, run_full_refresh
+    from workflowy_mcp.coherence.schema import CoherenceManifest, RefreshPublicationClaim
+
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    _fake_claim(env.paths, status="completed")
+    # BASE-shaped isolated files, with explicit persisted empty fields.
+    manifest_payload = json.loads(env.paths.manifest_path.read_text())
+    claim_payload = json.loads(env.paths.refresh_publication_path.read_text())
+    assert manifest_payload["covered_barrier_required_lease_ids"] == []
+    assert claim_payload["cut_token"]["barrier_required_lease_ids"] == []
+    assert CoherenceManifest.from_dict(manifest_payload) == read_manifest(env.paths)
+    assert RefreshPublicationClaim.from_dict(claim_payload) == read_refresh_claim(env.paths)
+
+    async def fetch():
+        return {"nodes": list(_CACHE.values())}
+
+    outcome = await run_full_refresh(paths=env.paths, fetch=fetch, settle_seconds=0, snapshot_dir=env.snapshot_dir)
+    assert outcome.status == "published"
+    assert json.loads(env.paths.manifest_path.read_text())["covered_barrier_required_lease_ids"] == []
+    new_claim = json.loads(env.paths.refresh_publication_path.read_text())
+    assert new_claim["cut_token"]["barrier_required_lease_ids"] == []
+    assert json.loads(env.paths.manifest_path.read_text())["schema_version"] == 1
+    assert new_claim["cut_token"]["schema_version"] == 2
+
+
+@async_test
+async def test_t10_nonempty_parser_and_compat_carry_are_preserved(tmp_path):
+    """Nonempty parser/compat-patch preservation, not full-refresh behavior."""
+    from workflowy_mcp.coherence import read_manifest, run_compat_patch
+    from workflowy_mcp.coherence.schema import CoherenceManifest, manifest_with_updates, write_manifest
+
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    old = read_manifest(env.paths)
+    write_manifest(env.paths, manifest_with_updates(old, covered_barrier_required_lease_ids=("1" * 32,)),
+                   expected_epoch_id=old.epoch_id, expected_head_seq=old.journal_head_seq)
+    assert CoherenceManifest.from_dict(read_manifest(env.paths).to_dict()).covered_barrier_required_lease_ids == ("1" * 32,)
+    await run_compat_patch(paths=env.paths, patches=[{"id": "file", "name": "renamed"}], snapshot_dir=env.snapshot_dir)
+    assert read_manifest(env.paths).covered_barrier_required_lease_ids == ("1" * 32,)
+
+
+@async_test
+async def test_p7_full_refresh_carries_nonempty_inert_field(tmp_path):
+    """P7 new-behavior witness: BASE overwrites this synthetic receipt."""
+    from workflowy_mcp.coherence import read_manifest, run_full_refresh
+    from workflowy_mcp.coherence.schema import manifest_with_updates, write_manifest
+
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    old = read_manifest(env.paths)
+    write_manifest(env.paths, manifest_with_updates(old, covered_barrier_required_lease_ids=("1" * 32,)),
+                   expected_epoch_id=old.epoch_id, expected_head_seq=old.journal_head_seq)
+
+    async def fetch():
+        return {"nodes": list(_CACHE.values())}
+
+    await run_full_refresh(paths=env.paths, fetch=fetch, settle_seconds=0, snapshot_dir=env.snapshot_dir)
+    assert read_manifest(env.paths).covered_barrier_required_lease_ids == ("1" * 32,)
+
+
+@async_test
+async def test_carto_head_gate_refuses_stale_basis(tmp_path):
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    append_tx(env, "1" * 32, effects_create(node("T1")))
+    with pytest.raises(gov.AdmissionRefusal) as exc_info:
+        gov.admit_carto_job_locked(**_admit_kwargs(
+            env, root_uuid="g", footprint_basis_sequence=0,
+            footprint_basis_epoch_id=env.manifest.epoch_id, live_mutation_lease_view=_CACHE,
+        ))
+    assert exc_info.value.kind == "head_basis_stale"
+    assert exc_info.value.details["conflict"]["current_head"] == 1
+
+
+@async_test
+async def test_carto_head_gate_epoch_change_is_stale(tmp_path):
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    from workflowy_mcp.coherence.schema import manifest_with_updates, new_epoch_id, write_manifest
+
+    write_manifest(env.paths, manifest_with_updates(
+        env.manifest, epoch_number=1, epoch_id=new_epoch_id(), previous_epoch_id=env.manifest.epoch_id,
+    ), expected_epoch_id=env.manifest.epoch_id, expected_head_seq=0)
+    with pytest.raises(gov.AdmissionRefusal) as exc_info:
+        gov.admit_carto_job_locked(**_admit_kwargs(
+            env, root_uuid="g", footprint_basis_sequence=0,
+            footprint_basis_epoch_id=env.manifest.epoch_id, live_mutation_lease_view=_CACHE,
+        ))
+    assert exc_info.value.kind == "head_basis_stale"
+
+
+@async_test
+async def test_adopt_fn_revalidates_and_admits(tmp_path):
+    """Stale basis → adopt → re-derive the footprint from the fresh view."""
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    append_tx(env, "2" * 32, effects_create(node("T1")))
+
+    async def adopt_fn():
+        adoption = await env.client._adopt_coherence_head()
+        return {"view": dict(adoption.view.nodes_by_id), "basis_sequence": adoption.view.adopted_sequence,
+                "basis_epoch_id": adoption.view.epoch_id}
+
+    admission = await gov.admit_carto_job(**_admit_kwargs(
+        env, root_uuid="g", footprint_basis_sequence=0, footprint_basis_epoch_id=env.manifest.epoch_id,
+        live_mutation_lease_view=_CACHE, adopt_fn=adopt_fn,
+    ))
+    assert admission["success"] is True
+    assert admission["claim"]["root_uuid"] == "g"
+
+
+@async_test
+async def test_adopt_fn_second_stale_surfaces_refusal(tmp_path):
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    append_tx(env, "3" * 32, effects_create(node("T1")))
+
+    async def adopt_fn():
+        return {"view": dict(_CACHE), "basis_sequence": 0, "basis_epoch_id": env.manifest.epoch_id}
+
+    with pytest.raises(gov.AdmissionRefusal) as exc_info:
+        await gov.admit_carto_job(**_admit_kwargs(
+            env, root_uuid="g", footprint_basis_sequence=0, footprint_basis_epoch_id=env.manifest.epoch_id,
+            live_mutation_lease_view=_CACHE, adopt_fn=adopt_fn,
+        ))
+    assert exc_info.value.kind == "head_basis_stale"
+
+
+@async_test
+async def test_head_gate_inert_without_basis_or_current(tmp_path):
+    env = make_lease_env(tmp_path, ACCOUNT_A, nodes=_CACHE.values())
+    append_tx(env, "4" * 32, effects_create(node("T1")))
+    admission = gov.admit_carto_job_locked(**_admit_kwargs(env, root_uuid="g"))
+    assert admission["success"] is True
+    admission2 = gov.admit_carto_job_locked(**_admit_kwargs(
+        env, root_uuid="f1", dedupe_key="a" * 64,
+        job_payload={"id": "job-candidate-2", "type": "CARTO_REFRESH"},
+        job_file=env.jobs_root / "job-candidate-2.json", footprint_basis_sequence=1,
+        footprint_basis_epoch_id=env.manifest.epoch_id, live_mutation_lease_view=_CACHE,
+    ))
+    assert admission2["success"] is True
+
+
+def test_t11_retired_plane_and_consult_fence_sensitivity():
+    from test_mutation_leases_s05_fences import (
+        _held_consult_offenders, _retired_offenders_in, _source_pairs,
+    )
+
+    for shape in (
+        "class MutationLeaseSet: pass",
+        "from workflowy_mcp.mutation_lease_governance import acquire_mutation_lease_set_async as acquire\nacquire()",
+        "from workflowy_mcp import mutation_lease_governance as substrate\nsubstrate.mark_mutation_sent(None)",
+        "def bad():\n    mark_mutation_verified(None)",
+    ):
+        assert _retired_offenders_in([("workflowy_mcp/rogue.py", shape)])
+    actor = 'code = "from workflowy_mcp.mutation_lease_governance import mark_mutation_sent as send\\nsend(None)"\nlaunch_actor(code)'
+    assert _retired_offenders_in([("tests/rogue.py", actor)], tests=True)
+    multiplied_actor = '''account = "a" * 32
+common = f"ACCOUNT = {account!r}\\n"
+code = common + "from workflowy_mcp.mutation_lease_governance import mark_mutation_sent as send\\nsend(None)"
+launch_actor(code)
+'''
+    assert _retired_offenders_in([("tests/rogue.py", multiplied_actor)], tests=True)
+    popen_actor = '''code = "from workflowy_mcp.mutation_lease_governance import mark_mutation_sent as send\\nsend(None)"
+subprocess.Popen([sys.executable, "-c", code, str(root)])
+'''
+    assert _retired_offenders_in([("tests/rogue.py", popen_actor)], tests=True)
+    assert not _retired_offenders_in([("tests/fence.py", 'prohibited = "mark_mutation_sent(None)"')], tests=True)
+    assert _retired_offenders_in([("workflowy_mcp/rogue.py", "_HEX_32_RE = None")])
+    assert not _retired_offenders_in([("workflowy_mcp/carto_job_governance.py", "_HEX_32_RE = None")])
+    lock_def = ("workflowy_mcp/mutation_locks.py", "def registry_held_keys(): return frozenset()")
+    prefix = "from .mutation_locks import registry_held_keys\n"
+    valid = prefix + "def admit_carto_job_locked():\n    held = registry_held_keys()\n    return held\n"
+    assert _held_consult_offenders([lock_def, ("workflowy_mcp/carto_job_governance.py", valid)]) == []
+    for shape in (
+        prefix + "def admit_carto_job_locked(): return None",
+        valid + "\ndef elsewhere(): return registry_held_keys()",
+        valid.replace("admit_carto_job_locked", "elsewhere"),
+        prefix + "async def admit_carto_job_locked(): return await asyncio.to_thread(registry_held_keys)",
+        prefix + "def admit_carto_job_locked(): return asyncio.to_thread(lambda: registry_held_keys())",
+    ):
+        assert _held_consult_offenders([lock_def, ("workflowy_mcp/carto_job_governance.py", shape)])
+    assert _retired_offenders_in(_source_pairs()) == []
+    assert _held_consult_offenders(_source_pairs()) == []

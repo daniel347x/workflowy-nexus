@@ -1,0 +1,329 @@
+"""CARTO job GC follow-up -- terminal jobs are collected again.
+
+RECON AND FIX socket [ap:7125X0] (follow-up, program [ap:HJNU1W]).
+``_gc_carto_jobs`` lost its only two callers on 2026-08-22 (commit 6acbea9,
+"Cartographer governance Phase C admission", which replaced the launch bodies
+with wrappers over the shared launch authority and dropped the "opportunistic
+GC" lines).  Every job since stayed on disk (224 JSONs, ~2.5 GB, oldest
+20260822-180304 on the live machine).  A latent second fault would have ended
+any restored pass early: the cancellation path writes an AWARE ``updated_at``
+(``...+00:00``) while every other writer writes a naive UTC one, and comparing
+the aware value with the GC's naive cutoff raised TypeError inside the GC's
+best-effort outer ``except`` -- the whole pass silently stopped there.
+
+Post-fix: the jobs watcher starts one single-flight GC pass (worker thread) at
+startup and every 10 minutes, and timestamps are normalized to naive UTC.
+The job JSONs here are shaped like today's worker output (fields copied from
+the live 2026-09-28 jobs).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from workflowy_mcp import carto_job_governance as gov  # noqa: E402
+from workflowy_mcp import server as srv  # noqa: E402
+from test_carto_governance_phase_d import _claim  # noqa: E402
+
+ACCOUNT = "b" * 32
+
+
+@pytest.fixture(autouse=True)
+def _isolated(monkeypatch, tmp_path):
+    """Governance config double + a private F12 artifact dir (never the real one)."""
+    admission = SimpleNamespace(
+        cooldown_seconds=60,
+        start_grace_seconds=30,
+        spawn_grace_seconds=60,
+        orphan_grace_seconds=120,
+    )
+    monkeypatch.setattr(
+        srv,
+        "get_server_config",
+        lambda: SimpleNamespace(
+            admission=admission,
+            governance=SimpleNamespace(mutex_wait_seconds=10),
+        ),
+    )
+    f12_dir = tmp_path / "f12"
+    f12_dir.mkdir()
+    monkeypatch.setattr(srv, "_get_carto_file_refresh_dir", lambda: str(f12_dir))
+    monkeypatch.setattr(srv, "log_event", lambda *a, **k: None)
+
+
+def _naive(dt: datetime) -> str:
+    return dt.replace(tzinfo=None).isoformat()
+
+
+def _aware(dt: datetime) -> str:
+    return dt.isoformat()
+
+
+def _write_real_shaped_job(
+    jobs: Path,
+    *,
+    job_id: str,
+    status: str,
+    age: timedelta,
+    aware_updated_at: bool = False,
+    claim_id: str | None = None,
+) -> dict:
+    """A CARTO_REFRESH job JSON shaped like today's detached-worker output:
+    aware ``created_at``, naive-UTC ``updated_at`` (aware on the cancellation
+    path), no ``finished_at``, claim identity, a job log and a per-job folder
+    named ``YYYYMMDD-HHMMSS_<id>`` from ``created_at``."""
+    jobs.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc)
+    created = now - age - timedelta(minutes=10)
+    updated = now - age
+    stem = f"{created.strftime('%Y%m%d-%H%M%S')}_{job_id}"
+    log_path = jobs / f"{stem}.log"
+    log_path.write_text("[WEAVE_WORKER] Starting CARTO worker\n", encoding="utf-8")
+    job_dir = jobs / stem
+    job_dir.mkdir()
+    (job_dir / "x_file_refresh_ab12_file.py.json").write_text("{}", encoding="utf-8")
+    payload = {
+        "id": job_id,
+        "type": "CARTO_REFRESH",
+        "mode": "folder",
+        "root_uuid": "7834ca3d-2f6b-47a2-aff4-9138aa57612f",
+        "created_at": _aware(created),
+        "updated_at": _aware(updated) if aware_updated_at else _naive(updated),
+        "cache_refresh_required": True,
+        "freshness_disposition": "performed",
+        "source_regime": "standard",
+        "progress": {
+            "total_files": 401,
+            "completed_files": 401,
+            "current_file": None,
+            "current_phase": "completed",
+            "nodes_created": 6,
+            "nodes_updated": 7,
+            "nodes_moved": 156,
+            "nodes_deleted": 0,
+        },
+        "result_summary": {"files_refreshed": 401, "files_deleted": 0, "errors": []},
+        "error": None,
+        "logs_path": str(log_path),
+        "claim_id": claim_id or "75c096239d4f41e9adae5fe8d0e0410a",
+        "dedupe_key": "e" * 64,
+        "account_scope_id": ACCOUNT,
+        "launcher": "system",
+        "parent_job_id": None,
+        "status": status,
+        "handoff_state": "running",
+        "spawn_started_at": _aware(created + timedelta(minutes=1)),
+        "execution_owner": "detached_worker",
+        "pid": 54540,
+        "pid_create_time": 1790611062.784156,
+        "pid_start_ticks": 17906110627841560,
+        "pid_boot_id": None,
+    }
+    job_path = jobs / f"{stem}.json"
+    job_path.write_text(json.dumps(payload), encoding="utf-8")
+    return {"json": job_path, "log": log_path, "dir": job_dir}
+
+
+OLD = timedelta(days=3)
+RECENT = timedelta(minutes=5)
+
+
+def _mark_discharged(artifacts, *, state="skipped_policy"):
+    """Fixture evidence, not a real policy/publication claim."""
+    path = artifacts["json"]
+    job = json.loads(path.read_text())
+    record = {"schema_version": 2, "job_id": job["id"],
+              "incarnation": srv._carto_job_incarnation(job, path), "path": str(path),
+              "relevant": True, "account_scope_id": job["account_scope_id"],
+              "terminal_proof": {"status": job["status"], "kind": "persisted_terminal"},
+              "state": state, "attempt_token": "fixture-attempt",
+              "skip_reason": "cache_refresh_skip_toggle_active"}
+    marker = path.parent / ".refresh_claims" / f"{job['id']}.claim.json"
+    gov.atomic_write_json(marker, record)
+    return marker
+
+
+def test_old_terminal_clean_exits_are_collected_with_log_and_folder(tmp_path):
+    jobs = tmp_path / "jobs"
+    completed = _write_real_shaped_job(jobs, job_id="carto-refresh-folder-aaaa0001", status="completed", age=OLD)
+    cancelled = _write_real_shaped_job(
+        jobs, job_id="carto-refresh-folder-aaaa0002", status="cancelled", age=OLD, aware_updated_at=True
+    )
+    _mark_discharged(completed)
+    _mark_discharged(cancelled)
+    srv._gc_carto_jobs(str(jobs))
+    for artifacts in (completed, cancelled):
+        assert not artifacts["json"].exists()
+        assert not artifacts["log"].exists()
+        assert not artifacts["dir"].exists()
+
+
+def test_deny_by_default_everything_else_is_kept(tmp_path):
+    jobs = tmp_path / "jobs"
+    kept = [
+        _write_real_shaped_job(jobs, job_id=f"carto-refresh-folder-keep{i:04d}", status=status, age=age)
+        for i, (status, age) in enumerate(
+            [
+                ("failed", OLD),
+                ("completed_with_warnings", OLD),
+                ("running", OLD),
+                ("cancelling", OLD),
+                ("some_future_status", OLD),
+                ("", OLD),
+                ("completed", RECENT),  # terminal but younger than the age limit
+            ]
+        )
+    ]
+    for artifacts in kept:
+        if json.loads(artifacts["json"].read_text())["status"] in {"failed", "completed_with_warnings", "completed"}:
+            _mark_discharged(artifacts)
+    srv._gc_carto_jobs(str(jobs))
+    for artifacts in kept:
+        assert artifacts["json"].exists()
+        assert artifacts["log"].exists()
+        assert artifacts["dir"].exists()
+
+
+def test_an_aware_timestamp_no_longer_ends_the_pass(tmp_path):
+    """CHANGE-DETECTING: pre-fix the aware cancelled job raised TypeError
+    against the naive cutoff before its deletion, and the outer best-effort
+    except ended the whole pass (so any job visited after it survived too)."""
+    jobs = tmp_path / "jobs"
+    first = _write_real_shaped_job(
+        jobs, job_id="a-carto-refresh-folder-cancel", status="cancelled", age=OLD, aware_updated_at=True
+    )
+    second = _write_real_shaped_job(jobs, job_id="b-carto-refresh-folder-done", status="completed", age=OLD)
+    _mark_discharged(first)
+    _mark_discharged(second)
+    srv._gc_carto_jobs(str(jobs))
+    assert not first["json"].exists()
+    assert not second["json"].exists()
+
+
+def test_timestamp_parser_normalizes_to_naive_utc():
+    parse = srv._parse_carto_job_timestamp_utc_naive
+    assert parse("2026-09-25T10:21:32.668256+00:00") == datetime(2026, 9, 25, 10, 21, 32, 668256)
+    assert parse("2026-09-25T06:21:32+04:00") == datetime(2026, 9, 25, 2, 21, 32)
+    assert parse("2026-09-28T16:06:07.186116") == datetime(2026, 9, 28, 16, 6, 7, 186116)
+    assert parse("not a date") is None
+
+
+def test_a_live_claim_still_pins_an_old_terminal_job(tmp_path):
+    jobs = tmp_path / "jobs"
+    claim = _claim(tmp_path, job_id="carto-refresh-folder-pinned")
+    gov.write_claim(claim, jobs)
+    pinned = _write_real_shaped_job(
+        jobs,
+        job_id="carto-refresh-folder-pinned",
+        status="completed",
+        age=OLD,
+        claim_id=claim["claim_id"],
+    )
+    srv._gc_carto_jobs(str(jobs))
+    assert pinned["json"].exists()
+
+
+# ---------------------------------------------------------------------------
+# The trigger: the watcher starts a pass at startup, off the loop thread
+# ---------------------------------------------------------------------------
+
+
+def test_watcher_trigger_runs_one_pass_off_the_loop_then_waits_the_interval(monkeypatch, tmp_path):
+    """CHANGE-DETECTING: pre-fix nothing ever called _gc_carto_jobs."""
+    calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(srv, "_carto_job_gc_last_started", float("-inf"))
+    monkeypatch.setattr(srv, "_carto_job_gc_task", None)
+    monkeypatch.setattr(srv, "_get_carto_jobs_base_dir", lambda: str(tmp_path / "jobs"))
+
+    def _fake_gc(base, *args, **kwargs):
+        calls.append((base, threading.get_ident()))
+
+    monkeypatch.setattr(srv, "_gc_carto_jobs", _fake_gc)
+
+    async def exercise():
+        loop_thread = threading.get_ident()
+        assert srv._maybe_start_carto_job_gc() is True  # startup pass
+        assert srv._maybe_start_carto_job_gc() is False  # single-flight
+        await asyncio.wait_for(srv._carto_job_gc_task, timeout=5)
+        assert srv._maybe_start_carto_job_gc() is False  # inside the 10-minute interval
+        srv._carto_job_gc_last_started -= srv._CARTO_JOB_GC_INTERVAL_S
+        assert srv._maybe_start_carto_job_gc() is True  # next interval
+        await asyncio.wait_for(srv._carto_job_gc_task, timeout=5)
+        return loop_thread
+
+    loop_thread = asyncio.run(exercise())
+    assert [base for base, _ in calls] == [str(tmp_path / "jobs")] * 2
+    assert all(thread != loop_thread for _, thread in calls)
+
+
+def test_a_failing_pass_is_logged_not_raised(monkeypatch):
+    logged: list[str] = []
+    monkeypatch.setattr(srv, "log_event", lambda msg, comp="SERVER": logged.append(msg))
+
+    def _boom(base, *args, **kwargs):
+        raise OSError("share violation")
+
+    monkeypatch.setattr(srv, "_gc_carto_jobs", _boom)
+    asyncio.run(srv._run_carto_job_gc_pass())
+    assert logged == ["CARTO job GC pass failed: share violation"]
+
+
+def test_watcher_loop_wires_the_gc_trigger():
+    import inspect
+
+    assert "_maybe_start_carto_job_gc()" in inspect.getsource(srv._carto_jobs_watcher_loop)
+
+
+@pytest.mark.parametrize("state", ["missing", "legacy", "observing", "uncertain", "pending", "reserved", "malformed", "published", "skipped_policy"])
+@pytest.mark.parametrize("manual", [False, True])
+def test_final_responsibility_pins_job_and_aged_marker_until_disposition(tmp_path, state, manual):
+    jobs = tmp_path / "jobs"
+    artifacts = _write_real_shaped_job(jobs, job_id="pin", status="completed", age=OLD)
+    marker = jobs / ".refresh_claims" / "pin.claim.json"
+    if state != "missing":
+        _mark_discharged(artifacts, state=state)
+        record = json.loads(marker.read_text())
+        if state == "legacy":
+            record = {"job_id": "pin", "claimed_by_pid": os.getpid(), "claimed_at": "2020-01-01"}
+        elif state == "published":
+            from test_carto_final_cache_publication import good_receipt
+            record["receipt"] = good_receipt(account_scope_id=ACCOUNT)
+        gov.atomic_write_json(marker, record)
+        if state == "malformed":
+            marker.write_text("{bad")
+        os.utime(marker, (1, 1))
+    if manual:
+        asyncio.run(srv._clear_carto_job_history(str(jobs)))
+    else:
+        srv._gc_carto_jobs(str(jobs))
+    complete = state in {"published", "skipped_policy"}
+    assert artifacts["json"].exists() is not complete
+    if state != "missing":
+        assert marker.exists() is not complete
+
+
+def test_orphaned_unfinished_marker_is_not_age_or_manual_cleaned(tmp_path):
+    jobs = tmp_path / "jobs"
+    artifacts = _write_real_shaped_job(jobs, job_id="orphan", status="completed", age=OLD)
+    marker = _mark_discharged(artifacts, state="pending")
+    artifacts["json"].unlink()
+    os.utime(marker, (1, 1))
+    srv._gc_carto_jobs(str(jobs))
+    asyncio.run(srv._clear_carto_job_history(str(jobs)))
+    assert marker.exists()

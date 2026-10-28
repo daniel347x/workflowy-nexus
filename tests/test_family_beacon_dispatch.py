@@ -1,0 +1,992 @@
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from workflowy_mcp import server
+from workflowy_mcp.mcp_api_registry import (
+    OperationSpecError,
+    dispatch_operation,
+    make_error,
+    validate_params,
+)
+
+
+def test_beacon_registry_inventory_effects_errors_examples_and_registration():
+    registry = server.BEACON_REGISTRY
+    assert [spec.verb for spec in registry.operations()] == [
+        "snippet",
+        "resolve",
+        "check",
+        "fix",
+        "tags.ensure",
+        "tags.remove",
+        "sync_node",
+        "map.refresh",
+    ]
+    assert registry.resolve("snippet").side_effects == ("pure_read",)
+    assert registry.resolve("resolve").side_effects == ("pure_read",)
+    assert registry.resolve("check").side_effects == ("pure_read",)
+    assert registry.resolve("check").cache_backed is True
+    assert registry.resolve("check").async_mode == "never"
+    assert registry.resolve("fix").side_effects == ("disk_mutation",)
+    assert registry.resolve("fix").cache_backed is True
+    assert registry.resolve("fix").async_mode == "never"
+    assert registry.resolve("tags.ensure").side_effects == ("disk_mutation",)
+    assert registry.resolve("tags.remove").side_effects == ("disk_mutation",)
+    assert registry.resolve("sync_node").side_effects == ("disk_mutation",)
+    assert registry.resolve("map.refresh").side_effects == (
+        "workflowy_mutation",
+        "disk_mutation",
+        "local_state_mutation",
+    )
+    assert registry.resolve("map.refresh").async_mode == "always"
+
+    expected_domain = {
+        "source_read_failed",
+        "beacon_mutation_request_invalid",
+        "beacon_fix_request_invalid",
+        "node_handle_unresolved",
+        "beacon_target_unsupported",
+        "beacon_write_failed",
+        "map_target_invalid",
+        "job_launch_failed",
+        "governance_cleanup_required",
+    }
+    assert expected_domain.issubset(set(registry.error_codes()))
+    index = registry.describe_index()
+    assert [row["verb"] for row in index["operations"]] == [
+        "snippet",
+        "resolve",
+        "check",
+        "fix",
+        "tags.ensure",
+        "tags.remove",
+        "sync_node",
+        "map.refresh",
+        "describe",
+    ]
+    for spec in registry.operations():
+        full = registry.describe_full(spec.verb)
+        assert not set(spec.param_aliases).intersection(full["params_schema"]["properties"])
+        for example in full["examples"]:
+            validate_params(spec, example["call"].get("params") or {})
+
+    map_description = registry.describe_full("map.refresh")["returns"]["description"]
+    assert "bulk Workflowy rewrite" in map_description
+    assert "NEVER loop it" in map_description
+    assert "60-second cooldown" in map_description
+    assert "system.job.cancel" in map_description
+    assert (
+        "Markdown parsing, snippet reads, and dry runs sanitize illegal C0 controls in memory only"
+        in map_description
+    )
+    assert "persistent C0 repair is an explicit, logged atomic mutation" in map_description
+    assert "Unpersisted Workflowy-side edits" in map_description
+    assert "403 WFB(3)" in index["summary"]
+    assert "stale cache is NOT a failed refresh" in index["summary"]
+    ensure_description = registry.describe_full("tags.ensure")["returns"]["description"]
+    assert "zero Workflowy API mutations" in ensure_description
+    assert "Vue template/style spans" in ensure_description
+    assert "run F12+2 first" in ensure_description
+    assert "transient Q3 file-region leases" in ensure_description
+    assert "overlap_conflict" in ensure_description
+    remove_description = registry.describe_full("tags.remove")["returns"]["description"]
+    assert "transient Q3 file-region leases" in remove_description
+    for description in (ensure_description, remove_description):
+        assert "failures skip only that item" in description
+        assert "Default Q3 admission is per canonical file" in description
+        assert "Unexpected item exceptions" in description
+        assert "one all-target admission" in description
+        assert "rows retain findings" in description
+        assert "detail.partial_success=true" in description
+        assert "retry failed/not-run items" in description
+    sync_description = registry.describe_full("sync_node")["returns"]["description"]
+    assert "live structured Workflowy read" in sync_description
+    assert "disk-only writer" in sync_description
+    assert "Q3 file-region lease" in sync_description
+
+    tools = asyncio.run(server.mcp.list_tools())
+    names = {tool.name for tool in tools}
+    assert "beacon" in names
+    assert {
+        "read_text_snippet",
+        "read_text_snippet_by_uuid",
+        "read_text_snippet_by_symbol",
+        "read_uuid_from_symbol",
+        "update_beacon_from_node",
+        "cartographer_refresh_async",
+    }.isdisjoint(names)
+
+
+def test_beacon_registry_routes_all_six_verbs_with_exact_unpack(monkeypatch):
+    calls = []
+
+    async def snippet(handle, file_path=None, symbol_kind="auto", view=None, root_handles=None, format="text"):
+        # U01: the registry normalizes params into a SnippetViewOptions and
+        # passes it as the fourth argument; context rides inside the view.
+        # [ap:WB323O]: root_handles rides as a keyword.
+        calls.append(("snippet", handle, file_path, symbol_kind, view, root_handles, format))
+        return "RAW SOURCE"
+
+    async def resolve(handle, file_path=None, symbol_kind="auto", root_handles=None):
+        calls.append(("resolve", handle, file_path, symbol_kind, root_handles))
+        return {"success": True, "match_count": 0, "candidates": []}
+
+    async def mutate(mode, **kwargs):
+        calls.append(("mutate", mode, kwargs))
+        return {
+            "success": True,
+            "partial_success": False,
+            "mode": mode,
+            "results": [{"status": "committed"}],
+            "files_changed": ["x.py"],
+            "summary": {"committed": 1},
+            "resolution_report": {"resolved": 1},
+        }
+
+    async def sync(handle):
+        calls.append(("sync", handle))
+        return {"success": True, "operation": "beacon.sync_node", "changed": True}
+
+    async def refresh(handle, mode, force=False):
+        calls.append(("refresh", handle, mode, force))
+        return {
+            "success": True,
+            "operation": "beacon.map.refresh",
+            "job": {"id": "J", "state": "queued"},
+        }
+
+    monkeypatch.setattr(server, "_beacon_snippet_impl", snippet)
+    monkeypatch.setattr(server, "_beacon_resolve_impl", resolve)
+    monkeypatch.setattr(server, "_beacon_tags_mutate_impl", mutate)
+    monkeypatch.setattr(server, "_beacon_sync_node_impl", sync)
+    monkeypatch.setattr(server, "_beacon_map_refresh_impl", refresh)
+    registry = server.build_beacon_registry()
+
+    assert (
+        asyncio.run(
+            dispatch_operation(
+                registry,
+                "snippet",
+                {
+                    "symbol": "fn",
+                    "file_path": "server.py",
+                    "symbol_kind": "ast",
+                    "context": 31,
+                },
+            )
+        )
+        == "RAW SOURCE"
+    )
+    assert (
+        asyncio.run(
+            dispatch_operation(
+                registry,
+                "resolve",
+                {"source_handle": "fn", "symbol_kind": "name"},
+            )
+        )["match_count"]
+        == 0
+    )
+    ensured = asyncio.run(
+        dispatch_operation(
+            registry,
+            "tags.ensure",
+            {
+                "symbols": ["fn"],
+                "tags": ["topic"],
+                "comment": "safe",
+                "root_uuid": "ROOT",
+                "favor": "symbol",
+            },
+        )
+    )
+    assert ensured["changed"] is True
+    assert ensured["detail"]["files_changed"] == ["x.py"]
+    removed = asyncio.run(
+        dispatch_operation(
+            registry,
+            "tags.remove",
+            {
+                "operations": [{"symbol": "fn", "tags": ["topic"]}],
+                "root_handles": ["ROOT"],
+            },
+        )
+    )
+    assert removed["operation"] == "beacon.tags.remove"
+    assert (
+        asyncio.run(dispatch_operation(registry, "sync_node", {"node_id": "N"}))["changed"] is True
+    )
+    assert (
+        asyncio.run(
+            dispatch_operation(registry, "map.refresh", {"root_uuid": "F", "mode": "file"})
+        )["job"]["id"]
+        == "J"
+    )
+
+    assert calls[0][:4] == ("snippet", "fn", "server.py", "ast")
+    from workflowy_mcp.snippet_view import SnippetViewOptions
+
+    assert isinstance(calls[0][4], SnippetViewOptions)
+    assert calls[0][4].context == 31
+    assert calls[0][5] is None
+    assert calls[0][6] == "text"
+    assert calls[1:] == [
+        ("resolve", "fn", None, "name", None),
+        (
+            "mutate",
+            "ensure_beacons",
+            {
+                "operations": None,
+                "symbols": ["fn"],
+                "tags": ["topic"],
+                "comment": "safe",
+                "comment_mode": None,
+                "atomic": False,
+                "root_handles": "ROOT",
+                "favor": "symbol",
+            },
+        ),
+        (
+            "mutate",
+            "remove_beacon_tags",
+            {
+                "operations": [{"symbol": "fn", "tags": ["topic"]}],
+                "symbols": None,
+                "tags": None,
+                "comment": None,
+                "comment_mode": None,
+                "atomic": False,
+                "root_handles": ["ROOT"],
+                "favor": "uuid",
+            },
+        ),
+        ("sync", "N"),
+        ("refresh", "F", "file", False),
+    ]
+
+
+def test_beacon_alias_conflicts_and_forbidden_sync_bytes_fail_before_handlers(monkeypatch):
+    async def should_not_run(*_args, **_kwargs):
+        raise AssertionError("envelope validation must fail before the handler")
+
+    monkeypatch.setattr(server, "_beacon_tags_mutate_impl", should_not_run)
+    monkeypatch.setattr(server, "_beacon_sync_node_impl", should_not_run)
+    registry = server.build_beacon_registry()
+
+    alias_conflict = asyncio.run(
+        dispatch_operation(
+            registry,
+            "tags.ensure",
+            {
+                "symbols": ["fn"],
+                "tags": ["x"],
+                "root_uuid": "A",
+                "root_uuids": ["B"],
+            },
+        )
+    )
+    assert alias_conflict["error"]["code"] == "forbidden_parameter"
+    assert "root_uuid" in alias_conflict["error"]["message"]
+    assert "root_handles" in alias_conflict["error"]["message"]
+
+    forbidden = asyncio.run(
+        dispatch_operation(
+            registry,
+            "sync_node",
+            {"node_handle": "N", "name": "caller bytes", "note": "forbidden"},
+        )
+    )
+    assert forbidden["error"]["code"] == "forbidden_parameter"
+    assert "name" in forbidden["error"]["message"]
+    assert "note" in forbidden["error"]["message"]
+
+
+def test_beacon_snippet_uuid_and_symbol_postures_and_standardized_failure(monkeypatch):
+    uuid_calls = []
+
+    async def shared_reader(input_str, context, *, explicit_uuid=False):
+        uuid_calls.append((input_str, context, explicit_uuid))
+        return {
+            "success": True,
+            "snippet": "UUID SOURCE",
+            "file_path": "X.py",
+            "file_lines": ["UUID SOURCE"],
+            "core_start_line": 1,
+            "core_end_line": 1,
+        }
+
+    # U01: the UUID leg resolves through _read_text_snippet_result_impl and
+    # renders the returned dict as the numbered view.
+    monkeypatch.setattr(server, "_read_text_snippet_result_impl", shared_reader)
+    uuid = "12345678-1234-1234-1234-123456789abc"
+    out = asyncio.run(server._beacon_snippet_impl(uuid))
+    assert uuid_calls == [(uuid, 0, True)]
+    assert out.startswith("[snippet: X.py | lines 1-1 of 1 |")
+    assert "1 | UUID SOURCE" in out
+
+    class Client:
+        def __init__(self):
+            self.paths = []
+            self.contexts = []
+
+        async def read_text_snippet_by_symbol(self, *, file_path, symbol, symbol_kind, context, suppress_tags=None, scope_root_ids=None):
+            self.paths.append(file_path)
+            self.contexts.append(context)
+            if file_path:
+                raise RuntimeError("bad path")
+            return {
+                "success": True,
+                "snippet": "SYMBOL SOURCE",
+                "file_path": "X.py",
+                "file_lines": ["SYMBOL SOURCE"],
+                "core_start_line": 1,
+                "core_end_line": 1,
+            }
+
+    client = Client()
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    out = asyncio.run(server._beacon_snippet_impl("fn", "wrong.py", "ast", None))
+    assert client.paths == ["wrong.py", None]
+    assert client.contexts == [0, 0]
+    assert out.startswith("[snippet: X.py | lines 1-1 of 1 |")
+    assert "1 | SYMBOL SOURCE" in out
+
+    async def fail(*_args, **_kwargs):
+        raise server._BeaconOperationError(
+            "source_read_failed", "missing", {"candidates": [{"uuid": "U"}]}
+        )
+
+    monkeypatch.setattr(server, "_beacon_snippet_impl", fail)
+    registry = server.build_beacon_registry()
+    result = asyncio.run(dispatch_operation(registry, "snippet", {"source_handle": "missing"}))
+    assert result["error"]["code"] == "source_read_failed"
+    assert result["error"]["extra"]["candidates"] == [{"uuid": "U"}]
+
+
+def test_beacon_resolve_preserves_nonraising_zero_many_and_rejects_blank(monkeypatch):
+    class Client:
+        async def read_uuid_from_symbol(self, *, file_path, symbol, symbol_kind, suppress_tags=None, scope_root_ids=None):
+            return {
+                "success": True,
+                "match_count": 2,
+                "candidates": [{"uuid": "A"}, {"uuid": "B"}],
+                "truncated": 0,
+            }
+
+    monkeypatch.setattr(server, "get_client", lambda: Client())
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    registry = server.build_beacon_registry()
+    many = asyncio.run(dispatch_operation(registry, "resolve", {"source_handle": "fn"}))
+    assert many["match_count"] == 2
+    assert [row["uuid"] for row in many["candidates"]] == ["A", "B"]
+
+    blank = asyncio.run(dispatch_operation(registry, "resolve", {"source_handle": "   "}))
+    assert blank["error"]["code"] == "invalid_parameter_combination"
+    assert blank["error"]["code"] != "operation_failed"
+
+
+def test_beacon_tags_reuses_one_normalizer_and_preserves_full_q3_ledger(monkeypatch):
+    captured = []
+    legacy = {
+        "success": False,
+        "partial_success": True,
+        "mode": "ensure_beacons",
+        "results": [
+            {"symbol": "a", "status": "committed"},
+            {"symbol": "b", "status": "error"},
+        ],
+        "files_changed": ["a.py"],
+        "summary": {
+            "requested": 2,
+            "committed": 1,
+            "noop": 0,
+            "preflight_failures": 0,
+            "commit_failures": 1,
+        },
+        "resolution_report": {"resolved": 2},
+    }
+
+    async def mutate(*, spec):
+        captured.append(spec)
+        return legacy
+
+    monkeypatch.setattr(server, "_lightning_rod_mutate_beacons", mutate)
+    registry = server.build_beacon_registry()
+    result = asyncio.run(
+        dispatch_operation(
+            registry,
+            "tags.ensure",
+            {
+                "operations": [
+                    {"symbol": "a", "tags": ["x"]},
+                    {"symbol": "b", "tags": ["x"], "comment": "safe"},
+                ],
+                "root_handles": ["ROOT"],
+            },
+        )
+    )
+    assert result["success"] is False
+    assert result["changed"] is True
+    assert result["detail"] is legacy
+    assert captured[0].mode == "ensure_beacons"
+    assert [op.handle for op in captured[0].operations] == ["a", "b"]
+
+    mixed = asyncio.run(
+        dispatch_operation(
+            registry,
+            "tags.ensure",
+            {
+                "operations": [{"symbol": "a", "tags": ["x"]}],
+                "symbols": ["b"],
+                "tags": ["x"],
+                "root_handles": ["ROOT"],
+            },
+        )
+    )
+    assert mixed["error"]["code"] == "beacon_mutation_request_invalid"
+
+    remove_comment = asyncio.run(
+        dispatch_operation(
+            registry,
+            "tags.remove",
+            {
+                "symbols": ["a"],
+                "tags": ["x"],
+                "comment": "forbidden",
+                "root_handles": ["ROOT"],
+            },
+        )
+    )
+    assert "comment" in captured[-1].operations[0].item_error
+    assert remove_comment["detail"] is legacy
+
+
+def test_beacon_sync_node_uses_structured_live_read_and_exact_semantic_bytes(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_acquire_single_beacon_q3_lease",
+        AsyncMock(return_value=[{"lease_id": "test"}]),
+    )
+    monkeypatch.setattr(server, "release_q3_leases_async", AsyncMock(return_value=[]))
+    reads = []
+    writes = []
+    node = SimpleNamespace(
+        name="🔱 exact live name #topic",
+        note='&lt;token&gt; <a href="https://example.test">https://example.test</a>',
+    )
+
+    monkeypatch.setattr(
+        server,
+        "_resolve_beacon_graph_handle",
+        lambda handle: ("UUID", {"resolved_uuid": "UUID", "nodes_by_id": {}}),
+    )
+
+    async def live_read(node_id, as_raw_node=True):
+        reads.append((node_id, as_raw_node))
+        return node
+
+    class Client:
+        async def update_beacon_from_node(self, *, node_id, name, note):
+            writes.append((node_id, name, note))
+            return {
+                "success": True,
+                "operation": "updated_beacon",
+                "source_path": "x.py",
+            }
+
+    monkeypatch.setattr(server, "_node_read_impl", live_read)
+    monkeypatch.setattr(server, "get_client", lambda: Client())
+    result = asyncio.run(server._beacon_sync_node_impl("[ap:ABC123]"))
+    assert reads == [("UUID", False)]
+    assert writes == [
+        (
+            "UUID",
+            "🔱 exact live name #topic",
+            "<token> https://example.test",
+        )
+    ]
+    assert result["operation"] == "beacon.sync_node"
+    assert result["changed"] is True
+
+
+def test_beacon_sync_node_declared_failures_and_virtual_group(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_acquire_single_beacon_q3_lease",
+        AsyncMock(return_value=[{"lease_id": "test"}]),
+    )
+    monkeypatch.setattr(server, "release_q3_leases_async", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        server,
+        "_resolve_beacon_graph_handle",
+        lambda handle: (None, {"candidates": [{"uuid": "A"}, {"uuid": "B"}]}),
+    )
+    registry = server.build_beacon_registry()
+    unresolved = asyncio.run(
+        dispatch_operation(registry, "sync_node", {"node_handle": "ambiguous"})
+    )
+    assert unresolved["error"]["code"] == "node_handle_unresolved"
+    assert len(unresolved["error"]["extra"]["candidates"]) == 2
+
+    monkeypatch.setattr(
+        server,
+        "_resolve_beacon_graph_handle",
+        lambda handle: ("UUID", {"resolved_uuid": "UUID", "nodes_by_id": {}}),
+    )
+
+    async def live_read(_node_id, as_raw_node=True):
+        return SimpleNamespace(name="x", note="")
+
+    class Unsupported:
+        async def update_beacon_from_node(self, **_kwargs):
+            return {"success": False, "reason": "unsupported_extension", "ext": ".txt"}
+
+    monkeypatch.setattr(server, "_node_read_impl", live_read)
+    monkeypatch.setattr(server, "get_client", lambda: Unsupported())
+    unsupported = asyncio.run(dispatch_operation(registry, "sync_node", {"node_handle": "UUID"}))
+    assert unsupported["error"]["code"] == "beacon_target_unsupported"
+
+    class Virtual:
+        async def update_beacon_from_node(self, **_kwargs):
+            return {
+                "success": True,
+                "changed": False,
+                "noop": True,
+                "reason": "virtual_group_noop",
+                "message": "edit source marker",
+            }
+
+    monkeypatch.setattr(server, "get_client", lambda: Virtual())
+    virtual = asyncio.run(server._beacon_sync_node_impl("UUID"))
+    assert virtual["success"] is True
+    assert virtual["changed"] is False
+    assert virtual["warnings"] == ["edit source marker"]
+
+
+def test_beacon_map_refresh_preflight_and_normalized_job(monkeypatch):
+    cache = {
+        "FILE": {"id": "FILE", "name": "server.py", "note": "Path: src/server.py\nLINE COUNT: 10"},
+        "FOLDER": {"id": "FOLDER", "name": "src", "note": "Path: src"},
+        "ROOT": {"id": "ROOT", "name": "repo", "note": "Root: E:/repo"},
+        "AST": {"id": "AST", "name": "fn", "note": "AST_QUALNAME: fn", "parent_id": "FILE"},
+    }
+    current = {"handle": "FILE"}
+
+    def resolve(_handle):
+        key = current["handle"]
+        return key, {"resolved_uuid": key, "nodes_by_id": cache}
+
+    launches = []
+
+    async def launch(root_uuid, mode, extra_job_fields=None):
+        launches.append((root_uuid, mode, extra_job_fields))
+        return {
+            "success": True,
+            "job_id": "J1",
+            "pid": 42,
+            "detached": True,
+            "mode": "carto_refresh",
+            "root_uuid": root_uuid,
+            "job_file": "job.json",
+            "log_file": "job.log",
+            "note": "detached",
+        }
+
+    monkeypatch.setattr(server, "_resolve_beacon_graph_handle", resolve)
+    monkeypatch.setattr(server, "_start_carto_refresh_job", launch)
+
+    file_job = asyncio.run(server._beacon_map_refresh_impl("FILE", "file"))
+    assert file_job == {
+        "success": True,
+        "operation": "beacon.map.refresh",
+        "job": {
+            "id": "J1",
+            "state": "queued",
+            "pid": 42,
+            "detached": True,
+            "mode": "file",
+            "root_uuid": "FILE",
+            "job_file": "job.json",
+            "log_file": "job.log",
+            "note": "detached",
+        },
+    }
+    assert launches == [("FILE", "file", None)]
+
+    current["handle"] = "FOLDER"
+    asyncio.run(server._beacon_map_refresh_impl("FOLDER", "folder"))
+    current["handle"] = "ROOT"
+    asyncio.run(server._beacon_map_refresh_impl("ROOT", "folder"))
+    assert [row[:2] for row in launches] == [
+        ("FILE", "file"),
+        ("FOLDER", "folder"),
+        ("ROOT", "folder"),
+    ]
+
+    current["handle"] = "AST"
+    try:
+        asyncio.run(server._beacon_map_refresh_impl("AST", "file"))
+    except server._BeaconOperationError as exc:
+        assert exc.code == "map_target_invalid"
+    else:  # pragma: no cover
+        raise AssertionError("AST descendants must fail pre-launch")
+    assert len(launches) == 3
+
+    registry = server.build_beacon_registry()
+    bad_mode = asyncio.run(
+        dispatch_operation(registry, "map.refresh", {"node_handle": "FILE", "mode": "sideways"})
+    )
+    assert bad_mode["error"]["code"] == "invalid_enum_value"
+    assert len(launches) == 3
+
+
+def test_beacon_map_refresh_launch_failure_and_undeclared_error_guard(monkeypatch):
+    cache = {"FILE": {"id": "FILE", "name": "x.py", "note": "Path: x.py"}}
+    monkeypatch.setattr(
+        server,
+        "_resolve_beacon_graph_handle",
+        lambda handle: ("FILE", {"resolved_uuid": "FILE", "nodes_by_id": cache}),
+    )
+
+    async def fail(**_kwargs):
+        return {"success": False, "error": "spawn failed"}
+
+    monkeypatch.setattr(server, "_start_carto_refresh_job", fail)
+    registry = server.build_beacon_registry()
+    result = asyncio.run(
+        dispatch_operation(registry, "map.refresh", {"node_handle": "FILE", "mode": "file"})
+    )
+    assert result["error"]["code"] == "job_launch_failed"
+
+    cleanup_payload = {
+        "success": False,
+        "error_kind": "governance_cleanup_required",
+        "error": "claim cleanup remains blocked",
+        "blocking_artifacts": ["claim.lock.json"],
+        "primary_error": "initial job JSON write failed",
+        "root_uuid": "FILE",
+        "mode": "file",
+    }
+
+    async def cleanup_required(**_kwargs):
+        return dict(cleanup_payload)
+
+    monkeypatch.setattr(server, "_start_carto_refresh_job", cleanup_required)
+    cleanup_result = asyncio.run(
+        dispatch_operation(registry, "map.refresh", {"node_handle": "FILE", "mode": "file"})
+    )
+    assert cleanup_result["success"] is False
+    assert cleanup_result["error"]["code"] == "governance_cleanup_required"
+    assert cleanup_result["error"]["extra"] == cleanup_payload
+
+    spec = registry.resolve("snippet")
+    try:
+        make_error(
+            family="beacon",
+            operation="beacon.snippet",
+            code="invented_domain_code",
+            message="must fail",
+            operation_spec=spec,
+        )
+    except OperationSpecError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("undeclared domain errors must fail closed")
+
+
+@pytest.fixture(autouse=True)
+def _no_workflowy_tab_suppress_list(monkeypatch):
+    """NBBW [ap:3ACUQS]: beacon symbol resolution reads the live #wfy-suppress
+    list from a Workflowy tab; these tests have no tab, so it is stubbed empty."""
+
+    async def _empty():
+        return []
+
+    monkeypatch.setattr("workflowy_mcp.server._beacon_symbol_suppress_tags", _empty)
+
+
+# ---------------------------------------------------------------------------
+# [ap:G5C9BX] beacon.snippet / beacon.resolve accept an 8-hex UUID segment
+# ---------------------------------------------------------------------------
+
+FULL_A = "1edcc8a4-aaaa-4444-8888-000000000001"
+FULL_B = "1edcc8a4-bbbb-4444-8888-000000000002"
+
+
+def test_uuid_shaped_gate_accepts_8hex_and_keeps_symbols_out():
+    assert server._looks_like_uuid_source_handle("1edcc8a4")
+    assert server._looks_like_uuid_source_handle(FULL_A)
+    assert server._looks_like_uuid_source_handle("1edcc8a4-aaaa")  # dashed partial
+    assert server._looks_like_uuid_source_handle("[1edcc8a4]")  # bracketed segment
+    assert server._looks_like_uuid_source_handle("[1EDCC8A4]")  # case-insensitive
+    assert not server._looks_like_uuid_source_handle("1edcc8a")  # 7 hex chars
+    assert not server._looks_like_uuid_source_handle("build_beacon_registry")
+    assert not server._looks_like_uuid_source_handle("[ap:CORE]")
+    assert not server._looks_like_uuid_source_handle("")
+    assert not server._looks_like_uuid_source_handle(None)
+
+
+def test_beacon_snippet_routes_8hex_prefix_to_uuid_leg(monkeypatch):
+    calls = []
+
+    async def shared_reader(input_str, context, *, explicit_uuid=False):
+        calls.append((input_str, context, explicit_uuid))
+        return {
+            "success": True,
+            "snippet": "UUID SOURCE",
+            "file_path": "X.py",
+            "file_lines": ["UUID SOURCE"],
+            "core_start_line": 1,
+            "core_end_line": 1,
+        }
+
+    monkeypatch.setattr(server, "_read_text_snippet_result_impl", shared_reader)
+    out = asyncio.run(server._beacon_snippet_impl("1edcc8a4"))
+    assert calls == [("1edcc8a4", 0, True)]
+    assert "1 | UUID SOURCE" in out
+
+
+def test_beacon_snippet_8hex_prefix_snippets_same_bytes_as_full_uuid(monkeypatch):
+    """The to-do's own test ask: the 8-hex prefix of a mapped node snippets the
+    same bytes as its full UUID, through the REAL gate + kernel adoption."""
+    from workflowy_mcp.client import api_client_nexus as nexus
+
+    fixture_nodes = [
+        {"id": FULL_A, "name": "alpha_fn", "note": ""},
+    ]
+
+    async def fake_export_nodes_impl(client, node_id=None, use_cache=True, force_refresh=False):
+        return {"nodes": fixture_nodes}
+
+    async def fake_extract(self, beacon_node_id, beacon_node, nodes_by_id, context=10):
+        return {
+            "success": True,
+            "snippet": f"SOURCE of {beacon_node['name']}",
+            "file_path": "X.py",
+            "file_lines": [f"SOURCE of {beacon_node['name']}"],
+            "core_start_line": 1,
+            "core_end_line": 1,
+        }
+
+    monkeypatch.setattr(nexus, "export_nodes_impl", fake_export_nodes_impl)
+    monkeypatch.setattr(
+        nexus.WorkFlowyClientNexus,
+        "get_code_snippet_for_resolved_node",
+        fake_extract,
+    )
+    monkeypatch.setattr(server, "get_client", lambda: object.__new__(nexus.WorkFlowyClientNexus))
+    monkeypatch.setattr(server, "_rate_limiter", None)
+
+    by_full = asyncio.run(server._beacon_snippet_impl(FULL_A))
+    by_segment = asyncio.run(server._beacon_snippet_impl("1edcc8a4"))
+    assert by_segment == by_full
+    assert "SOURCE of alpha_fn" in by_segment
+
+
+def test_beacon_get_code_snippet_colliding_prefix_is_loud(monkeypatch):
+    """A colliding prefix raises a loud did-you-mean carrying the candidate
+    list -- never a silent pick, never the generic not-found."""
+    from workflowy_mcp.client import api_client_nexus as nexus
+    from workflowy_mcp.models.errors import NetworkError
+
+    fixture_nodes = [
+        {"id": FULL_A, "name": "alpha_fn", "note": ""},
+        {"id": FULL_B, "name": "beta_fn", "note": ""},
+    ]
+
+    async def fake_export_nodes_impl(client, node_id=None, use_cache=True, force_refresh=False):
+        return {"nodes": fixture_nodes}
+
+    monkeypatch.setattr(nexus, "export_nodes_impl", fake_export_nodes_impl)
+    client = object.__new__(nexus.WorkFlowyClientNexus)
+    with pytest.raises(NetworkError) as excinfo:
+        asyncio.run(client.beacon_get_code_snippet("1edcc8a4", context=0))
+    message = str(excinfo.value)
+    assert "AMBIGUOUS" in message
+    assert FULL_A in message and FULL_B in message
+    assert "alpha_fn" in message and "beta_fn" in message
+    assert getattr(excinfo.value, "candidates", None) and len(excinfo.value.candidates) == 2
+
+
+def test_beacon_snippet_ambiguity_never_falls_back_to_symbol_leg(monkeypatch):
+    symbol_calls = []
+
+    class Client:
+        async def beacon_get_code_snippet(self, beacon_node_id, context=10):
+            error = RuntimeError(f"Node {beacon_node_id!r} is AMBIGUOUS ...")
+            error.candidates = [{"uuid": FULL_A, "name": "alpha_fn"}, {"uuid": FULL_B, "name": "beta_fn"}]
+            raise error
+
+        async def read_text_snippet_by_symbol(self, **kwargs):
+            symbol_calls.append(kwargs)
+            raise AssertionError("symbol leg must not run for an ambiguous handle")
+
+    monkeypatch.setattr(server, "get_client", lambda: Client())
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    with pytest.raises(server._BeaconOperationError) as excinfo:
+        asyncio.run(server._beacon_snippet_impl("1edcc8a4"))
+    assert symbol_calls == []
+    extra = excinfo.value.extra if hasattr(excinfo.value, "extra") else {}
+    assert extra.get("candidates") and len(extra["candidates"]) == 2
+    assert "AMBIGUOUS" in str(extra.get("original_message", ""))
+
+
+def test_beacon_resolve_uuid_leg_unique_prefix_matches_full_uuid(monkeypatch):
+    class Client:
+        def __init__(self):
+            self.symbol_calls = 0
+
+        def _get_nodes_export_cache_nodes(self):
+            return [{"id": FULL_A, "name": "alpha_fn", "note": ""}]
+
+        async def read_uuid_from_symbol(self, **kwargs):
+            self.symbol_calls += 1
+            raise AssertionError("symbol leg must not run for a resolvable UUID handle")
+
+    client = Client()
+    monkeypatch.setattr(server, "get_client", lambda: client)
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    registry = server.build_beacon_registry()
+
+    by_full = asyncio.run(dispatch_operation(registry, "resolve", {"source_handle": FULL_A}))
+    assert by_full["success"] is True
+    assert by_full["match_count"] == 1
+    assert by_full["resolved_uuid"] == FULL_A
+    # [ap:CZ95R6]: every candidate row carries the identifier vocabulary.
+    assert by_full["candidates"] == [
+        {
+            "uuid": FULL_A,
+            "name": "alpha_fn",
+            "short": "1edcc8a4",
+            "ap_id": "no anchor point available",
+        }
+    ]
+    assert by_full["short"] == "1edcc8a4"
+    assert by_full["uuid"] == FULL_A
+    assert by_full["ap_id"] == "no anchor point available"
+    assert by_full["resolved_via"] == "uuid"
+
+    by_segment = asyncio.run(dispatch_operation(registry, "resolve", {"source_handle": "1edcc8a4"}))
+    # [ap:CZ95R6]: the identifier vocabulary and the candidate record are
+    # identical whatever form was passed; only input_kind legitimately
+    # differs (exact hit vs adopted prefix).
+    assert by_segment["input_kind"] == "uuid_prefix"
+    assert by_full["input_kind"] == "exact_uuid"
+    for key in ("success", "match_count", "resolved_uuid", "candidates", "truncated",
+                "short", "uuid", "ap_id", "resolved_via", "resolved_ap_id", "name"):
+        assert by_segment[key] == by_full[key], key
+    assert client.symbol_calls == 0
+
+    # A UUID-shaped resolve never needs the suppress-list read (no tab).
+    async def _no_tab():
+        raise AssertionError("suppress list must not be read for a UUID-shaped handle")
+
+    monkeypatch.setattr(server, "_beacon_symbol_suppress_tags", _no_tab)
+    by_segment_again = asyncio.run(
+        dispatch_operation(registry, "resolve", {"source_handle": "1edcc8a4"})
+    )
+    assert by_segment_again["match_count"] == 1
+
+
+def test_beacon_resolve_colliding_prefix_is_loud_never_guessed(monkeypatch):
+    class Client:
+        def _get_nodes_export_cache_nodes(self):
+            return [
+                {"id": FULL_A, "name": "alpha_fn", "note": ""},
+                {"id": FULL_B, "name": "beta_fn", "note": ""},
+            ]
+
+    monkeypatch.setattr(server, "get_client", lambda: Client())
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    registry = server.build_beacon_registry()
+    many = asyncio.run(dispatch_operation(registry, "resolve", {"source_handle": "1edcc8a4"}))
+    assert many["success"] is True
+    assert many["match_count"] == 2
+    assert {row["uuid"] for row in many["candidates"]} == {FULL_A, FULL_B}
+    assert "resolved_uuid" not in many  # never a silent pick
+
+
+def test_beacon_resolve_unresolved_uuid_falls_through_to_symbol_leg(monkeypatch):
+    class Client:
+        def _get_nodes_export_cache_nodes(self):
+            return [{"id": FULL_A, "name": "alpha_fn", "note": ""}]
+
+        async def read_uuid_from_symbol(self, *, file_path, symbol, symbol_kind, suppress_tags=None, scope_root_ids=None):
+            return {
+                "success": True,
+                "match_count": 1,
+                "candidates": [{"uuid": FULL_A, "name": "deadbeef_symbol"}],
+                "truncated": 0,
+            }
+
+    monkeypatch.setattr(server, "get_client", lambda: Client())
+    monkeypatch.setattr(server, "_rate_limiter", None)
+    registry = server.build_beacon_registry()
+    out = asyncio.run(dispatch_operation(registry, "resolve", {"source_handle": "deadbeef9"}))
+    assert out["success"] is True
+    assert out["match_count"] == 1
+    assert out["candidates"][0]["name"] == "deadbeef_symbol"
+
+
+def test_beacon_resolve_describe_names_the_8hex_segment():
+    registry = server.build_beacon_registry()
+    resolve_spec = registry.resolve("resolve")
+    snippet_spec = registry.resolve("snippet")
+    assert "8-hex" in snippet_spec.params_schema["properties"]["source_handle"]["description"]
+    assert "8-hex" in resolve_spec.summary
+    assert "8-hex" in resolve_spec.returns["description"]
+    grammar = registry.describe_index().get("handle_grammar") or ""
+    combined = grammar + registry.family_summary
+    assert "8-hex segment" in combined
+
+
+# ---------------------------------------------------------------------------
+# [ap:WB323O] root_handles scopes beacon.snippet / beacon.resolve symbol resolution
+# ---------------------------------------------------------------------------
+
+
+def test_beacon_snippet_resolve_declare_root_handles_scope():
+    registry = server.build_beacon_registry()
+    for verb in ("snippet", "resolve"):
+        spec = registry.resolve(verb)
+        prop = spec.params_schema["properties"]["root_handles"]
+        assert list(prop["type"]) == ["string", "array"]
+        assert prop["items"] == {"type": "string"}
+        # One shared scope description across the family's read and write verbs.
+        assert prop["description"] == registry.resolve("tags.ensure").params_schema[
+            "properties"
+        ]["root_handles"]["description"]
+        assert "root_handles" in spec.returns["description"]
+        # Accepted shapes: one handle string or a list of handles.
+        for value in ("aaaaaaaa-0000-0000-0000-0000000000a1", ["aaaaaaaa-0000-0000-0000-0000000000a1"]):
+            validate_params(spec, {"source_handle": "fn", "root_handles": value})
+    # The family summary names the new disambiguator role.
+    assert "scope symbol resolution" in registry.family_summary
+
+
+def test_snippet_json_format_routes_and_declares_extraction_failure(monkeypatch):
+    calls = []
+
+    async def snippet(handle, file_path=None, symbol_kind="auto", view=None, root_handles=None, format="text"):
+        calls.append(format)
+        return {"text": "code", "location": {"span": {"pair_state": "closed"}}, "findings": []} if format == "json" else "code"
+
+    monkeypatch.setattr(server, "_beacon_snippet_impl", snippet)
+    registry = server.build_beacon_registry()
+    spec = registry.resolve("snippet")
+    assert list(spec.params_schema["properties"]["format"]["enum"]) == ["text", "json"]
+    assert "source_extraction_failed" in spec.domain_error_codes
+    result = asyncio.run(dispatch_operation(registry, "snippet", {"source_handle": "fn", "format": "json"}))
+    assert result["location"]["span"]["pair_state"] == "closed"
+    assert calls == ["json"]
+    result = asyncio.run(dispatch_operation(registry, "snippet", {"source_handle": "fn", "format": "xml"}))
+    assert result["error"]["code"] == "invalid_enum_value"
+    assert calls == ["json"]
+    assert asyncio.run(dispatch_operation(registry, "snippet", {"source_handle": "fn"})) == "code"
+    assert calls == ["json", "text"]

@@ -1,0 +1,107 @@
+{
+ "meta": {
+  "base_commit": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+  "base_root": "/mnt/c/tmp/beacon_robustness/area-1/tree",
+  "nmc_file": "/mnt/c/tmp/beacon_robustness/area-1/tree/nexus_map_codebase.py",
+  "bmc_file": "/mnt/c/tmp/beacon_robustness/area-1/tree/beacon_mutation_contract.py",
+  "python": "3.12.3",
+  "area1_tree_verdict": "VERIFIED: area-1/tree is byte-identical to a345dc7 (git blobs, or the clean worktree checkout form where .gitattributes rewrites line endings) for every tracked file",
+  "note": "Records are JSON of the base parsers' return values and diagnostics sinks; values that are not JSON-native are stringified by json.dumps(default=str)."
+ },
+ "per_language": {
+  "markdown": {
+   "files": 20,
+   "files_with_blocks": 0,
+   "blocks_kept": 0,
+   "block_records_total": 0,
+   "skipped_unknown_kind": 0,
+   "unterminated_blocks": 0,
+   "close_records": 0,
+   "close_match_records": 0,
+   "beacons_total": 0,
+   "span_beacons_with_id": 0,
+   "span_beacons_paired": 0,
+   "beacons_with_span_lines": 0,
+   "distinct_block_ids": 0,
+   "matrix_foreign_blocks": {
+    "parse_python_beacon_blocks": 3,
+    "parse_js_beacon_blocks": 5,
+    "parse_sh_beacon_blocks": 3,
+    "parse_yaml_beacon_blocks": 3,
+    "parse_sql_beacon_blocks": 1
+   },
+   "matrix_foreign_block_count": 15
+  },
+  "python": {
+   "files": 408,
+   "files_with_blocks": 94,
+   "blocks_kept": 1274,
+   "block_records_total": 1277,
+   "skipped_unknown_kind": 3,
+   "unterminated_blocks": 0,
+   "close_records": 643,
+   "close_match_records": 45,
+   "beacons_total": 1274,
+   "span_beacons_with_id": 81,
+   "span_beacons_paired": 45,
+   "beacons_with_span_lines": 45,
+   "distinct_block_ids": 1274,
+   "matrix_foreign_blocks": {
+    "parse_js_beacon_blocks": 266,
+    "parse_sh_beacon_blocks": 1274,
+    "parse_yaml_beacon_blocks": 1274,
+    "parse_markdown_beacon_blocks": 1,
+    "parse_sql_beacon_blocks": 1
+   },
+   "matrix_foreign_block_count": 2816
+  },
+  "js_ts": {
+   "files": 22,
+   "files_with_blocks": 5,
+   "blocks_kept": 330,
+   "block_records_total": 330,
+   "skipped_unknown_kind": 0,
+   "unterminated_blocks": 1,
+   "close_records": 79,
+   "close_match_records": 17,
+   "beacons_total": 330,
+   "span_beacons_with_id": 22,
+   "span_beacons_paired": 17,
+   "beacons_with_span_lines": 17,
+   "distinct_block_ids": 329,
+   "matrix_foreign_blocks": {},
+   "matrix_foreign_block_count": 0
+  }
+ },
+ "totals": {
+  "files": 450,
+  "files_with_blocks": 99,
+  "block_records_total": 1607,
+  "blocks_kept": 1604,
+  "skipped_unknown_kind": 3,
+  "unterminated_blocks": 1,
+  "close_records": 722,
+  "close_match_records": 62,
+  "beacons_total": 1604,
+  "span_beacons_with_id": 103,
+  "span_beacons_paired_by_base_second_pass": 62,
+  "beacons_with_span_lines": 62,
+  "matrix_foreign_block_count": 2831
+ },
+ "comparison": {
+  "attributed_recon": "1607 blocks in 450 beacon-language files (area-1 recon; 1277 python + 330 js_ts)",
+  "actual_blocks_kept": 1604,
+  "actual_block_records_total": 1607,
+  "actual_skipped_unknown_kind": 3,
+  "matches_1607_kept": false,
+  "per_language_kept": {
+   "markdown": 0,
+   "python": 1274,
+   "js_ts": 330
+  },
+  "recon_per_language_kept": {
+   "python": 1277,
+   "js_ts": 330
+  }
+ }
+}

@@ -1,0 +1,760 @@
+"""U3 tag/untag tests (spec 12.5): every behaviour of spec 10.11, on the
+fixture repository F1 of spec 14 and on small purpose-built repositories.
+The kit runs as a subprocess in the fixture repository; nothing touches an
+account, and the only writes are the fixture's own source files.  After
+every write the test runs ``slice`` fresh, so the change is shown through
+the same mapping a reader would use.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+for _p in (str(REPO_ROOT / "src"), str(REPO_ROOT)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+KIT_SCRIPTS = REPO_ROOT / "agent-kit" / ".claude" / "skills" / "code-map" / "scripts"
+if str(KIT_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(KIT_SCRIPTS))
+
+from test_agent_kit_build import F1_FILES  # noqa: E402
+from test_agent_kit_parity import build_fixture_repo, run_kit  # noqa: E402
+
+SCRIPT = KIT_SCRIPTS / "code_map.py"
+
+
+# ---------------------------------------------------------------------------
+# Fixtures and helpers
+# ---------------------------------------------------------------------------
+
+
+def make_repo(tmp_path: Path, files: dict[str, str]) -> Path:
+    return build_fixture_repo(tmp_path, files)
+
+
+@pytest.fixture()
+def f1_repo(tmp_path: Path) -> Path:
+    return make_repo(tmp_path, F1_FILES)
+
+
+def write_raw(repo: Path, rel: str, data: bytes) -> None:
+    target = repo / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+
+
+def read_bytes(repo: Path, rel: str) -> bytes:
+    return (repo / rel).read_bytes()
+
+
+def read_lines(repo: Path, rel: str) -> list[str]:
+    return read_bytes(repo, rel).decode("utf-8").split("\n")
+
+
+def replaced_exactly(before: list[str], after: list[str], expected: str) -> int:
+    """One line changed in place, to exactly `expected`; returns its index."""
+    assert len(before) == len(after), "a replace must not change the line count"
+    changed = [i for i, (b, a) in enumerate(zip(before, after)) if b != a]
+    assert len(changed) == 1, f"expected one changed line, got {changed}"
+    assert after[changed[0]] == expected
+    return changed[0]
+
+
+def inserted_exactly(before: list[str], after: list[str], index: int, block: list[str]) -> None:
+    """`block` (len(block) lines) inserted at `index`; every other byte's
+    line unchanged."""
+    assert after[:index] == before[:index]
+    assert after[index : index + len(block)] == block
+    assert after[index + len(block) :] == before[index:]
+
+
+def py_block(bid: str, labels: str, comment: str, *, indent: str = "") -> list[str]:
+    return [
+        f"{indent}# @beacon[",
+        f"{indent}#   id={bid},",
+        f"{indent}#   slice_labels={labels},",
+        f"{indent}#   kind=ast,",
+        f"{indent}#   comment={comment},",
+        f"{indent}# ]",
+    ]
+
+
+def slice_text(repo: Path, *labels: str) -> str:
+    proc = run_kit(repo, "slice", *labels)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.decode("utf-8")
+
+
+COLLISION_FILES = {
+    "pkg/coll.py": (
+        "# @beacon[\n"
+        "#   id=demo@g,\n"
+        "#   slice_labels=demo,\n"
+        "#   kind=ast,\n"
+        "#   comment=Stale id: names g but sits on h.\n"
+        "# ]\n"
+        "def h():\n"
+        '    """H."""\n'
+        "\n"
+        "\n"
+        "def g():\n"
+        '    """G."""\n'
+    ),
+}
+
+TWO_BLOCKS_FILES = {
+    "pkg/two.py": (
+        "# @beacon[\n"
+        "#   id=one@f,\n"
+        "#   slice_labels=one,\n"
+        "#   kind=ast,\n"
+        "#   comment=First.\n"
+        "# ]\n"
+        "# @beacon[\n"
+        "#   id=two@f,\n"
+        "#   slice_labels=two,\n"
+        "#   kind=ast,\n"
+        "#   comment=Second.\n"
+        "# ]\n"
+        "def f():\n"
+        '    """F."""\n'
+    ),
+}
+
+LAST_LABEL_FILES = {
+    "pkg/one.py": (
+        "# @beacon[\n"
+        "#   id=solo@f,\n"
+        "#   slice_labels=solo,\n"
+        "#   kind=ast,\n"
+        "#   comment=Only label.\n"
+        "# ]\n"
+        "def f():\n"
+        '    """F."""\n'
+    ),
+}
+
+TWO_HELPERS_FILES = {
+    "pkg/one.py": 'def helper():\n    """One."""\n',
+    "pkg/two.py": 'def helper():\n    """Two."""\n',
+}
+
+DECORATED_FILES = {
+    "pkg/deco.py": (
+        "@decorator\n"
+        "def target(x: int = 3) -> None:\n"
+        '    """Target."""\n'
+        "\n"
+        "\n"
+        "def plain():\n"
+        '    """Plain."""\n'
+    ),
+}
+
+
+def crlf_bytes() -> bytes:
+    lines = [
+        "# @beacon[",
+        "#   id=old@f,",
+        "#   slice_labels=old,",
+        "#   kind=ast,",
+        "#   comment=Old.,",
+        "# ]",
+        "",
+        "def f():",
+        '    """F."""',
+        "",
+        "def g():",
+        '    """G."""',
+        "",
+    ]
+    return "\r\n".join(lines).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# tag: creating a block
+# ---------------------------------------------------------------------------
+
+
+def test_tag_untagged_decorated_function(tmp_path: Path):
+    repo = make_repo(tmp_path, DECORATED_FILES)
+    before = read_lines(repo, "pkg/deco.py")
+    index = before.index("@decorator")
+    proc = run_kit(repo, "tag", "target", "fresh", "--comment", "Freshly tagged.")
+    assert proc.returncode == 0, proc.stderr
+    assert (
+        proc.stdout.decode().strip()
+        == "tagged pkg/deco.py target: fresh (block fresh@target)"
+    )
+    after = read_lines(repo, "pkg/deco.py")
+    inserted_exactly(
+        before,
+        after,
+        index,
+        py_block("fresh@target", "fresh", "Freshly tagged."),
+    )
+    # The block attaches on the re-map and the slice shows it.
+    document = slice_text(repo, "fresh")
+    assert "## function `target(x: int)`" in document
+    assert "Labels: fresh" in document
+    assert "Freshly tagged." in document
+
+
+def test_tag_id_collision_gets_suffix(tmp_path: Path):
+    repo = make_repo(tmp_path, COLLISION_FILES)
+    before = read_lines(repo, "pkg/coll.py")
+    index = before.index("def g():")
+    proc = run_kit(repo, "tag", "g", "demo", "--comment", "Tag g.")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.decode().strip() == "tagged pkg/coll.py g: demo (block demo@g-2)"
+    after = read_lines(repo, "pkg/coll.py")
+    inserted_exactly(before, after, index, py_block("demo@g-2", "demo", "Tag g."))
+    document = slice_text(repo, "demo")
+    assert "## function `h()`" in document  # the stale block's carrier
+    assert "## function `g()`" in document  # the newly tagged symbol
+
+
+# ---------------------------------------------------------------------------
+# tag: updating an existing block
+# ---------------------------------------------------------------------------
+
+
+def test_tag_adds_label_existing_labels_first(f1_repo: Path):
+    before = read_lines(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "tag", "Store", "demo2")
+    assert proc.returncode == 0, proc.stderr
+    assert (
+        proc.stdout.decode().strip()
+        == "tagged pkg/core.py Store: demo, demo2 (block demo@Store)"
+    )
+    after = read_lines(f1_repo, "pkg/core.py")
+    replaced_exactly(before, after, "#   slice_labels=demo,demo2,")
+    document = slice_text(f1_repo, "demo2")
+    assert "## class `Store`" in document
+    assert "Labels: demo, demo2" in document
+    assert "The one store" in document  # the comment is kept
+
+
+def test_tag_comment_conflict_kept_with_warning(f1_repo: Path):
+    before = read_lines(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "tag", "Store", "demo2", "--comment", "A different comment")
+    assert proc.returncode == 0, proc.stderr
+    err = proc.stderr.decode()
+    assert "The one store" in err and "A different comment" in err
+    after = read_lines(f1_repo, "pkg/core.py")
+    replaced_exactly(before, after, "#   slice_labels=demo,demo2,")
+    document = slice_text(f1_repo, "demo2")
+    assert "The one store" in document  # the disk comment survived
+
+
+def test_tag_replace_comment(f1_repo: Path):
+    before = read_lines(f1_repo, "pkg/core.py")
+    proc = run_kit(
+        f1_repo, "tag", "Store", "demo2", "--comment", "New words", "--replace-comment"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "kept" not in proc.stderr.decode()
+    after = read_lines(f1_repo, "pkg/core.py")
+    # Two lines change: the labels line and the comment line of Store's block.
+    store_id = before.index("#   id=demo@Store,")
+    changed = [i for i, (b, a) in enumerate(zip(before, after)) if b != a]
+    assert len(before) == len(after) and changed == [store_id + 1, store_id + 3]
+    assert after[store_id + 1] == "#   slice_labels=demo,demo2,"
+    assert after[store_id + 3] == "#   comment=New words,"
+    document = slice_text(f1_repo, "demo2")
+    assert "New words" in document
+
+
+def test_tag_equal_comment_is_unchanged(f1_repo: Path):
+    data = read_bytes(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "tag", "Store", "demo", "--comment", "The one store")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.decode().startswith("unchanged pkg/core.py Store:")
+    assert read_bytes(f1_repo, "pkg/core.py") == data  # nothing was written
+
+
+def test_tag_double_hyphen_label(f1_repo: Path):
+    before = read_lines(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "tag", "fetch", "demo--x")
+    assert proc.returncode == 0, proc.stderr
+    after = read_lines(f1_repo, "pkg/core.py")
+    replaced_exactly(before, after, "#   slice_labels=demo,demo--x,")
+    document = slice_text(f1_repo, "demo--x")
+    assert "## async function `fetch(url: str)`" in document
+    assert "## function `serve(port: int)`" in document  # the native carrier
+
+
+# ---------------------------------------------------------------------------
+# tag: refusals
+# ---------------------------------------------------------------------------
+
+
+def test_tag_span_id_refused(f1_repo: Path):
+    data = read_bytes(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "tag", "demo@limits", "demo")
+    assert proc.returncode == 1
+    assert "span blocks are edited by hand" in proc.stderr.decode()
+    assert read_bytes(f1_repo, "pkg/core.py") == data
+
+
+def test_tag_two_blocks_refused(tmp_path: Path):
+    repo = make_repo(tmp_path, TWO_BLOCKS_FILES)
+    data = read_bytes(repo, "pkg/two.py")
+    proc = run_kit(repo, "tag", "f", "three")
+    assert proc.returncode == 1
+    assert "two beacon blocks attach to f" in proc.stderr.decode()
+    assert read_bytes(repo, "pkg/two.py") == data
+    proc = run_kit(repo, "untag", "f", "one")
+    assert proc.returncode == 1
+    assert "two beacon blocks attach to f" in proc.stderr.decode()
+    assert read_bytes(repo, "pkg/two.py") == data
+
+
+def test_tag_invalid_label_exit_2(f1_repo: Path):
+    data = read_bytes(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "tag", "Store", "Demo")
+    assert proc.returncode == 2
+    assert "not a valid label: Demo" in proc.stderr.decode()
+    proc = run_kit(f1_repo, "tag", "Store", "demo.cli")
+    assert proc.returncode == 2
+    assert read_bytes(f1_repo, "pkg/core.py") == data
+
+
+def test_tag_replace_comment_requires_comment(f1_repo: Path):
+    proc = run_kit(f1_repo, "tag", "Store", "demo2", "--replace-comment")
+    assert proc.returncode == 2
+    assert "--replace-comment needs --comment" in proc.stderr.decode()
+
+
+def test_tag_unsafe_comment_exit_2(f1_repo: Path):
+    proc = run_kit(f1_repo, "tag", "Store", "demo2", "--comment", "bad @beacon[ text")
+    assert proc.returncode == 2
+    assert "unsafe beacon comment" in proc.stderr.decode()
+
+
+def test_tag_file_disambiguates(tmp_path: Path):
+    repo = make_repo(tmp_path, TWO_HELPERS_FILES)
+    one_before = read_bytes(repo, "pkg/one.py")
+    two_before = read_bytes(repo, "pkg/two.py")
+    proc = run_kit(repo, "tag", "helper", "demo", "--file", "pkg/one.py",
+                   "--comment", "One helper.")
+    assert proc.returncode == 0, proc.stderr
+    assert "pkg/one.py helper: demo (block demo@helper)" in proc.stdout.decode()
+    assert read_bytes(repo, "pkg/two.py") == two_before
+    one_tagged = read_bytes(repo, "pkg/one.py")
+    assert len(one_tagged.decode().split("\n")) == len(one_before.decode().split("\n")) + 6
+    # untag with --file, and untag on a file with no block: refused
+    proc = run_kit(repo, "untag", "helper", "demo", "--file", "pkg/two.py")
+    assert proc.returncode == 1
+    assert "has no beacon block" in proc.stderr.decode()
+    assert read_bytes(repo, "pkg/one.py") == one_tagged  # the refusal wrote nothing
+
+
+# ---------------------------------------------------------------------------
+# untag
+# ---------------------------------------------------------------------------
+
+
+def test_untag_removes_one_label(f1_repo: Path):
+    before = read_lines(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "untag", "Registry.register", "demo")
+    assert proc.returncode == 0, proc.stderr
+    assert (
+        proc.stdout.decode().strip()
+        == "untagged pkg/core.py Registry.register: demo-cli "
+        "(block demo@Registry.register)"
+    )
+    after = read_lines(f1_repo, "pkg/core.py")
+    replaced_exactly(before, after, "    #   slice_labels=demo-cli,")
+    document = slice_text(f1_repo, "demo-cli")
+    assert "### method `register(self, name: str, handler)`" in document
+    assert "Labels: demo-cli" in document
+
+
+def test_untag_last_label_deletes_block(tmp_path: Path):
+    repo = make_repo(tmp_path, LAST_LABEL_FILES)
+    proc = run_kit(repo, "untag", "f", "solo")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.decode().strip() == "untagged pkg/one.py f: removed block solo@f"
+    assert read_bytes(repo, "pkg/one.py") == b'def f():\n    """F."""\n'
+    proc = run_kit(repo, "slice", "solo")
+    assert proc.returncode == 1  # nothing carries the label any more
+
+
+def test_untag_label_not_present_is_unchanged(f1_repo: Path):
+    data = read_bytes(f1_repo, "pkg/core.py")
+    proc = run_kit(f1_repo, "untag", "Store", "nosuch")
+    assert proc.returncode == 0, proc.stderr
+    assert "unchanged pkg/core.py Store: no such label(s): nosuch" in proc.stdout.decode()
+    assert read_bytes(f1_repo, "pkg/core.py") == data
+
+
+# ---------------------------------------------------------------------------
+# The writer: newline style and byte stability
+# ---------------------------------------------------------------------------
+
+
+def test_crlf_file_stays_crlf_through_a_full_cycle(tmp_path: Path):
+    write_raw(tmp_path, "pkg/core.py", crlf_bytes())
+    repo = make_repo(tmp_path, {})
+
+    proc = run_kit(repo, "tag", "g", "extra", "--comment", "G tag.")
+    assert proc.returncode == 0, proc.stderr
+    tagged = read_bytes(repo, "pkg/core.py")
+    assert tagged.count(b"\r\n") == tagged.count(b"\n")  # pure CRLF, no bare LF
+    lines = tagged.decode("utf-8").split("\r\n")
+    index = lines.index("def g():")
+    assert lines[index - 6 : index] == py_block("extra@g", "extra", "G tag.")
+    document = slice_text(repo, "extra")
+    assert "## function `g()`" in document
+
+    # f's only label goes: the whole block is deleted, still pure CRLF.
+    proc = run_kit(repo, "untag", "f", "old")
+    assert proc.returncode == 0, proc.stderr
+    assert b"removed block old@f" in proc.stdout
+    final = read_bytes(repo, "pkg/core.py")
+    assert final.count(b"\r\n") == final.count(b"\n")
+    # The cycle's net effect, byte for byte: f's block gone, g's block in
+    # (the blank line that followed f's block stays).
+    expected = [
+        "",
+        "def f():",
+        '    """F."""',
+        "",
+        "# @beacon[",
+        "#   id=extra@g,",
+        "#   slice_labels=extra,",
+        "#   kind=ast,",
+        "#   comment=G tag.,",
+        "# ]",
+        "def g():",
+        '    """G."""',
+        "",
+    ]
+    assert final.decode("utf-8").split("\r\n") == expected
+
+
+def test_tag_and_untag_touch_no_other_byte(f1_repo: Path):
+    before = read_bytes(f1_repo, "pkg/core.py")
+    # Store.get is untagged and indented (inside its class).
+    proc = run_kit(f1_repo, "tag", "Store.get", "seasonal", "--comment", "Seasonal.")
+    assert proc.returncode == 0, proc.stderr
+    mid_lines = read_bytes(f1_repo, "pkg/core.py").decode("utf-8").split("\n")
+    index = mid_lines.index("    def get(self, key: str):")
+    assert mid_lines[index - 6 : index] == py_block(
+        "seasonal@Store.get", "seasonal", "Seasonal.", indent="    "
+    )
+    proc = run_kit(f1_repo, "untag", "Store.get", "seasonal")
+    assert proc.returncode == 0, proc.stderr
+    assert read_bytes(f1_repo, "pkg/core.py") == before  # round trip restores
+
+
+# ---------------------------------------------------------------------------
+# JavaScript/TypeScript (parser present)
+# ---------------------------------------------------------------------------
+
+
+def test_tag_js_ts_method(f1_repo: Path):
+    pytest.importorskip("tree_sitter_language_pack")
+    before = read_lines(f1_repo, "web/app.ts")
+    proc = run_kit(f1_repo, "tag", "Greeter.greet", "web2")
+    assert proc.returncode == 0, proc.stderr
+    assert (
+        proc.stdout.decode().strip()
+        == "tagged web/app.ts Greeter.greet: web, web2 (block web@Greeter.greet)"
+    )
+    after = read_lines(f1_repo, "web/app.ts")
+    changed = [i for i, (b, a) in enumerate(zip(before, after)) if b != a]
+    greet_labels = before.index("  //   slice_labels=web,")  # the method's own block
+    assert changed == [greet_labels]
+    assert after[changed[0]] == "  //   slice_labels=web,web2,"
+    document = slice_text(f1_repo, "web2")
+    assert "### method ``greet(name: string = `world`)``" in document
+    assert "Labels: web, web2" in document
+
+
+# ---------------------------------------------------------------------------
+# W2: a block id quoted in prose can neither redirect a write nor make the
+# real attached id falsely ambiguous.
+# ---------------------------------------------------------------------------
+
+DECOY_PY = (
+    "# @beacon[\n#   id=o@1,\n#   slice_labels=o,\n#   kind=ast,\n#   comment=Orphan,\n# ]\n"
+    "x = 1\n\n\n"
+    'def g():\n    """Documentation quoting another block:\n\n    id: o@1\n\n    """\n    pass\n'
+)
+
+ATTACHED_DECOY_PY = (
+    "# @beacon[\n#   id=d@g,\n#   slice_labels=d,\n#   kind=ast,\n#   comment=The real one,\n# ]\n"
+    'def g():\n    """The real carrier; the id is quoted again below.\n\n    id: d@g\n\n    """\n    pass\n\n\n'
+    'def h():\n    """Only prose:\n\n    id: d@g\n\n    """\n    pass\n'
+)
+
+
+def test_w2_tag_or_untag_by_orphan_id_refused_and_write_nothing(tmp_path: Path):
+    repo = make_repo(tmp_path, {"z.py": DECOY_PY})
+    before = read_bytes(repo, "z.py")
+    tagged = run_kit(repo, "tag", "o@1", "demo")
+    assert tagged.returncode == 1, tagged.stdout
+    assert b"attaches to no definition" in tagged.stderr
+    assert read_bytes(repo, "z.py") == before
+    untagged = run_kit(repo, "untag", "o@1", "demo")
+    assert untagged.returncode == 1, untagged.stdout
+    assert read_bytes(repo, "z.py") == before
+
+
+def test_w2_tag_by_attached_id_edits_its_own_symbol_despite_decoy(tmp_path: Path):
+    repo = make_repo(tmp_path, {"z.py": ATTACHED_DECOY_PY})
+    before = read_lines(repo, "z.py")
+    tagged = run_kit(repo, "tag", "d@g", "demo")
+    assert tagged.returncode == 0, tagged.stderr
+    after = read_lines(repo, "z.py")
+    # the block's own labels line is the only line that changed
+    changed = [i for i, (b, a) in enumerate(zip(before, after)) if b != a]
+    assert changed == [2], (changed, after[2])
+    assert after[2] == "#   slice_labels=d,demo,"
+    # the prose in h is untouched
+    assert "id: d@g" in "\n".join(after)
+    shown = slice_text(repo, "demo")
+    assert "## function `g()`" in shown
+    assert "Labels: d, demo" in shown
+    assert "def h" not in shown
+
+
+# ---------------------------------------------------------------------------
+# W4: creation, replacement and deletion change only the selected block's
+# byte range; every byte outside it is exactly the original byte, including
+# mixed LF/CRLF/CR terminators, final-newline presence and form-feed /
+# U+2028 inside valid strings.
+# ---------------------------------------------------------------------------
+
+GREET = 'def greet(name):\n    """Doc."""\n    return name\n'
+
+
+def _docstrings(data: bytes) -> dict:
+    import ast
+
+    tree = ast.parse(data.decode("utf-8"))
+    return {
+        node.name: ast.get_docstring(node)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+    }
+
+
+def _assert_insertion_byte_exact(after: bytes, before: bytes) -> None:
+    """after == before[:k] + inserted + before[k:] for one contiguous
+    inserted range; every byte outside it is the original byte."""
+    p = 0
+    while p < len(before) and p < len(after) and before[p] == after[p]:
+        p += 1
+    s = 0
+    while (
+        s < len(before) - p
+        and s < len(after) - p
+        and before[len(before) - 1 - s] == after[len(after) - 1 - s]
+    ):
+        s += 1
+    assert after[:p] + after[len(after) - s:] == before, (
+        "bytes outside the inserted block changed:\n"
+        f"before={before!r}\nafter={after!r}"
+    )
+
+
+def _w4_repo(tmp_path: Path, source: bytes) -> Path:
+    repo = tmp_path / "repo"
+    build_fixture_repo(repo, {"pkg/doc.py": source.decode("utf-8")})
+    return repo
+
+
+def _w4_roundtrip(tmp_path: Path, source: bytes) -> None:
+    repo = _w4_repo(tmp_path, source)
+    before = read_bytes(repo, "pkg/doc.py")
+    before_docs = _docstrings(before)
+
+    tagged = run_kit(repo, "tag", "greet", "demo")
+    assert tagged.returncode == 0, tagged.stderr
+    after_tag = read_bytes(repo, "pkg/doc.py")
+    _assert_insertion_byte_exact(after_tag, before)
+    assert _docstrings(after_tag) == before_docs
+    shown = run_kit(repo, "slice", "demo")
+    assert shown.returncode == 0, shown.stderr
+    assert "## function `greet(name)`" in shown.stdout.decode("utf-8")
+
+    second = run_kit(repo, "tag", "greet", "demo2")
+    assert second.returncode == 0, second.stderr
+    after_second = read_bytes(repo, "pkg/doc.py")
+    # the replacement changes exactly the block's labels segment
+    assert after_second == after_tag.replace(
+        b"slice_labels=demo,", b"slice_labels=demo,demo2,", 1
+    )
+
+    removed = run_kit(repo, "untag", "greet", "demo2")
+    assert removed.returncode == 0, removed.stderr
+    after_untag_label = read_bytes(repo, "pkg/doc.py")
+    assert after_untag_label == after_tag
+
+    deleted = run_kit(repo, "untag", "greet", "demo")
+    assert deleted.returncode == 0, deleted.stderr
+    assert read_bytes(repo, "pkg/doc.py") == before
+
+
+def test_w4_byte_fidelity_matrix(tmp_path: Path):
+    crlf = GREET.replace("\n", "\r\n")
+    cases = {
+        "lf_final": GREET.encode("utf-8"),
+        "lf_no_final": GREET.encode("utf-8").rstrip(b"\n"),
+        "crlf_final": crlf.encode("utf-8"),
+        "crlf_no_final": crlf.encode("utf-8").rstrip(b"\r\n"),
+        "mixed_lf_and_crlf": (
+            'def greet(name):\n    """Doc."""\r\n    return name\n'
+        ).encode("utf-8"),
+        "cr_only_no_final": (
+            'def greet(name):\r    """Doc."""\r    return name'
+        ).encode("utf-8"),
+        "cr_only_final": (
+            'def greet(name):\r    """Doc."""\r    return name\r'
+        ).encode("utf-8"),
+        "form_feed_inside_docstring": (
+            'def greet(name):\n    """First line\x0cSecond line."""\n    return name\n'
+        ).encode("utf-8"),
+        "u2028_inside_docstring": (
+            'def greet(name):\n    """First line\u2028Second line."""\n    return name\n'
+        ).encode("utf-8"),
+    }
+    for name, source in cases.items():
+        sub = tmp_path / name
+        sub.mkdir()
+        _w4_roundtrip(sub, source)
+
+
+def test_w4_forced_verify_failure_restores_original_bytes(tmp_path: Path, monkeypatch):
+    import code_map as cm  # noqa: E402
+
+    repo = _w4_repo(tmp_path, GREET.encode("utf-8"))
+    before = read_bytes(repo, "pkg/doc.py")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(cm, "_verify_written_block", lambda *a, **k: False)
+    rc = cm.main(["tag", "greet", "demo"])
+    assert rc == 1
+    assert read_bytes(repo, "pkg/doc.py") == before
+
+
+# ---------------------------------------------------------------------------
+# r2 W2: insertion coordinates are translated to the original source's
+# boundaries (WorkOrder [ap:J7STY1] W2).  The engine's own decorator-range
+# authority decides the row; the tests assert the exact insertion position,
+# not merely that a block attached.
+# ---------------------------------------------------------------------------
+
+WO_EXOTIC_FILES = {
+    "pkg/exotic.py": (
+        "def first(x):\n"
+        "    \"\"\"Before\x0cAnd after\u2028still one string.\"\"\"\n"
+        "    return x\n"
+        "\n"
+        "class Holder:\n"
+        "    @decorator(\n"
+        "        \"arg\",\n"
+        "    )\n"
+        "    def meth(self):\n"
+        "        \"\"\"M.\"\"\"\n"
+        "        return 1\n"
+        "\n"
+        "class Plain:\n"
+        "    def bare(self):\n"
+        "        return 0\n"
+    ),
+}
+
+MULTILINE_DECORATOR_FILES = {
+    "pkg/multi.py": (
+        "class Holder:\n"
+        "    @decorator(\n"
+        "        \"arg\",\n"
+        "    )\n"
+        "    def meth(self):\n"
+        "        \"\"\"M.\"\"\"\n"
+        "        return 1\n"
+        "\n"
+        "class Plain:\n"
+        "    def bare(self):\n"
+        "        return 0\n"
+    ),
+}
+
+
+def test_w2_exotic_separators_above_decorated_target_refuse_instead_of_misplacing(tmp_path: Path):
+    """The WorkOrder's exact fixture: a form feed and U+2028 inside an
+    earlier docstring, then a multiline-decorated method.  The translated
+    coordinates aim the insertion at the decorator's opener -- and since the
+    generated engine's re-map cannot attach a block there, the command
+    refuses loudly and writes nothing, instead of the r1 behaviour of
+    writing the block between the decorator opener and its argument."""
+    import code_map  # noqa: F401  (KIT_SCRIPTS is on sys.path)
+
+    repo = make_repo(tmp_path, WO_EXOTIC_FILES)
+    before = read_bytes(repo, "pkg/exotic.py")
+    proc = run_kit(repo, "tag", "Holder.meth", "demo")
+    assert proc.returncode == 1, (
+        f"expected a loud refusal, got rc {proc.returncode}: {proc.stdout!r}"
+    )
+    assert read_bytes(repo, "pkg/exotic.py") == before, "a refused tag must write nothing"
+    assert "restored" in proc.stderr.decode("utf-8")
+    # the translation itself aims exactly at the opener row the WorkOrder
+    # names: one contiguous insertion before `    @decorator(`.
+    text = before.decode("utf-8")
+    lines = text.splitlines()
+    physical = text.split("\n").index("    def meth(self):") + 1
+    assert code_map._python_insert_row(text, lines, {"orig_lineno_start_unused": physical}) == (
+        lines.index("    @decorator(")
+    )
+
+
+def test_w2_multiline_decorator_places_block_above_opener(tmp_path: Path):
+    """Ordinary multiline decorator, no boundary characters above: the block
+    lands directly above `    @decorator(`, with the definition's
+    indentation, and the change is shown through `slice`."""
+    repo = make_repo(tmp_path, MULTILINE_DECORATOR_FILES)
+    before = read_lines(repo, "pkg/multi.py")
+    index = before.index("    @decorator(")
+    proc = run_kit(repo, "tag", "Holder.meth", "demo", "--comment", "Tagged.")
+    assert proc.returncode == 0, proc.stderr
+    after = read_lines(repo, "pkg/multi.py")
+    inserted_exactly(
+        before,
+        after,
+        index,
+        py_block("demo@Holder.meth", "demo", "Tagged.", indent="    "),
+    )
+    document = slice_text(repo, "demo")
+    assert "## method `meth(self)`" in document
+    assert "Labels: demo" in document
+    removed = run_kit(repo, "untag", "Holder.meth", "demo")
+    assert removed.returncode == 0, removed.stderr
+    assert read_lines(repo, "pkg/multi.py") == before
+
+
+def test_w2_undecorated_target_places_block_above_definition(tmp_path: Path):
+    """The undecorated control: the block lands directly above the
+    definition, exactly, and the round trip restores the original bytes."""
+    repo = make_repo(tmp_path, MULTILINE_DECORATOR_FILES)
+    before = read_lines(repo, "pkg/multi.py")
+    index = before.index("    def bare(self):")
+    proc = run_kit(repo, "tag", "Plain.bare", "solo", "--comment", "Bare.")
+    assert proc.returncode == 0, proc.stderr
+    after = read_lines(repo, "pkg/multi.py")
+    inserted_exactly(
+        before,
+        after,
+        index,
+        py_block("solo@Plain.bare", "solo", "Bare.", indent="    "),
+    )
+    document = slice_text(repo, "solo")
+    assert "## method `bare(self)`" in document
+    removed = run_kit(repo, "untag", "Plain.bare", "solo")
+    assert removed.returncode == 0, removed.stderr
+    assert read_lines(repo, "pkg/multi.py") == before

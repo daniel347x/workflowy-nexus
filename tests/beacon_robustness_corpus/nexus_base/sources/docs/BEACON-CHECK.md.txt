@@ -1,0 +1,222 @@
+# beacon.check — the read-only beacon integrity check
+
+## What it is for
+
+`beacon.check` lists, by file and line, every beacon problem that
+Cartographer or the tag writers would trip over, and writes nothing. A beacon
+curation run calls it at its start, to see what to fix, and at its end, to
+confirm the repository is clean. It replaces "run `beacon.map.refresh` and see
+what breaks" as the way to find beacon problems.
+
+The check defines no rule of its own. Every row reports a decision an
+existing function already makes: the shared block parsers, Cartographer's own
+single-file mapping, the tag writer's extent and anchor helpers, and the
+comment validator. Each row names that function in its `authority` field.
+
+## How to call it
+
+Exactly one target per call:
+
+- the source-map `Root:` node of a repository (every mapped file in it):
+  `beacon(verb='check', params={'node_handle': '<Root: node>'})`;
+- a mapped FOLDER or FILE node:
+  `beacon(verb='check', params={'node_handle': '<FOLDER or FILE node>'})`;
+- one file on disk, mapped or not:
+  `beacon(verb='check', params={'file_path': '/mnt/e/…/some_file.py'})`.
+
+`node_handle` takes the family's node-handle forms (exact UUID, its 8-hex
+first segment, a unique longer prefix, or `[ap:CORE]`). `file_path` must be
+absolute; it is resolved on the daemon's host like every other tool path
+(`/mnt/<drive>/…` ⇄ `<DRIVE>:\…`), and the result echoes the resolution as
+`target.path_record`.
+
+Two optional parameters:
+
+- `min_severity` (`error` | `warning` | `info`, default `warning`): rows below
+  it are counted, not listed. `min_severity: "info"` lists the info rows,
+  empty comments (`empty_comment`) among them.
+- `max_rows` (integer ≥ 1, default 300): when more rows qualify, every error is
+  kept first, then warnings, then info; the kept rows are returned sorted by
+  file and line, and `rows_truncated` counts the cut.
+
+A file returns in seconds; a whole repository in seconds to tens of seconds
+(NEXUS's 448 beacon-language files take about 7 seconds). The files are read
+in a worker thread, so the daemon keeps serving other clients meanwhile.
+
+Verb errors use the family's existing codes: `invalid_parameter_combination`
+(both targets or neither), `node_handle_unresolved` (no unique node; an
+ambiguous prefix carries the candidates), `map_target_invalid` (the node is
+not a FILE, FOLDER or `Root:` node), `beacon_target_unsupported` (a single
+file whose extension no beacon parser or writer reads), and
+`invalid_parameter_value` (a relative, missing or directory `file_path`, a
+path the daemon's host cannot open, or `max_rows` below 1). A file that cannot
+be read is a row (`file_unreadable`), never a verb error.
+
+## The result
+
+```
+{"success": true,
+ "operation": "beacon.check",
+ "summary_line": "...",
+ "target": {"kind": "file" | "folder", "node_uuid": ..., "header": [kind, value],
+            "root_abs": ..., "path_record": ...},
+ "counts": {"files_checked", "files_skipped", "files_missing", "files_unreadable",
+            "files_with_problems", "by_severity": {"error", "warning", "info"}, "by_code"},
+ "rows": [...], "rows_truncated": 0, "min_severity": "warning"}
+```
+
+A report with problems is still `success: true`: the check succeeded. A
+`node_handle` call fills `node_uuid`, `header` (the node's `Path:` or `Root:`
+line) and `root_abs` (the source-map root); a `file_path` call fills
+`path_record`. `counts` and `summary_line` always cover every row, whatever
+`min_severity` hides.
+
+**The summary line** follows the batch writers' style
+(`BEACON-BATCH-PARTIAL-SUCCESS.md`, "The one-line summary"):
+`N files · E errors · W warnings · I info`, then in parentheses either the one
+error or warning row as `file:line code — message` (the message cut to 110
+characters), or, with several, the distinct error codes then warning codes
+with counts, at most four, then `, ...`. With no error or warning, the base
+alone. Example:
+`412 files · 3 errors · 0 warnings · 189 info (writer_anchor_mismatch ×2, duplicate_id ×1)`.
+
+**Each row** carries `file` (relative to the source-map root on a node call;
+the resolved path on a `file_path` call), `line` (1-based; 0 means the whole
+file), `code`, `severity`, `view`, `authority`, `beacon_id`, a one-sentence
+`message` naming the block and the consequence, and `detail`.
+
+## The codes
+
+| code | severity | view | authority | what the row means | how to fix it |
+|---|---|---|---|---|---|
+| `file_unreadable` | error | file | the strict UTF-8 read the writer and mapper share | the file cannot be read or decoded; neither the mapper nor the writer can use it | re-save the file as UTF-8 (the row's `detail.exception` names the bad bytes) |
+| `file_missing` | warning | file | `resolve_cartographer_path_from_node` | the map lists this FILE node but nothing is on disk at its path (folder checks) | restore the file, or run one `beacon.map.refresh` over its folder so the map stops listing it |
+| `mapper_parse_error` | error | mapper | `_is_cartographer_parse_error_sentinel` over `map_codebase` | Cartographer's outline builder failed: no beacon in the file (or in that Vue section) reaches the map | fix the syntax error the row's `detail` names, then check again |
+| `unterminated_block` | error | parser | `parse_*_beacon_blocks` | no closing `]` line: the parser reads to the end of the file and every later beacon in it is invisible | add the closing line (the comment prefix, then `]` alone) directly after the block's last field |
+| `unknown_kind` | error | parser | `parse_*_beacon_blocks` | `kind=` is neither `ast` nor `span`: the block is skipped and does not exist for Cartographer or the writers | set `kind=ast` or `kind=span` |
+| `missing_id` | error | parser | `parse_*_beacon_blocks` | the block has no id: Markdown drops it; other languages map it under a fallback name the writer cannot address | add an `id=` line, unique in the file |
+| `unknown_field_key` | warning | parser | `parse_beacon_field_lines` / `beacon_field_unknown_keys` | a line starting with a `key=` outside the beacon field keys is glued onto the previous field (or ignored before the first) | correct the misspelled key; if the line is a deliberately wrapped value, leave it |
+| `legacy_field` | info | parser | `parse_beacon_field_lines` | `role=` (deprecated) or `comments=` (read as `comment=`) | write `comment=` instead of `comments=`; drop `role=` (or move its text into the comment) |
+| `duplicate_id` | error | mapper | `_duplicate_beacon_ids` | two or more blocks share this id: the refresh adds a 🚨 warning node and the writer refuses with `ambiguous_beacon_id` | give each block its own id |
+| `block_not_mapped` | error | mapper | `map_codebase` + `parse_cartographer_note_for_preview` | no mapped node carries this block's id: Cartographer drops it silently | put a `kind=ast` block directly above the symbol it tags; in SQL, shell and YAML use `kind=span`; a `.markdown` or `.bash` file is mapped as a plain file |
+| `two_blocks_one_symbol` | error | mapper | `map_codebase` + `parse_cartographer_note_for_preview` | one mapped node carries two or more beacon records | merge the blocks into one (labels comma-separated) |
+| `kind_changed_by_mapper` | warning | mapper | `map_codebase` (`apply_markdown_beacons` demotion) | an explicit `kind=` maps as the other kind: a Markdown `ast` block with no later heading becomes a span | put the block directly above its heading, or say `kind=span`; first check that the block ends on its own `-->` (see T2.4 below) |
+| `no_slice_labels` | warning | mapper | the mapped record's `slice_labels:` | the beacon maps with no label: it is in no slice | add `slice_labels=` with the Slice Catalog tag it belongs to |
+| `slice_labels_derived` | info | mapper | the mapped record vs the parsed block | `slice_labels` is absent; the mapper derived the tag from `role` or the id prefix | write the label explicitly |
+| `span_without_close` | info | parser | `parse_*_beacon_blocks` second pass | an open-only span: legitimate per the grammar; it runs to the end of the file | add the close block with the span's id where it should end, or leave it if it is meant to run to the end |
+| `orphan_close` | info | parser | `parse_*_beacon_blocks` second pass | a close candidate the parser examined and matched to no span opener; inert for the mapper and the writers | beside a `span_without_close`, correct the close's id to the opener's; otherwise delete the stray close, or reword the line that mentions the close marker |
+| `block_end_mismatch` | error | writer | `_beacon_block_extent_for_language` vs the parser's end | the writer's block extent is missing or ends elsewhere: `tags.ensure`/`remove` refuse or rewrite the wrong lines | make the closing line exactly `]` after the comment prefix (no trailing comma or space, no `*/` on it); in Markdown, keep `-->` out of the block's fields and comment |
+| `writer_anchor_mismatch` | error | writer | `_find_anchor_matched_beacons` vs the mapper's attachment | Cartographer attaches this block to a symbol, but the writer's anchor rule does not reach it: `tags.ensure` on that symbol refuses with `beacon_identity_conflict` | if an ordinary line sits between the block's last line and the symbol, move it above the beacon block or delete it; if the block has lost its closing `]` and runs into the next block (T2.11), restore the `]` |
+| `writer_anchor_ambiguous` | error | writer | `_find_anchor_matched_beacons` | two or more blocks anchor this symbol for the writer: `ambiguous_beacon_anchor` | keep one block per symbol |
+| `writer_target_ambiguous` | error | writer | `_resolve_anchor_target_line` | the symbol's qualified name names several outline nodes (a property getter and setter, two same-named functions): `ambiguous_beacon_anchor` | tag a uniquely named symbol, or rename one of the twins |
+| `comment_rejected` | info | comment | `validate_beacon_comment_text` | the comment would be refused if sent as a new comment; on disk it maps and is kept as is; the validator's message says why | reword it before re-sending it through `tags.ensure`; otherwise optional |
+| `empty_comment` | info | comment | the grammar (comment recommended) | the block has no comment | add a one-sentence `comment=` saying what the code does |
+
+**A close-id typo shows as two rows together:** `span_without_close` on the
+opener and `orphan_close` on the close (MasterSpec R3). Both rows are info;
+list them with `min_severity: "info"`. The exception: when the mistyped close
+sits on the line directly after another close block, the parser's pass never
+examines it (T2.10), so only `span_without_close` appears.
+
+## What a quiet result does not prove
+
+The check reports what the shared functions decide; where they are blind, so
+is the check. These are the tolerated gaps.
+
+- **T2.1 · Beacon syntax inside strings, docstrings and test fixtures** is
+  reported exactly as Cartographer sees it, because the Python and JS parsers
+  are not string-aware, so the rows are true to its parse. Such rows are
+  recognised by their line, which falls inside a string literal, a docstring
+  or a test fixture, and typically by their code: `unknown_kind` from a quoted
+  `kind=ast|span`, `missing_id`, `block_not_mapped`, or an `unterminated_block`
+  that reads to the end of the file. Leave such a row when it is a deliberate
+  example whose effect stays inside it. Reword the example so the parser no
+  longer opens a block when its effect reaches real beacons, as an
+  `unterminated_block` does by hiding every later beacon in the file. NEXUS
+  itself is the outlier: at the time of writing, 20 of its 24 default-listed
+  errors are fixture or docstring text (for example
+  `tests/js/test_saved_tabs_drive_ui.js:1548`, a `missing_id` and an
+  `unterminated_block`); the 4 real ones are `f8_slice_policy.py` lines 1 and
+  764, `transforms.py` line 1 and `server.py` line 25197.
+- **T2.2 · Duplicates:** `duplicate_id` says how many of the id's blocks reached
+  the map (`detail.mapped_records`), not which copy Cartographer dropped.
+- **T2.3 · A second Markdown block on a heading** shows as `block_not_mapped`,
+  not `two_blocks_one_symbol`; `writer_anchor_ambiguous` still fires when both
+  blocks sit on the heading.
+- **T2.4 · Block ends:** a writer extent that runs past the parser's end
+  without crossing another block is reported as `block_end_mismatch`. A
+  Markdown block with text between its `]` and its `-->` is not reported.
+  **And a Markdown block that lost its closing `-->`, with a stray `-->` later
+  in the file (a prose arrow, an HTML comment, a mermaid edge), passes at the
+  default severity:** a `kind=ast` block shows only a `kind_changed_by_mapper`
+  warning that names no cause, a `kind=span` block shows nothing. Meanwhile
+  Cartographer drops the headings in between, and the tag writer's extent
+  covers them, so a `tags.ensure` or `tags.remove` on that block would rewrite
+  or delete them (recoverable from git). Before writing to a Markdown block,
+  make sure it ends on its own `-->`; treat an unexplained
+  `kind_changed_by_mapper` there as this case until shown otherwise.
+- **T2.5 · Writer view on updates only:** the writer codes are evaluated on
+  symbols Cartographer decorated; what the writer would do when creating a new
+  block is not simulated.
+- **T2.6 · Markdown writer targets** are the mapper's heading lines.
+- **T2.7 · An empty span** (its close on the very next line) reads as
+  `span_without_close`.
+- **T2.8 · Vue:** template and style blocks are outside the tag writer's
+  capability (`operation_not_supported_for_target`), so no writer-view code is
+  reported for them; their parser and mapper codes still are.
+- **T2.9 · Stderr:** Cartographer's `[NEXUS MAP] Using .nexusignore …` line is
+  printed once per checked file, as on any refresh.
+- **T2.10 · Close candidates:** the parsers' close test is a substring test. A
+  code or prose line that mentions the close marker inside a span, before its
+  real close, can end that span there for Cartographer and the tag writer
+  alike, and the check does not report it (removing that span's last label
+  would delete everything from the mention to the real close). Otherwise, when
+  the parser's pass examines such a line, it is an `orphan_close` info row. A
+  close that no opener's pass examines is not reported: one above every span
+  opener, one after the matching close of every span opener above it, one
+  inside the lines a pass collected from an earlier candidate, or one on the
+  line directly after another close block. When that leaves an opener
+  unmatched, `span_without_close` reports the opener.
+- **T2.11 · A block that lost its closing `]`** runs into the next block's `]`
+  and takes the next block's id; the swallowed id is not named. The rows land
+  on the damaged block's first line (typically `writer_anchor_mismatch`,
+  `block_end_mismatch` or `unknown_field_key`); with no later block it is
+  `unterminated_block`.
+
+And what it does not cover at all:
+
+- **T3.1 · A disk folder path** is refused. A folder is checked through its
+  mapped FOLDER or `Root:` node, because the `.nexusignore` rules that decide
+  which files a folder holds exist only inside the map refresh.
+- **T3.2 · Files the map does not list yet** (created since the last refresh)
+  are not part of a folder check. Check them by `file_path`.
+- **T3.3 · Files edited while the check reads them** may be read differently
+  by each of its up to three reads.
+- **T3.4 · Non-UTF-8 files** are `file_unreadable` rows and are not analysed
+  further.
+- **T3.5 · A daemon without tree-sitter** reports JS/TS/Vue blocks as
+  `block_not_mapped`.
+- **T3.6 · Concurrent checks, several users, remote hosts:** not designed for.
+
+## Read-only guarantees
+
+The verb declares `side_effects: ["pure_read"]`. It writes no file, makes no
+Workflowy call, patches no cache, takes no lease, starts no job, runs no
+refresh and needs no Workflowy tab (it never reads the `#wfy-suppress` list).
+Handles resolve through the family's own resolver against the pinned
+operation cache, paths through the shared tool-path resolver, and the files
+are read, parsed and mapped in a worker thread. The tests prove the checked
+files byte-for-byte and mtime unchanged, and that every write, lease, refresh,
+job and Workflowy entry point is never entered.
+
+## Relation to map.refresh and tags.ensure
+
+- **`beacon.map.refresh`** writes Workflowy and, on claimed runs, rewrites
+  source. Use `beacon.check` to find beacon problems, fix them on disk, then
+  run one refresh to bring the map up to date. A folder check sees what the
+  last refresh mapped, so refresh after adding files.
+- **`beacon.tags.ensure` / `beacon.tags.remove`**: the writer-view codes
+  (`block_end_mismatch`, `writer_anchor_mismatch`, `writer_anchor_ambiguous`,
+  `writer_target_ambiguous`) and `duplicate_id` predict their refusals
+  (`beacon_identity_conflict`, `ambiguous_beacon_anchor`,
+  `ambiguous_beacon_id`) before you send a batch. Clear them first.

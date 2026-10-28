@@ -1,0 +1,30 @@
+def parse_file_outline(file_path: str) -> List[Dict[str, Any]]:
+    """Parse a single Python file into a NEXUS outline tree + beacon decorations.
+
+    Steps (V1 Beacon-aware):
+    1. Parse the file with `ast.parse` and build an AST-backed outline tree that
+       records `ast_type`, `ast_name`, `ast_qualname`, `file_path`, and
+       `orig_lineno_start_unused` / `orig_lineno_end_unused` for each node.
+    2. Scan the raw source lines for `@beacon[...]` comment blocks.
+    3. Attach AST beacons (kind=ast) to existing outline nodes (no new nodes).
+    4. Attach SPAN beacons (kind=span) as child nodes under the enclosing AST
+       node (or at file-level if no enclosing node is found).
+
+    PRIORITY HANDLING: Existing class/function/const nodes still receive
+    sequential priorities (100, 200, 300, ...) based on order in source code.
+    Span beacon nodes do not currently participate in the priority sequence.
+    """
+    try:
+        outline_nodes, lines = parse_file_outline_core(file_path)
+        return group_outline_by_carto_markers(
+            lines=lines,
+            outline_nodes=outline_nodes,
+            language="python",
+            comment_style="python",
+        )
+    except Exception as e:
+        return [{
+            "name": _warn_name("⚠️ Parse Error"),
+            "note": str(e),
+            "children": []
+        }]

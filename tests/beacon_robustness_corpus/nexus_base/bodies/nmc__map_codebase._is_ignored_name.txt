@@ -1,0 +1,12 @@
+    def _is_ignored_name(name: str) -> bool:
+        if name == "__pycache__":
+            return True
+        if not ignore_patterns:
+            return False
+        # Simple fnmatch-style globbing over basenames (no path semantics).
+        import fnmatch
+
+        for pat in ignore_patterns:
+            if fnmatch.fnmatch(name, pat):
+                return True
+        return False

@@ -1,0 +1,241 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "workflowy-nexus-mcp-tools"
+version = "1.0.1"
+description = "NEXUS Core v1 — MCP server with Workflowy GLIMPSE/Cartographer/beacon-tag navigation for AI agents working on large codebases"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Daniel Nissenbaum", email = "daniel347x@gmail.com"},
+]
+keywords = [
+    "mcp",
+    "workflowy",
+    "cartographer",
+    "glimpse",
+    "beacon",
+    "ast",
+    "agent",
+    "llm",
+    "code-navigation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
+dependencies = [
+    # MCP framework. N06 negotiation/middleware needs 4.0.5+; transforms.py
+    # uses the fastmcp.server.transforms.Transform API (added in FastMCP 3.x)
+    # to attach a Claude-Desktop-Windows compatibility shim that strips
+    # `outputSchema` from tool definitions before serialization. See the bug
+    # filed at modelcontextprotocol/mcpb#174 for the Claude-Desktop-side
+    # JSON-Schema validator failure that this works around. On FastMCP 2.x
+    # the shim silently no-ops (so the install still runs), but Claude
+    # Desktop on Windows would then show "0 tools available" — hence the
+    # 4.0.5+ floor also retains that transform compatibility.
+    "fastmcp>=4.0.5",
+    # PEP 440 ordering of installed release identities (N06).
+    "packaging>=24.0",
+    # HTTP client for the Workflowy REST API
+    "httpx>=0.25.0",
+    # Data models + settings loader
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    # WebSocket bridge for the GLIMPSE Chrome/Electron extension
+    "websockets>=11.0",
+    # Portable PID identity/liveness for Cartographer claims and Q3 leases.
+    "psutil>=5.9.0",
+    # Markdown parsing/formatting (Cartographer forward pass + F12+3 generate)
+    "markdown-it-py>=3.0.0",
+    "mdformat>=0.7.17",
+    # Tree-sitter for JS/TS/Vue AST parsing (Cartographer forward pass).
+    #
+    # VERSION PINNING -- DO NOT NAIVELY BUMP TO 1.9.x (architecture change,
+    # NOT a bug). Our code uses the OFFICIAL py-tree-sitter core:
+    #     from tree_sitter import Parser
+    #     parser.language = get_language(name)   # tree_sitter.Language
+    # tree-sitter-language-pack <= 1.8.1 is a thin wrapper over that official
+    # core: 1.8.1 correctly declares `tree-sitter>=0.25.2`, co-installs the
+    # newest official core (0.25.2), and its get_language() returns a real
+    # tree_sitter.Language. All grammars (javascript/typescript/tsx/vue)
+    # parse cleanly. This is the supported, verified combination today.
+    #
+    # As of 1.9.0 the package was REWRITTEN as a self-contained Rust
+    # extension (alef-generated `_native.pyd`) with its OWN Parser / Language
+    # / Node / Tree types and a new file-intelligence API (process(),
+    # SymbolInfo, ImportInfo, query getters, lazy REMOTE grammar download
+    # into a per-user cache). It deliberately no longer depends on the
+    # external `tree_sitter` package -- hence the dropped `Requires-Dist`,
+    # which is CORRECT for the new design, not a packaging bug.
+    #
+    # Consequences that make 1.9.x a breaking change for us (all verified):
+    #   * get_language() returns the pack's OWN Language type, which fails
+    #     `isinstance(L, tree_sitter.Language)` -> the runtime error
+    #     "language must be assigned a tree_sitter.Language object,
+    #      not builtins.Language" at every parser.language assignment.
+    #   * Its parser.parse() takes str, NOT bytes (opposite of our pipeline,
+    #     which works in source_bytes + byte offsets throughout).
+    #   * Grammars are downloaded on first use from a remote manifest into
+    #     %LOCALAPPDATA%\tree-sitter-language-pack\... (new network + cache
+    #     dependency; a fresh env has 0 languages until fetched).
+    # Moving to 1.9.x therefore requires a deliberate CODE MIGRATION + audit
+    # (switch to get_parser()/native API, str inputs, prefetch the needed
+    # grammars), tracked as its own task -- not a version bump. Until then,
+    # stay on the last release of the old architecture.
+    "tree-sitter>=0.25.2",
+    "tree-sitter-language-pack==1.8.1",  # last release of the official-core wrapper architecture; 1.9.x is the self-contained Rust rewrite (migration needed)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "mypy>=1.5.0",
+    "ruff>=0.1.0",
+    "python-dotenv>=1.0.0",  # Optional .env loading; gated behind WORKFLOWY_DEV_MODE
+    "pytest-xdist>=3.8.0",
+    "hatchling",  # Actual offline wheel/sdist hook tests (N06).
+]
+
+[project.urls]
+Homepage = "https://github.com/daniel347x/workflowy-nexus"
+Repository = "https://github.com/daniel347x/workflowy-nexus"
+Issues = "https://github.com/daniel347x/workflowy-nexus/issues"
+
+# Package and console entry share the shim default; explicit full transports remain available.
+[project.scripts]
+# Default stdio SHIM; --transport stdio selects the guarded full stdio server.
+# --transport http (or WORKFLOWY_MCP_TRANSPORT=http) selects the guarded HTTP daemon.
+workflowy-mcp = "workflowy_mcp.__main__:main"
+# Explicit stdio SHIM alias; existing workflowy-mcp host blobs now need no command change.
+workflowy-mcp-shim = "workflowy_mcp.shim:main"
+# Singleton GLIMPSE broker (Stage 1+): owns ws://127.0.0.1:8765 so the one
+# browser extension and the many MCP servers all connect to it as clients,
+# eliminating port-bind contention and providing transport-level request_id
+# correlation for every WebSocket action.
+workflowy-glimpse-broker = "workflowy_mcp.broker:main"
+
+# ---------------------------------------------------------------------------
+# Hatch build configuration
+# ---------------------------------------------------------------------------
+# Two-tier layout:
+#   - The MCP server package lives under src/workflowy_mcp/
+#   - Nine repo-root scripts are imported via importlib walk-up (NOT as part
+#     of the workflowy_mcp package). They MUST live at the installed
+#     repo/site-packages root, alongside the package, so the walk-up
+#     resolves them correctly:
+#       - nexus_map_codebase.py         (Cartographer mapper)
+#       - beacon_obtain_code_snippet.py (snippet engine)
+#       - markdown_roundtrip.py         (Markdown reverse mapper for F12+3)
+#       - glimpse_deploy_trampoline.py  (Workflowy Desktop extension deployer)
+#       - beacon_mutation_contract.py   (stdlib-only beacon mutation contracts;
+#         imported by BOTH nexus_map_codebase AND the workflowy_mcp package,
+#         so it can never live inside the package -- SPEC v5 §2)
+#       - beacon_source.py              (immutable source/physical-line model)
+#       - beacon_edits.py               (bounded byte proof and atomic commit)
+#       - beacon_findings.py            (portable finding identity and analysis)
+#       - beacon_resolutions.py         (pure explicit finding-to-intent planner)
+# The Chrome extension under workflowy-glimpse-cache/ is NOT a Python module
+# and is intentionally NOT pip-installed; users install it as an unpacked
+# Chrome extension (or, later, via the Chrome Web Store). It ships in the
+# repo so users can find it after `git clone`, but pip ignores it.
+# ---------------------------------------------------------------------------
+[tool.hatch.build]
+include = [
+    "src/workflowy_mcp/**/*.py",
+    "nexus_map_codebase.py",
+    "beacon_obtain_code_snippet.py",
+    "markdown_roundtrip.py",
+    "glimpse_deploy_trampoline.py",
+    "beacon_mutation_contract.py",
+    "beacon_source.py",
+    "beacon_edits.py",
+    "beacon_findings.py",
+    "beacon_resolutions.py",
+    "workflowy_nexus.config.example.json",
+    "README.md",
+    "LICENSE",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/workflowy_mcp"]
+
+# Also ship the nine repo-root scripts as top-level modules so importlib
+# walk-up can find them after `pip install`.
+[tool.hatch.build.targets.wheel.force-include]
+"nexus_map_codebase.py" = "nexus_map_codebase.py"
+"beacon_obtain_code_snippet.py" = "beacon_obtain_code_snippet.py"
+"markdown_roundtrip.py" = "markdown_roundtrip.py"
+"glimpse_deploy_trampoline.py" = "glimpse_deploy_trampoline.py"
+"beacon_mutation_contract.py" = "beacon_mutation_contract.py"
+"beacon_source.py" = "beacon_source.py"
+"beacon_edits.py" = "beacon_edits.py"
+"beacon_findings.py" = "beacon_findings.py"
+"beacon_resolutions.py" = "beacon_resolutions.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "hatch_build.py",
+    "src/workflowy_mcp/**/*.py",
+    "nexus_map_codebase.py",
+    "beacon_obtain_code_snippet.py",
+    "markdown_roundtrip.py",
+    "glimpse_deploy_trampoline.py",
+    "beacon_mutation_contract.py",
+    "beacon_source.py",
+    "beacon_edits.py",
+    "beacon_findings.py",
+    "beacon_resolutions.py",
+    "workflowy_nexus.config.example.json",
+    "workflowy-glimpse-cache/**/*",
+    "README.md",
+    "LICENSE",
+]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
+# ---------------------------------------------------------------------------
+# Tooling configuration (kept for parity with the source fork; not required
+# for the package to install or run)
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+markers = ["timing: serial wall-clock/heartbeat performance regressions"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+]

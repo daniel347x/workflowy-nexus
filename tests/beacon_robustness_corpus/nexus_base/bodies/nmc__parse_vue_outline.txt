@@ -1,0 +1,201 @@
+def parse_vue_outline(file_path: str) -> List[Dict[str, Any]]:
+    """Parse a Vue SFC (.vue) file into deterministic section subnodes.
+
+    Structure:
+      - ⦿ <template ...>  (span beacons only, MVP)
+      - ⦿ <script ...> / <script setup ...> (AST + span beacons)
+      - ⦿ <style ...> (span beacons only, MVP)
+
+    Script AST nodes are built by running the existing JS/TS outline builder
+    against the extracted script raw_text, then rebasing line numbers back
+    into the .vue file.
+    """
+    if not _HAVE_TREE_SITTER:
+        return [{
+            "name": _warn_name("⚠️ Vue parsing not available"),
+            "note": (
+                "Tree-sitter / tree_sitter_language_pack could not be imported. "
+                "Install 'tree_sitter' and 'tree_sitter-language-pack' "
+                "in the Windows Python environment to enable .vue Cartographer support."
+            ),
+            "children": [],
+        }]
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            source_text = f.read()
+    except Exception as e:  # noqa: BLE001
+        return [{
+            "name": _warn_name("⚠️ Parse Error (VUE)"),
+            "note": f"failed_to_read_file: {e}",
+            "children": [],
+        }]
+
+    source_bytes = source_text.encode("utf-8")
+    file_lines = source_text.splitlines()
+
+    try:
+        root = _parse_vue_sfc_tree(source_bytes)
+    except Exception as e:  # pragma: no cover
+        return [{
+            "name": _warn_name("⚠️ Parse Error (VUE)"),
+            "note": str(e),
+            "children": [],
+        }]
+
+    # Collect top-level SFC blocks in order of appearance.
+    blocks = _vue_sfc_sections(source_bytes, root)
+
+    # Build section nodes.
+    out_nodes: list[dict[str, Any]] = []
+    priority = 100
+
+    script_ix = 0
+    style_ix = 0
+
+    for blk in blocks:
+        btype = blk.get("type")
+        start_tag_compact = str(blk.get("start_tag") or "").strip() or "<unknown>"
+        raw_text_str = str(blk.get("raw_text") or "")
+        content_row0 = int(blk.get("content_row0") or 0)
+
+        # Section node
+        # NOTE: Workflowy treats '<...>' as tag-like markup and may render it as blank.
+        # Use square brackets to ensure section headings are visible.
+        display_tag = start_tag_compact.replace("<", "[").replace(">", "]")
+        section_name = f"⦿ {display_tag}"
+        section_note_lines = [
+            f"VUE_SECTION: {btype}",
+            f"VUE_START_TAG: {start_tag_compact}",
+            f"VUE_CONTENT_ROW0: {content_row0}",
+        ]
+
+        section_children: list[dict[str, Any]] = []
+
+        if btype == "template_element":
+            # Template: HTML-comment beacons (Markdown-style) as SPAN nodes.
+            try:
+                beacons_abs = _vue_section_beacons(blk)
+            except Exception:
+                beacons_abs = []
+
+            for b in beacons_abs:
+                if (b.get("kind") or "").strip().lower() != "span":
+                    continue
+                bid = (b.get("id") or "").strip()
+                role = (b.get("role") or "").strip() or (bid.split("@", 1)[0] if "@" in bid else "")
+                slice_labels = _canonicalize_slice_labels((b.get("slice_labels") or "").strip(), role)
+                show_span, show_span_explicit = _beacon_show_span(b)
+
+                tag_suffix = _slice_label_tags(slice_labels)
+                name = f"🔱 {role or bid or 'vue-template-span'}"
+                if tag_suffix:
+                    name = f"{name} {tag_suffix}"
+
+                note_lines = [
+                    "BEACON (VUE TEMPLATE SPAN)",
+                    f"id: {bid}",
+                    f"role: {role}",
+                    f"slice_labels: {slice_labels}",
+                    "kind: span",
+                ]
+                if show_span_explicit:
+                    note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+                comment = b.get("comment")
+                if comment:
+                    note_lines.append(f"comment: {comment}")
+
+                span_node = {"name": name, "note": "\n".join(note_lines), "children": []}
+                section_children.append(span_node)
+
+        elif btype == "script_element":
+            # Determine language for this script block (ts/tsx vs js).
+            lang = "javascript"
+            start_tag_low = start_tag_compact.lower()
+            if "lang=\"ts\"" in start_tag_low or "lang='ts'" in start_tag_low or "lang=ts" in start_tag_low:
+                lang = "typescript"
+            if "lang=\"tsx\"" in start_tag_low or "lang='tsx'" in start_tag_low or "lang=tsx" in start_tag_low:
+                lang = "tsx"
+
+            vue_prefix = f"vue:script{script_ix}"
+            section_note_lines.append(f"VUE_SCRIPT_INDEX: {script_ix}")
+            section_note_lines.append(f"VUE_SCRIPT_LANG: {lang}")
+
+            outline_nodes = _parse_js_ts_outline_from_source(
+                source_text=raw_text_str,
+                file_path=file_path,
+                language_name=lang,
+                line_offset0=content_row0,
+                vue_qual_prefix=vue_prefix,
+            )
+
+            # Attach JS/TS beacons inside this script block.
+            try:
+                local_lines = raw_text_str.splitlines()
+                beacons_abs = _vue_section_beacons(blk)
+                apply_js_beacons(file_path, file_lines, outline_nodes, beacons_abs)
+                outline_nodes = group_outline_by_carto_markers(
+                    lines=local_lines,
+                    outline_nodes=outline_nodes,
+                    language="vue_script_js_ts",
+                    comment_style="js_ts",
+                    line_offset0=content_row0,
+                )
+            except Exception:
+                pass
+
+            section_children.extend(outline_nodes)
+            script_ix += 1
+
+        elif btype == "style_element":
+            section_note_lines.append(f"VUE_STYLE_INDEX: {style_ix}")
+
+            # Style: CSS comment beacons (block-comment syntax) treated as span-only.
+            try:
+                beacons_abs = _vue_section_beacons(blk)
+            except Exception:
+                beacons_abs = []
+
+            for b in beacons_abs:
+                if (b.get("kind") or "").strip().lower() != "span":
+                    continue
+                bid = (b.get("id") or "").strip()
+                role = (b.get("role") or "").strip() or (bid.split("@", 1)[0] if "@" in bid else "")
+                slice_labels = _canonicalize_slice_labels((b.get("slice_labels") or "").strip(), role)
+                show_span, show_span_explicit = _beacon_show_span(b)
+
+                tag_suffix = _slice_label_tags(slice_labels)
+                name = f"🔱 {role or bid or 'vue-style-span'}"
+                if tag_suffix:
+                    name = f"{name} {tag_suffix}"
+
+                note_lines = [
+                    "BEACON (VUE STYLE SPAN)",
+                    f"id: {bid}",
+                    f"role: {role}",
+                    f"slice_labels: {slice_labels}",
+                    "kind: span",
+                ]
+                if show_span_explicit:
+                    note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+                comment = b.get("comment")
+                if comment:
+                    note_lines.append(f"comment: {comment}")
+
+                span_node = {"name": name, "note": "\n".join(note_lines), "children": []}
+                section_children.append(span_node)
+
+            style_ix += 1
+
+        # Default: section node
+        out_nodes.append(
+            {
+                "name": section_name,
+                "priority": priority,
+                "note": "\n".join(section_note_lines),
+                "children": section_children,
+            }
+        )
+        priority += 100
+
+    return out_nodes

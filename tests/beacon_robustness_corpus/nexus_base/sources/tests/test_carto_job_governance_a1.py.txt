@@ -1,0 +1,678 @@
+from __future__ import annotations
+
+import asyncio
+import errno
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+import psutil
+import pytest
+
+from workflowy_mcp import carto_job_governance as gov
+
+ACCOUNT_A = "a" * 32
+ACCOUNT_B = "b" * 32
+DEDUPE_A = "c" * 64
+DEDUPE_B = "d" * 64
+
+
+def _cache() -> dict[str, dict]:
+    return {
+        "vault": {"id": "vault"},
+        "repo-a": {"id": "repo-a", "parent_id": "vault"},
+        "folder-a": {"id": "folder-a", "parent_id": "repo-a"},
+        "file-a": {"id": "file-a", "parent_id": "folder-a"},
+        "file-b": {"id": "file-b", "parent_id": "folder-a"},
+        "repo-b": {"id": "repo-b", "parent_id": "vault"},
+        "file-c": {"id": "file-c", "parent_id": "repo-b"},
+    }
+
+
+def _footprint(tmp_path: Path, name: str = "repo/file.py", root: str = "file-a") -> dict:
+    return gov.compute_footprint(tmp_path / name, root, _cache(), kind="file")
+
+
+def _claim(
+    tmp_path: Path,
+    *,
+    job_id: str = "carto-refresh-file-test",
+    account: str = ACCOUNT_A,
+    footprint: dict | None = None,
+    pid: int | None = None,
+    create_time: float | None = None,
+    state: str = "running",
+    spawn_started_at: str | None = None,
+    status_type: str = "CARTO_REFRESH",
+    dedupe: str = DEDUPE_A,
+) -> dict:
+    current = psutil.Process(os.getpid())
+    return gov.build_claim(
+        job_id=job_id,
+        job_type=status_type,
+        dedupe_key=dedupe,
+        account_scope_id=account,
+        footprint=footprint or _footprint(tmp_path),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=pid or os.getpid(),
+        pid_create_time=create_time if create_time is not None else current.create_time(),
+        handoff_state=state,
+        spawn_started_at=spawn_started_at,
+        execution_owner="detached_worker" if state == "running" else "launcher",
+    )
+
+
+def _write_job(jobs_root: Path, payload: dict, name: str = "job.json") -> Path:
+    path = jobs_root / name
+    gov.atomic_write_json(path, payload)
+    return path
+
+
+def _job(
+    job_id: str, *, status: str = "running", pid: int | None = None, created_at: str | None = None
+) -> dict:
+    return {
+        "id": job_id,
+        "type": "CARTO_REFRESH",
+        "status": status,
+        "pid": os.getpid() if pid is None else pid,
+        "created_at": created_at or gov.utc_now_iso(),
+        "updated_at": gov.utc_now_iso(),
+    }
+
+
+def test_jobs_root_uses_authoritative_config_helper(monkeypatch, tmp_path):
+    expected = tmp_path / "configured" / "cartographer_jobs"
+    monkeypatch.setattr(gov, "get_cartographer_jobs_dir", lambda: expected)
+    assert gov.get_jobs_root() == expected
+    paths = gov.governance_paths()
+    assert paths.jobs_root == expected
+    assert paths.admission_mutex == expected / "admission.mutex"
+    assert paths.claims_dir.parent == expected
+    assert paths.leases_dir.parent == expected
+
+
+def test_mutex_exclusion_and_busy_taxonomy_across_real_subprocesses(tmp_path):
+    lock_path = tmp_path / "admission.mutex"
+    holder_code = """
+import sys, time
+from workflowy_mcp.carto_job_governance import os_lock
+with os_lock(sys.argv[1], timeout_seconds=2):
+    print('ACQUIRED', flush=True)
+    time.sleep(3.0)
+"""
+    contender_code = """
+import sys
+from workflowy_mcp.carto_job_governance import os_lock, AdmissionBusyTimeoutError, AdmissionUnavailableError
+try:
+    with os_lock(sys.argv[1], timeout_seconds=0.2, poll_seconds=0.02):
+        print('WRONGLY_ACQUIRED')
+except AdmissionBusyTimeoutError:
+    print('BUSY')
+except AdmissionUnavailableError:
+    print('BROKEN')
+"""
+    holder = subprocess.Popen(
+        [sys.executable, "-c", holder_code, str(lock_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "ACQUIRED"
+        contender = subprocess.run(
+            [sys.executable, "-c", contender_code, str(lock_path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        assert contender.stdout.strip() == "BUSY"
+        assert "BROKEN" not in contender.stdout
+    finally:
+        holder.wait(timeout=5)
+    with gov.os_lock(lock_path, timeout_seconds=1):
+        assert lock_path.exists()
+        if os.name == "nt":
+            assert lock_path.stat().st_size >= 1
+
+
+def test_mutex_broken_path_fails_closed_and_busy_timeout_is_distinct(tmp_path):
+    parent_file = tmp_path / "not-a-directory"
+    parent_file.write_text("x", encoding="utf-8")
+    with pytest.raises(gov.AdmissionUnavailableError) as broken:
+        with gov.os_lock(parent_file / "admission.mutex", timeout_seconds=0):
+            pass
+    assert str(parent_file) in str(broken.value)
+    assert not isinstance(broken.value, gov.AdmissionBusyTimeoutError)
+
+
+def test_open_eacces_is_broken_even_though_windows_lock_eacces_is_busy(monkeypatch, tmp_path):
+    def denied(_path):
+        raise OSError(errno.EACCES, "open denied")
+
+    monkeypatch.setattr(gov, "_open_lock_handle", denied)
+    with pytest.raises(gov.AdmissionUnavailableError):
+        gov.acquire_os_lock(tmp_path / "admission.mutex", timeout_seconds=0.01)
+
+
+def test_async_mutex_wait_is_cancellation_aware(tmp_path):
+    lock_path = tmp_path / "admission.mutex"
+
+    async def scenario():
+        with gov.os_lock(lock_path):
+            started = time.monotonic()
+
+            async def cancelled():
+                return time.monotonic() - started > 0.08
+
+            with pytest.raises(gov.MutexWaitCancelledError):
+                await gov.acquire_os_lock_async(
+                    lock_path,
+                    timeout_seconds=1,
+                    poll_seconds=0.01,
+                    cancel_check=cancelled,
+                )
+
+    asyncio.run(scenario())
+
+
+def test_contention_errno_taxonomy_is_platform_specific_busy():
+    assert gov._is_busy_lock_error(OSError(errno.EAGAIN, "x"), "posix")
+    assert gov._is_busy_lock_error(OSError(errno.EACCES, "x"), "nt")
+    assert not gov._is_busy_lock_error(OSError(errno.EINVAL, "x"), "posix")
+
+
+def test_canonical_account_region_artifact_and_dedupe_hashes(tmp_path):
+    normalized = "https://api.workflowy.com/v1"
+    assert gov.normalize_api_base_url(" HTTPS://API.WORKFLOWY.COM:443/v1/// ") == normalized
+    account_expected = hashlib.sha256(
+        json.dumps([normalized, "secret"], ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()[:32]
+    assert (
+        gov.derive_account_scope_id(" HTTPS://API.WORKFLOWY.COM:443/v1/// ", "secret")
+        == account_expected
+    )
+
+    target = tmp_path / "Repo" / "file.py"
+    canonical = gov.canonicalize_path(target)
+    region_expected = hashlib.sha256(canonical.encode()).hexdigest()
+    assert gov.derive_region_key(target, "ignored") == region_expected
+    artifact_expected = hashlib.sha256(
+        json.dumps([account_expected, region_expected], separators=(",", ":")).encode()
+    ).hexdigest()
+    assert gov.derive_artifact_key(account_expected, region_expected) == artifact_expected
+
+    override = tmp_path / "source.md"
+    ingredients = [
+        account_expected,
+        "CARTO_REFRESH",
+        "file",
+        "ROOT",
+        "temp_override",
+        gov.canonicalize_path(override),
+        "true",
+        "e" * 64,
+    ]
+    dedupe_expected = hashlib.sha256(
+        json.dumps(ingredients, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert (
+        gov.derive_dedupe_key(
+            account_scope_id=account_expected,
+            job_type="CARTO_REFRESH",
+            mode="file",
+            root_uuid="ROOT",
+            source_regime="temp_override",
+            source_path_override=override,
+            delete_temp_file_after=True,
+            preparation_input_digest="e" * 64,
+        )
+        == dedupe_expected
+    )
+
+
+def test_dedupe_key_closed_mode_and_source_regime_validation():
+    with pytest.raises(ValueError):
+        gov.derive_dedupe_key(
+            account_scope_id=ACCOUNT_A,
+            job_type="CARTO_REFRESH",
+            mode="visible",
+            root_uuid="x",
+        )
+    with pytest.raises(ValueError):
+        gov.derive_dedupe_key(
+            account_scope_id=ACCOUNT_A,
+            job_type="CARTO_BULK_APPLY",
+            mode="file",
+            root_uuid="x",
+        )
+    with pytest.raises(ValueError):
+        gov.derive_dedupe_key(
+            account_scope_id=ACCOUNT_A,
+            job_type="CARTO_MARKDOWN_GENERATE",
+            mode=None,
+            root_uuid="x",
+            source_regime="invented",
+        )
+
+
+def test_footprint_pathless_markdown_in_markdown_shape_and_fail_closed(tmp_path):
+    footprint = gov.compute_footprint(None, "file-a", _cache(), kind="file")
+    assert footprint == {
+        "kind": "file",
+        "path": None,
+        "root_uuid": "file-a",
+        "ancestor_chain": ["file-a", "folder-a", "repo-a", "vault"],
+    }
+    with pytest.raises(gov.FootprintUnresolvableError) as missing:
+        gov.compute_footprint(tmp_path / "x", "missing", _cache(), kind="file")
+    assert "system.cache.refresh" in str(missing.value)
+    broken = _cache()
+    broken["folder-a"]["parent_id"] = "missing-parent"
+    with pytest.raises(gov.FootprintUnresolvableError):
+        gov.compute_footprint(None, "file-a", broken, kind="file")
+
+
+def test_symmetric_overlap_matrix(tmp_path):
+    parent_path = tmp_path / "repo"
+    child_path = parent_path / "src" / "a.py"
+    sibling_path = tmp_path / "other" / "b.py"
+    parent = {
+        "account_scope_id": ACCOUNT_A,
+        **gov.compute_footprint(parent_path, "repo-a", _cache(), kind="folder"),
+    }
+    child_other_account = {
+        "account_scope_id": ACCOUNT_B,
+        **gov.compute_footprint(child_path, "file-a", _cache(), kind="file"),
+    }
+    sibling = {
+        "account_scope_id": ACCOUNT_A,
+        **gov.compute_footprint(sibling_path, "file-c", _cache(), kind="file"),
+    }
+    assert gov.footprints_overlap(parent, child_other_account)
+    assert gov.footprints_overlap(child_other_account, parent)
+    assert not gov.footprints_overlap(parent, sibling)
+
+    pathless_file = {
+        "account_scope_id": ACCOUNT_A,
+        **gov.compute_footprint(None, "file-a", _cache(), kind="file"),
+    }
+    pathless_folder = {
+        "account_scope_id": ACCOUNT_A,
+        **gov.compute_footprint(None, "folder-a", _cache(), kind="folder"),
+    }
+    cross_account_folder = {
+        "account_scope_id": ACCOUNT_B,
+        **gov.compute_footprint(None, "folder-a", _cache(), kind="folder"),
+    }
+    assert gov.footprints_overlap(pathless_file, pathless_folder)
+    assert not gov.footprints_overlap(pathless_file, cross_account_folder)
+
+    sibling_a = {
+        "account_scope_id": ACCOUNT_A,
+        **gov.compute_footprint(None, "file-a", _cache(), kind="file"),
+    }
+    sibling_b = {
+        "account_scope_id": ACCOUNT_A,
+        **gov.compute_footprint(None, "file-b", _cache(), kind="file"),
+    }
+    assert not gov.footprints_overlap(sibling_a, sibling_b)
+
+
+def test_cross_drive_paths_are_non_overlapping():
+    a = {
+        "account_scope_id": ACCOUNT_A,
+        "kind": "folder",
+        "path": r"C:\repo",
+        "root_uuid": "a",
+        "ancestor_chain": ["a"],
+    }
+    b = {
+        "account_scope_id": ACCOUNT_B,
+        "kind": "folder",
+        "path": r"D:\repo",
+        "root_uuid": "b",
+        "ancestor_chain": ["b"],
+    }
+    assert not gov.footprints_overlap(a, b)
+
+
+def test_owner_liveness_truth_table_clock_independent():
+    """U01 P2: exact start-ticks/boot-id comparison, no epsilon; the stored
+    epoch create_time is never consulted."""
+
+    current = gov.current_process_identity()
+    stored = gov.StoredOwnerIdentity(
+        pid=current.pid,
+        pid_create_time=current.create_time,
+        start_ticks=current.start_ticks,
+        boot_id=current.boot_id,
+    )
+    assert gov.classify_owner_liveness(stored) == "alive"
+    # The stored epoch create_time moving by whole seconds changes NOTHING —
+    # it is provenance, never authority (the retired defect classified this
+    # live owner dead).
+    moved_epoch = gov.StoredOwnerIdentity(
+        pid=current.pid,
+        pid_create_time=current.create_time + 1.0,
+        start_ticks=current.start_ticks,
+        boot_id=current.boot_id,
+    )
+    assert gov.classify_owner_liveness(moved_epoch) == "alive"
+    # A legacy artifact (no stable fields) with a live pid fails closed.
+    legacy = gov.StoredOwnerIdentity(
+        pid=current.pid, pid_create_time=current.create_time, start_ticks=None, boot_id=None
+    )
+    assert gov.classify_owner_liveness(legacy) == "unknown"
+    # A nonexistent pid is dead; a recycled pid (ticks differ) is dead.
+    assert gov.classify_owner_liveness(
+        gov.StoredOwnerIdentity(
+            pid=2**31 - 1, pid_create_time=1.0, start_ticks=1, boot_id=None
+        )
+    ) == "dead"
+    reused = gov.StoredOwnerIdentity(
+        pid=current.pid,
+        pid_create_time=current.create_time,
+        start_ticks=current.start_ticks + 1,
+        boot_id=current.boot_id,
+    )
+    assert gov.classify_owner_liveness(reused) == "dead"
+
+    def _unreadable(_pid):
+        raise PermissionError("denied")
+
+    assert gov.classify_owner_liveness(stored, identity_reader=_unreadable) == "unknown"
+
+
+def test_claim_schema_requires_every_handoff_and_ownership_field(tmp_path):
+    claim = _claim(tmp_path)
+    assert set(gov.CLAIM_REQUIRED_FIELDS) <= set(claim)
+    for field in ("handoff_state", "spawn_started_at", "execution_owner"):
+        malformed = dict(claim)
+        malformed.pop(field)
+        with pytest.raises(ValueError, match="missing required"):
+            gov.validate_claim(malformed)
+
+
+def test_cancellation_sentinel_schema_and_atomic_crud(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    path = gov.create_cancellation_sentinel(
+        "carto-refresh-file-test",
+        "unit-test",
+        jobs_root,
+        requested_at=gov.utc_now_iso(100),
+    )
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "requested_at": gov.utc_now_iso(100),
+        "requested_by": "unit-test",
+    }
+    assert (
+        gov.read_cancellation_sentinel("carto-refresh-file-test", jobs_root)["requested_by"]
+        == "unit-test"
+    )
+    with pytest.raises(ValueError, match="missing required"):
+        gov.validate_cancellation_sentinel({"requested_at": gov.utc_now_iso(100)})
+    gov.delete_cancellation_sentinel("carto-refresh-file-test", jobs_root)
+    assert gov.read_cancellation_sentinel("carto-refresh-file-test", jobs_root) is None
+
+
+def test_cross_account_tombstone_artifact_keys_do_not_collide(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    footprint = _footprint(tmp_path)
+    claim_a = _claim(tmp_path, account=ACCOUNT_A, footprint=footprint, job_id="job-a")
+    claim_b = _claim(tmp_path, account=ACCOUNT_B, footprint=footprint, job_id="job-b")
+    tomb_a = gov.build_tombstone_from_claim(claim_a, now_epoch=10)
+    tomb_b = gov.build_tombstone_from_claim(claim_b, now_epoch=10)
+    path_a = gov.write_tombstone_max_merge(tomb_a, jobs_root)
+    path_b = gov.write_tombstone_max_merge(tomb_b, jobs_root)
+    assert path_a != path_b
+    assert path_a.exists() and path_b.exists()
+    assert gov.read_tombstone(path_a)["account_scope_id"] == ACCOUNT_A
+    assert gov.read_tombstone(path_b)["account_scope_id"] == ACCOUNT_B
+
+
+def test_finalize_claim_is_token_safe_max_merges_and_deletes_only_after_tombstone(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    claim = _claim(tmp_path)
+    claim_path = gov.write_claim(claim, jobs_root)
+    assert not gov.finalize_claim("f" * 32, jobs_root)
+    assert claim_path.exists()
+
+    future = gov.build_tombstone_from_claim(claim, now_epoch=200)
+    tombstone_path = gov.write_tombstone_max_merge(future, jobs_root)
+    assert gov.finalize_claim(claim["claim_id"], jobs_root, now_epoch=100)
+    assert not claim_path.exists()
+    assert gov._parse_time(gov.read_tombstone(tombstone_path)["last_terminal_at"]) == 200
+
+
+def test_tombstone_write_failure_preserves_claim(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    claim = _claim(tmp_path)
+    claim_path = gov.write_claim(claim, jobs_root)
+
+    def fail_writer(_path, _payload):
+        raise OSError("unwritable")
+
+    assert not gov.finalize_claim(claim["claim_id"], jobs_root, atomic_writer=fail_writer)
+    assert claim_path.exists()
+    assert not gov.governance_paths(jobs_root).tombstones_dir.exists()
+
+
+def test_shared_sweep_spawn_grace_terminal_preservation_and_dead_claim_finalize(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    terminal_claim = _claim(tmp_path, job_id="terminal-job")
+    terminal_path = gov.write_claim(terminal_claim, jobs_root)
+    _write_job(jobs_root, _job("terminal-job", status="completed"), "terminal.json")
+
+    grace_claim = _claim(
+        tmp_path,
+        job_id="grace-job",
+        footprint=_footprint(tmp_path, "other.py", "file-b"),
+        state="spawning",
+        spawn_started_at=gov.utc_now_iso(995),
+        dedupe=DEDUPE_B,
+    )
+    grace_path = gov.write_claim(grace_claim, jobs_root)
+    _write_job(jobs_root, _job("grace-job"), "grace.json")
+    status_writes: list[str] = []
+
+    def merge_writer(path, payload):
+        status_writes.append(payload["status"])
+        gov.atomic_write_json(path, payload)
+        return True
+
+    result = gov.sweep_region_governance(
+        jobs_root,
+        now_epoch=1000,
+        spawn_grace_seconds=60,
+        liveness_classifier=lambda _stored: "dead",
+        merge_writer=merge_writer,
+    )
+    assert terminal_claim["claim_id"] in result.reaped_claim_ids
+    assert not terminal_path.exists()
+    assert "failed" not in status_writes
+    assert grace_path.exists()
+    assert grace_claim in result.live_claims
+    assert gov.governance_paths(jobs_root).tombstones_dir.exists()
+
+
+def test_claimless_legacy_job_fallback_dead_unknown_and_pidless(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    dead_path = _write_job(jobs_root, _job("legacy-dead", pid=99999999), "dead.json")
+    unknown_path = _write_job(jobs_root, _job("legacy-unknown", pid=123), "unknown.json")
+    pidless = _job("legacy-pidless", pid=1, created_at=gov.utc_now_iso(100))
+    pidless.pop("pid")
+    pidless_path = _write_job(jobs_root, pidless, "pidless.json")
+
+    def classify(pid):
+        return "dead" if int(pid) == 99999999 else "unknown"
+
+    result = gov.sweep_region_governance(
+        jobs_root,
+        now_epoch=1000,
+        start_grace_seconds=30,
+        legacy_liveness_classifier=classify,
+    )
+    assert set(result.terminalized_claimless_job_ids) == {"legacy-dead", "legacy-pidless"}
+    assert gov._read_json(dead_path)["status"] == "failed"
+    assert gov._read_json(pidless_path)["status"] == "failed"
+    assert [job["id"] for job in result.claimless_conflicts] == ["legacy-unknown"]
+    assert gov._read_json(unknown_path)["status"] == "running"
+    assert not gov.governance_paths(jobs_root).tombstones_dir.exists()
+
+
+def test_unknown_claim_liveness_preserves_and_blocks(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    claim = _claim(tmp_path)
+    path = gov.write_claim(claim, jobs_root)
+    result = gov.sweep_region_governance(
+        jobs_root, liveness_classifier=lambda _stored: "unknown"
+    )
+    assert path.exists()
+    assert result.live_claims == [claim]
+    assert not result.reaped_claim_ids
+
+
+def test_verified_dead_q3_lease_reap_is_plain_delete_without_tombstone(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    lease = gov.build_q3_lease(
+        lease_id="1" * 32,
+        account_scope_id=ACCOUNT_A,
+        footprint=_footprint(tmp_path),
+        pid=os.getpid(),
+        pid_create_time=psutil.Process(os.getpid()).create_time(),
+    )
+    path = gov.write_q3_lease(lease, jobs_root)
+    result = gov.sweep_region_governance(
+        jobs_root, liveness_classifier=lambda _stored: "dead"
+    )
+    assert lease["lease_id"] in result.reaped_lease_ids
+    assert not path.exists()
+    assert not gov.governance_paths(jobs_root).tombstones_dir.exists()
+
+
+def test_unclassifiable_claim_tombstone_and_lease_are_preserved_fail_closed(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    paths = gov.governance_paths(jobs_root)
+    for directory, name in (
+        (paths.claims_dir, "broken.lock.json"),
+        (paths.tombstones_dir, "broken.json"),
+        (paths.leases_dir, "broken.lock.json"),
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / name).write_text("{not json", encoding="utf-8")
+    result = gov.sweep_region_governance(jobs_root, now_epoch=10_000)
+    assert len(result.unclassifiable_artifacts) == 3
+    assert all(Path(path).exists() for path in result.unclassifiable_artifacts)
+
+    with pytest.raises(gov.GovernanceStateUnclassifiableError):
+        gov.acquire_q3_leases(
+            [_footprint(tmp_path)], account_scope_id=ACCOUNT_A, jobs_root=jobs_root
+        )
+
+
+def test_partial_multi_target_q3_lease_create_failure_rolls_back_before_mutation(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    targets = [
+        _footprint(tmp_path, "one.py", "file-a"),
+        _footprint(tmp_path, "two.py", "file-b"),
+    ]
+    writes = 0
+    source_mutations: list[str] = []
+
+    def fail_second(path, payload):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("second lease write failed")
+        gov.atomic_write_json(path, payload)
+
+    with pytest.raises(gov.Q3LeaseAcquisitionError) as exc_info:
+        gov.acquire_q3_leases(
+            targets,
+            account_scope_id=ACCOUNT_A,
+            jobs_root=jobs_root,
+            atomic_writer=fail_second,
+        )
+    assert writes == 2
+    assert source_mutations == []
+    lease_dir = gov.governance_paths(jobs_root).leases_dir
+    assert not list(lease_dir.glob("*.lock.json"))
+    assert exc_info.value.residual_paths == ()
+
+
+def test_q3_lease_overlap_is_symmetric_with_active_claim_and_other_lease(tmp_path):
+    jobs_root = tmp_path / "jobs"
+    footprint = _footprint(tmp_path)
+    claim = _claim(tmp_path, footprint=footprint)
+    gov.write_claim(claim, jobs_root)
+    with pytest.raises(gov.GovernanceConflictError):
+        gov.acquire_q3_leases(
+            [footprint],
+            account_scope_id=ACCOUNT_B,
+            jobs_root=jobs_root,
+            sweep_kwargs={"liveness_classifier": lambda _stored: "alive"},
+        )
+
+    # Remove the claim through the one exit door, then acquire a lease and show
+    # that an overlapping second Q3 operation refuses even across accounts.
+    assert gov.finalize_claim(claim["claim_id"], jobs_root)
+    leases = gov.acquire_q3_leases([footprint], account_scope_id=ACCOUNT_A, jobs_root=jobs_root)
+    try:
+        with pytest.raises(gov.GovernanceConflictError):
+            gov.acquire_q3_leases([footprint], account_scope_id=ACCOUNT_B, jobs_root=jobs_root)
+    finally:
+        assert gov.release_q3_leases(leases, jobs_root=jobs_root) == []
+
+
+def test_atomic_governance_writes_never_expose_torn_json(tmp_path):
+    path = tmp_path / "claim.json"
+    gov.atomic_write_json(path, {"n": 0, "payload": "x" * 10_000})
+    stop = threading.Event()
+    failures: list[BaseException] = []
+
+    def reader():
+        while not stop.is_set():
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+                assert isinstance(value["n"], int)
+                assert len(value["payload"]) == 10_000
+            except PermissionError:
+                # Windows may briefly deny an ordinary read while os.replace
+                # swaps the complete file; retrying is still lock-free and, on
+                # every successful open, the JSON must be whole.
+                continue
+            except BaseException as exc:  # pragma: no cover - failure capture
+                failures.append(exc)
+                stop.set()
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    try:
+        for index in range(100):
+            gov.atomic_write_json(path, {"n": index, "payload": "y" * 10_000})
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+    assert failures == []
+
+
+def test_a1_is_wired_into_phase_c_production_launchers():
+    repo = Path(__file__).resolve().parents[1]
+    server_source = (repo / "src/workflowy_mcp/server.py").read_text(encoding="utf-8")
+    worker_source = (repo / "src/workflowy_mcp/weave_worker.py").read_text(encoding="utf-8")
+    pipeline_source = (repo / "src/workflowy_mcp/markdown_generate_pipeline.py").read_text(
+        encoding="utf-8"
+    )
+    assert "from .carto_job_governance import" in server_source
+    assert "adopt_carto_worker_claim" in worker_source
+    assert "launch_carto_refresh_job" in pipeline_source

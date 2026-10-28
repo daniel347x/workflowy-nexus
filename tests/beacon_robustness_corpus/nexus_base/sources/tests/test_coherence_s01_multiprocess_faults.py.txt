@@ -1,0 +1,190 @@
+"""S01 §13.6 — multi-process / fault-injection harness tests."""
+
+from __future__ import annotations
+
+import os
+import threading
+from pathlib import Path
+
+import pytest
+from coherence_harness import (
+    ACCOUNT_A,
+    FAULT_POINTS,
+    TransportOutcome,
+    TransportScript,
+    launch_subprocess,
+    make_coherence_root,
+    run_reader_loop,
+    write_malformed,
+    write_unknown_version,
+)
+
+from workflowy_mcp.coherence import (
+    SemanticEffect,
+    append_journal_transaction,
+    inspect_journal,
+    new_bootstrap_manifest,
+    read_manifest,
+)
+from workflowy_mcp.coherence.durable_io import atomic_write_json_durable
+from workflowy_mcp.coherence.errors import (
+    CoherenceSchemaError,
+    CoherenceStateMissingError,
+    UnsupportedCoherenceSchemaError,
+)
+from workflowy_mcp.coherence.paths import coherence_paths
+from workflowy_mcp.coherence.schema import initialize_manifest_if_absent
+
+TESTS_DIR = Path(__file__).resolve().parent
+
+# Expected post-kill state per named fault point:
+#   point -> (head_after_kill, orphan_seqs_above_head)
+_KILL_EXPECTATIONS = {
+    "before_record_temp_write": (0, []),
+    "after_record_file_fsync": (0, []),
+    "before_record_replace": (0, []),
+    "after_record_replace_before_manifest": (0, [1]),
+    "before_manifest_temp_write": (0, [1]),
+    "after_manifest_file_fsync": (0, [1]),
+    "before_manifest_replace": (0, [1]),
+    "after_manifest_replace": (1, []),
+}
+
+_CHILD_CODE = """
+import sys
+sys.path.insert(0, sys.argv[3])
+from coherence_harness import exit_ops, make_coherence_root
+from workflowy_mcp.coherence import (
+    JournalProducer, SemanticEffect, append_journal_transaction, coherence_paths,
+)
+import os
+paths = coherence_paths(sys.argv[1], jobs_root=sys.argv[2])
+producer = JournalProducer(pid=os.getpid(), pid_create_time=1.0,
+                           owner_kind='process', ownership_kind='none')
+append_journal_transaction(
+    paths,
+    operation_kind='test',
+    effects=[SemanticEffect.tombstone(['x'])],
+    producer=producer,
+    fs_ops=exit_ops(sys.argv[4], 42),
+)
+print('SURVIVED')
+"""
+
+
+@pytest.mark.parametrize("point", FAULT_POINTS)
+def test_kill_at_every_named_fault_point(tmp_path, point):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    jobs_root = str(paths.account_root.parent.parent)
+    proc = launch_subprocess(_CHILD_CODE, ACCOUNT_A, jobs_root, str(TESTS_DIR), point)
+    try:
+        out, err = proc.communicate(timeout=60)
+    except BaseException:
+        proc.kill()
+        proc.communicate(timeout=10)
+        raise
+    assert proc.returncode == 42, (out, err)
+    assert "SURVIVED" not in out
+
+    expected_head, expected_orphans = _KILL_EXPECTATIONS[point]
+    manifest = read_manifest(paths)
+    assert manifest.journal_head_seq == expected_head, point
+    report = inspect_journal(paths, manifest)
+    assert report["above_head"] == expected_orphans, point
+
+    if expected_orphans:
+        # deterministic recovery: the next locked append adopts the orphan
+        # exactly once, then continues the contiguous stream.
+        from workflowy_mcp.coherence import JournalProducer
+
+        producer = JournalProducer(
+            pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+        )
+        record, new_manifest = append_journal_transaction(
+            paths,
+            operation_kind="test",
+            effects=[SemanticEffect.tombstone(["y"])],
+            producer=producer,
+        )
+        assert new_manifest.journal_head_seq == 2
+        assert record.sequence == 2 and record.previous_sequence == 1
+
+
+def test_reader_loop_observes_only_complete_old_or_new_json(tmp_path):
+    make_coherence_root(tmp_path, ACCOUNT_A)
+    target = tmp_path / "artifact.json"
+    gen_a = {"generation": "A", "payload": list(range(50))}
+    gen_b = {"generation": "B", "payload": list(range(50, 100))}
+    atomic_write_json_durable(target, gen_a)
+
+    stop = threading.Event()
+    result_holder: dict = {}
+
+    def reader() -> None:
+        result_holder["result"] = run_reader_loop(target, stop, acceptable=[gen_a, gen_b])
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    for _ in range(100):
+        atomic_write_json_durable(target, gen_b)
+        atomic_write_json_durable(target, gen_a)
+    stop.set()
+    thread.join(timeout=15)
+    result = result_holder["result"]
+    assert result.torn == 0
+    assert not result.unexpected
+    assert result.reads > 0
+
+
+def test_corrupt_missing_unknown_version_artifact_injectors(tmp_path):
+    paths = coherence_paths(ACCOUNT_A, jobs_root=tmp_path / "jobs")
+    with pytest.raises(CoherenceStateMissingError):
+        read_manifest(paths)
+
+    manifest = new_bootstrap_manifest(ACCOUNT_A)
+    initialize_manifest_if_absent(paths, manifest)
+
+    write_malformed(paths.manifest_path)
+    with pytest.raises(CoherenceSchemaError):
+        read_manifest(paths)
+
+    write_unknown_version(paths.manifest_path, manifest.to_dict())
+    with pytest.raises(UnsupportedCoherenceSchemaError):
+        read_manifest(paths)
+
+
+def test_transport_outcome_seam():
+    script = TransportScript(
+        [
+            TransportOutcome("success", {"id": "n1"}),
+            TransportOutcome("timeout_committed"),
+            TransportOutcome("ambiguous", detail="unverifiable"),
+        ]
+    )
+    assert script({"op": 1}).kind == "success"
+    assert script({"op": 2}).kind == "timeout_committed"
+    assert script(None).kind == "ambiguous"
+    assert len(script.calls) == 3
+    with pytest.raises(AssertionError):
+        script(None)
+    with pytest.raises(ValueError):
+        TransportOutcome("bogus_kind")
+
+
+# ---------------------------------------------------------------------------
+# Audit-gate addition (A8)
+# ---------------------------------------------------------------------------
+
+
+def test_import_coherence_does_not_import_server():
+    """Importing the dependency-light coherence package must not pull the
+    FastMCP server, credentials, or broker machinery."""
+    code = (
+        "import workflowy_mcp.coherence, sys; "
+        "print('server-imported:', 'workflowy_mcp.server' in sys.modules)"
+    )
+    result = launch_subprocess(code)
+    out, err = result.communicate(timeout=30)
+    assert result.returncode == 0, err
+    assert "server-imported: False" in out
+    assert "server.py" not in err

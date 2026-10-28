@@ -1,0 +1,192 @@
+{
+  "record_layout": "summary-head/2",
+  "id": "carto-markdown-generate-1fa52c8e",
+  "type": "CARTO_MARKDOWN_GENERATE",
+  "mode": "file",
+  "root_uuid": "454056dc-3d12-55ba-994a-60fff0ab11e9",
+  "status": "completed_with_warnings",
+  "outcome": "completed_with_errors",
+  "has_errors": true,
+  "has_warnings": true,
+  "has_findings": true,
+  "error": null,
+  "created_at": "2026-10-27T14:11:31.841788",
+  "updated_at": "2026-10-27T14:11:31.868720",
+  "progress": {
+    "total_files": 1,
+    "completed_files": 0,
+    "current_file": null,
+    "current_phase": "done",
+    "nodes_created": 0,
+    "nodes_updated": 0,
+    "nodes_moved": 0,
+    "nodes_deleted": 0
+  },
+  "warning_count": 2,
+  "warnings": [
+    {
+      "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+      "note": "j4 local parser failure",
+      "section": false
+    },
+    {
+      "type": "phase8_refresh_failed",
+      "error": "Source outline unavailable; existing symbols retained",
+      "disk_committed": true
+    }
+  ],
+  "execution_model": "daemon_task",
+  "execution_owner": "launcher",
+  "detached": false,
+  "cache_refresh_required": true,
+  "freshness_disposition": "performed",
+  "snapshot_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/snapshots/20261027-101131-832109_pid2081463_nodes_export_snapshot.json",
+  "snapshot_lineage": {
+    "account_scope_id": "40976e08f3bf596e573c1a1994718f5f",
+    "epoch_number": 0,
+    "epoch_id": "7d0ecc95e781737122bba9ed7c2c6d61",
+    "incorporated_through_seq": 0
+  },
+  "live_basis_lineage": {
+    "account_scope_id": "40976e08f3bf596e573c1a1994718f5f",
+    "epoch_number": 0,
+    "epoch_id": "7d0ecc95e781737122bba9ed7c2c6d61",
+    "adopted_sequence": 0
+  },
+  "logs_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/jobs/20261027-141131_carto-markdown-generate-1fa52c8e.log",
+  "claim_id": "4f4427c9956145b4943717c871b19e9f",
+  "dedupe_key": "6a8407e4d217bbdf7e4c23704abfabcca932c6811c66f98d0962f4ecb09a695d",
+  "account_scope_id": "40976e08f3bf596e573c1a1994718f5f",
+  "footprint": {
+    "kind": "file",
+    "path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+    "root_uuid": "454056dc-3d12-55ba-994a-60fff0ab11e9",
+    "ancestor_chain": [
+      "454056dc-3d12-55ba-994a-60fff0ab11e9",
+      "3ed4cb0d-3b16-5f8a-8013-c6fb25a2343d",
+      "7c0e4983-ffb5-53cb-81b6-430b3af18049"
+    ]
+  },
+  "launcher": "gui",
+  "parent_job_id": null,
+  "handoff_state": "preparing",
+  "pid": 2081463,
+  "_job_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/jobs/20261027-141131_carto-markdown-generate-1fa52c8e.json",
+  "evidence": {
+    "files": {
+      "path": "files.jsonl",
+      "rows": 2,
+      "lines": 4,
+      "bytes": 23233,
+      "pending": 0
+    },
+    "nodes": null
+  },
+  "in_flight": null,
+  "result_summary": {
+    "warnings_total": 2,
+    "warnings_by_type": {
+      "phase8_refresh_failed": 1,
+      "warning": 1
+    },
+    "warnings_truncated": 0,
+    "changed": true,
+    "findings_total": 1,
+    "findings_by_code": {
+      "mapper_parse_error": 1
+    },
+    "findings_truncated": 0,
+    "summary_line": "1 successful \u00b7 0 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 1,
+    "failed": 0,
+    "skipped": 0,
+    "partial_success": true,
+    "success": true,
+    "cancelled": false,
+    "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+    "publication": {
+      "success": true,
+      "changed": true,
+      "before_sha256": "5c1c635232beab483ddc321566f6b1b0440eb7b254c95001de297ad3d2918873",
+      "candidate_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+      "edited_ranges": [
+        {
+          "start_byte": 3,
+          "end_byte": 28,
+          "replacement_bytes": 183,
+          "owner": "document"
+        }
+      ],
+      "structural_effects": [],
+      "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12"
+    },
+    "publication_policy": {
+      "expected_sha256": "5c1c635232beab483ddc321566f6b1b0440eb7b254c95001de297ad3d2918873",
+      "source_exists": true,
+      "bom": "retain_existing_or_generated",
+      "had_bom": true,
+      "newlines": "retain_generated_physical_endings_with_local_metadata_and_eof",
+      "line_endings": [
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n"
+      ]
+    },
+    "ast_beacons_reapplied": 1,
+    "ast_beacons_skipped": 0,
+    "completed_with_warnings": true,
+    "message": "Generated Markdown at /tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md; publication and inline refresh are separate outcomes",
+    "errors_total": 1,
+    "node_errors_total": 0,
+    "phase8_failed": true,
+    "files_changed_total": 1,
+    "events_total": 0,
+    "findings_by_severity": {
+      "error": 1
+    },
+    "phase8_summary": {
+      "execution": "inline",
+      "success": false,
+      "error": "Source outline unavailable; existing symbols retained",
+      "files_total": 1,
+      "files_failed": 1
+    },
+    "findings_preview": [
+      {
+        "code": "mapper_parse_error",
+        "severity": "error",
+        "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+        "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+        "line": 0,
+        "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+      }
+    ],
+    "files_changed": [
+      "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md"
+    ],
+    "errors": [],
+    "preview_totals": {
+      "findings_preview": 1,
+      "files_changed": 1,
+      "errors": 0
+    }
+  }
+}

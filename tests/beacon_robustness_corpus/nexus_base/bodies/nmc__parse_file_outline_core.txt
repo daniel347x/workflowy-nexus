@@ -1,0 +1,293 @@
+def parse_file_outline_core(file_path: str) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Ungrouped core of parse_file_outline (R1): the file read, the AST
+    walk and Python beacon attachment, moved verbatim out of the wrapper's
+    try block with their nested helpers. Returns ``(outline_nodes,
+    lines)``; no virtual grouping and no parse-error handling -- errors
+    propagate to the caller (the wrapper adds grouping and the Parse
+    Error node).
+    """
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    tree = ast.parse(content, filename=file_path)
+    lines = content.splitlines()
+    decorator_ranges_by_definition = _python_decorator_ranges_by_definition(lines, tree=tree)
+
+    # @beacon[
+    #   id=auto-beacon@parse_file_outline._extract_ast_comment_context-h4xx,
+    #   role=parse_file_outline._extract_ast_comment_context,
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _extract_ast_comment_context(start_lineno: int, decor_start: Optional[int]) -> list[str]:
+        context: list[str] = []
+        # Above: skip decorator region between decor_start and the AST node.
+        j = start_lineno - 1
+        while j >= 1:
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j -= 1
+                continue
+            if decor_start is not None and decor_start <= j < start_lineno:
+                # Inside decorator region (including multiline decorators);
+                # skip these lines entirely so we can reach comments that
+                # truly lead the AST node.
+                j -= 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.insert(0, body)
+                j -= 1
+                continue
+            break
+
+        # Below: immediate top-of-body comments (before docstring or code)
+        j = start_lineno + 1
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.lstrip()
+            if not stripped:
+                j += 1
+                continue
+            if stripped.startswith("#"):
+                body = stripped.lstrip("#").lstrip()
+                if body:
+                    context.append(body)
+                j += 1
+                continue
+            break
+
+        return _strip_beacon_meta_blocks_from_context(context)
+
+    priority_counter = [100]  # Mutable list to share across recursion
+
+    # @beacon[
+    #   id=carto-parser@should-map-python-assigned-name,
+    #   role=ƒ _should_map_python_assigned_name(name: str),
+    #   slice_labels=carto-js-ts,ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    #   comment=Select Python assigned names that should become Cartographer outline nodes, including module-level dunder globals like __version__ and __all__,
+    # ]
+    def _should_map_python_assigned_name(name: str, *, qual_prefix: Optional[str]) -> bool:
+        """Return True when an assigned Name should appear in the Python outline."""
+        if not isinstance(name, str) or not name:
+            return False
+        if name.isupper():
+            return True
+        # Map module-level dunder globals like __version__ / __all__ so
+        # package __init__.py and similar files remain structurally visible.
+        if qual_prefix is None and len(name) > 4 and name.startswith("__") and name.endswith("__"):
+            return True
+        return False
+
+    # @beacon[
+    #   id=carto-parser@assigned-name-note-label,
+    #   role=ƒ _assigned_name_note_label(name: str),
+    #   slice_labels=carto-js-ts,ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    #   comment=Choose the note label for mapped Python assigned names, distinguishing module-level dunder globals from regular constants,
+    # ]
+    def _assigned_name_note_label(name: str, *, qual_prefix: Optional[str]) -> str:
+        if qual_prefix is None and len(name) > 4 and name.startswith("__") and name.endswith("__"):
+            return "Module global"
+        return "Constant"
+
+    # @beacon[
+    #   id=carto-parser@iter-nested-statement-bodies-py,
+    #   role=ƒ _iter_nested_statement_bodies(stmt: AST),
+    #   slice_labels=carto-js-ts,ra-reconcile,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _iter_nested_statement_bodies(stmt: ast.AST) -> List[List[ast.AST]]:
+        """Return nested statement lists for control-flow containers.
+
+        We intentionally do NOT create outline nodes for statements like
+        if/try/with/for/match, but we *do* need to descend into their
+        bodies so nested defs/classes become visible to Cartographer/F12.
+
+        The returned bodies are sorted by their first source line so nested
+        AST nodes appear in lexical order regardless of construct type.
+        """
+        candidates: List[tuple[int, int, List[ast.AST]]] = []
+        ordinal = 0
+
+        # @beacon[
+        #   id=auto-beacon@parse_file_outline._iter_nested_statement_bodies._add-ym6p,
+        #   role=parse_file_outline._iter_nested_statement_bodies._add,
+        #   slice_labels=carto-fwd-source,
+        #   kind=ast,
+        # ]
+        def _add(body: Any) -> None:
+            nonlocal ordinal
+            if not isinstance(body, list) or not body:
+                return
+            first_stmt = body[0]
+            first_lineno = getattr(first_stmt, "lineno", None)
+            if not isinstance(first_lineno, int):
+                first_lineno = 10**9
+            candidates.append((first_lineno, ordinal, body))
+            ordinal += 1
+
+        for attr in ("body", "orelse", "finalbody"):
+            _add(getattr(stmt, attr, None))
+
+        handlers = getattr(stmt, "handlers", None)
+        if isinstance(handlers, list):
+            for handler in handlers:
+                _add(getattr(handler, "body", None))
+
+        cases = getattr(stmt, "cases", None)
+        if isinstance(cases, list):
+            for case in cases:
+                _add(getattr(case, "body", None))
+
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return [body for _, _, body in candidates]
+
+    # @beacon[
+    #   id=auto-beacon@parse_file_outline.walk_body-moke,
+    #   role=parse_file_outline.walk_body,
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def walk_body(
+        body_items: List[ast.AST],
+        qual_prefix: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for item in body_items:
+            # ONE shared physical-start interpretation for classes and
+            # functions, also used by forward attachment and reverse writes.
+            decor_ranges = decorator_ranges_by_definition.get(getattr(item, "lineno", 0) - 1, [])
+            decor_start: Optional[int] = decor_ranges[0][0] + 1 if decor_ranges else None
+            if isinstance(item, ast.ClassDef):
+                qual = item.name if not qual_prefix else f"{qual_prefix}.{item.name}"
+                start = getattr(item, "lineno", None)
+                end = getattr(item, "end_lineno", start)
+                # Build note: AST_QUALNAME header, then optional separator and docstring.
+                doc = get_docstring(item)
+                note_lines: list[str] = [f"AST_QUALNAME: {qual}"]
+                if doc:
+                    note_lines.append("---")
+                    note_lines.append(doc)
+                context_lines = _extract_ast_comment_context(start, decor_start) if isinstance(start, int) else []
+                if context_lines:
+                    note_lines.append("")
+                    note_lines.append("CONTEXT COMMENTS (PYTHON):")
+                    note_lines.extend(context_lines)
+                note_text = "\n".join(note_lines)
+
+                node = {
+                    "name": f"{EMOJI_CLASS} class {item.name}",
+                    "priority": priority_counter[0],
+                    "note": note_text,
+                    "children": walk_body(item.body, qual_prefix=qual),
+                    "ast_type": "class",
+                    "ast_name": item.name,
+                    "ast_qualname": qual,
+                    "file_path": file_path,
+                    "orig_lineno_start_unused": start,
+                    "orig_lineno_end_unused": end,
+                    "decor_start_lineno": decor_start,
+                }
+                priority_counter[0] += 100
+                results.append(node)
+            elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                prefix = EMOJI_ASYNC if isinstance(item, ast.AsyncFunctionDef) else EMOJI_FUNC
+                sig = get_function_signature(item)
+                qual = item.name if not qual_prefix else f"{qual_prefix}.{item.name}"
+                start = getattr(item, "lineno", None)
+                end = getattr(item, "end_lineno", start)
+
+                doc = get_docstring(item)
+                note_lines: list[str] = [f"AST_QUALNAME: {qual}"]
+                if doc:
+                    note_lines.append("---")
+                    note_lines.append(doc)
+                context_lines = _extract_ast_comment_context(start, decor_start) if isinstance(start, int) else []
+                if context_lines:
+                    note_lines.append("")
+                    note_lines.append("CONTEXT COMMENTS (PYTHON):")
+                    note_lines.extend(context_lines)
+                note_text = "\n".join(note_lines)
+
+                node = {
+                    "name": f"{prefix} {sig}",
+                    "priority": priority_counter[0],
+                    "note": note_text,
+                    "children": walk_body(item.body, qual_prefix=qual),
+                    "ast_type": "async_function" if isinstance(item, ast.AsyncFunctionDef) else "function",
+                    "ast_name": item.name,
+                    "ast_qualname": qual,
+                    "file_path": file_path,
+                    "orig_lineno_start_unused": start,
+                    "orig_lineno_end_unused": end,
+                    "decor_start_lineno": decor_start,
+                }
+                priority_counter[0] += 100
+                results.append(node)
+            elif isinstance(item, ast.Assign):
+                # Optional: Capture constants and selected module globals at this structural level.
+                for target in item.targets:
+                    if isinstance(target, ast.Name) and _should_map_python_assigned_name(
+                        target.id,
+                        qual_prefix=qual_prefix,
+                    ):
+                        start = getattr(item, "lineno", None)
+                        end = getattr(item, "end_lineno", start)
+                        qual_const = target.id if not qual_prefix else f"{qual_prefix}.{target.id}"
+                        note_label = _assigned_name_note_label(target.id, qual_prefix=qual_prefix)
+                        note_text = f"AST_QUALNAME: {qual_const}\n---\n{note_label}"
+                        node = {
+                            "name": f"{EMOJI_CONST} {target.id}",
+                            "priority": priority_counter[0],
+                            "note": note_text,
+                            "children": [],
+                            "ast_type": "const",
+                            "ast_name": target.id,
+                            "ast_qualname": qual_const,
+                            "file_path": file_path,
+                            "orig_lineno_start_unused": start,
+                            "orig_lineno_end_unused": end,
+                        }
+                        priority_counter[0] += 100
+                        results.append(node)
+            elif isinstance(item, ast.AnnAssign):
+                target = item.target
+                if isinstance(target, ast.Name) and _should_map_python_assigned_name(
+                    target.id,
+                    qual_prefix=qual_prefix,
+                ):
+                    start = getattr(item, "lineno", None)
+                    end = getattr(item, "end_lineno", start)
+                    qual_const = target.id if not qual_prefix else f"{qual_prefix}.{target.id}"
+                    note_label = _assigned_name_note_label(target.id, qual_prefix=qual_prefix)
+                    note_text = f"AST_QUALNAME: {qual_const}\n---\n{note_label}"
+                    node = {
+                        "name": f"{EMOJI_CONST} {target.id}",
+                        "priority": priority_counter[0],
+                        "note": note_text,
+                        "children": [],
+                        "ast_type": "const",
+                        "ast_name": target.id,
+                        "ast_qualname": qual_const,
+                        "file_path": file_path,
+                        "orig_lineno_start_unused": start,
+                        "orig_lineno_end_unused": end,
+                    }
+                    priority_counter[0] += 100
+                    results.append(node)
+            else:
+                for nested_body in _iter_nested_statement_bodies(item):
+                    results.extend(walk_body(nested_body, qual_prefix=qual_prefix))
+        return results
+
+    outline_nodes = walk_body(tree.body)
+    _dedupe_python_const_ast_qualnames(outline_nodes)
+    apply_python_beacons(
+        file_path, lines, outline_nodes,
+        decorator_ranges_by_definition=decorator_ranges_by_definition,
+    )
+    return outline_nodes, lines

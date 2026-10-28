@@ -1,0 +1,36 @@
+.git
+*.wav
+*.png
+.cache
+__pycache__
+deprecated
+attachments
+archived
+cartographer_jobs
+.windsurf
+.viminfo
+.ssh
+.ssh-mcp
+.python_history
+.gnupg
+.gk
+.docker
+.codeium
+.bun
+.bash_history
+.venv
+.pytest_cache
+katex
+.ruff_cache
+.venv-wsl
+.runs.codenomad
+.codenomad
+.oc_shared
+# test-run receipts and logs (gitignored; rotated by scripts/run_tests.py, so never map them)
+.runs
+.last_run.json
+.last_run.log
+# corrupted-file backups left by old Stage-2 repairs
+*.stage2-corrupted-*
+# the whole test tree: tests read their files (fixtures, corpora, manifests) from disk; nothing navigates them through the map
+tests

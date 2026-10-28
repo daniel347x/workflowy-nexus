@@ -1,0 +1,361 @@
+def map_codebase(
+    root_path: str,
+    include_exts: List[str] = None,
+    exclude_patterns: List[str] = None,
+    *,
+    repo_root: str | None = None,
+) -> Dict[str, Any]:
+    """
+    Wraps the inner file parsing into a directory walker.
+    Returns a single root NEXUS node representing the codebase tree.
+
+    NOTE: This function is used to initialize a Cartographer codebase map
+    via MCP tool calls, but this full-codebase mapping is not considered
+    part of the minimal NEXUS Core v1 surface. It remains here for
+    convenience and advanced workflows.
+    """
+
+    # Load .nexusignore patterns (optional) with ancestor walk.
+    #
+    # Semantics:
+    # - Start at root_path (directory mapping root).
+    # - Walk upward, loading any .nexusignore files found.
+    # - Stop when we reach repo_root (when provided) or the filesystem root.
+    #
+    # Patterns are basename-only globs (no path separators).
+    ignore_patterns: List[str] | None = None
+    ignore_sources: List[str] = []
+
+    # @beacon[
+    #   id=auto-beacon@map_codebase._collect_nexusignore_patterns-3h3e,
+    #   role=ƒ _collect_nexusignore_patterns(),
+    #   slice_labels=nexus-path-resolution-logic,carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _collect_nexusignore_patterns(
+        *,
+        start_dir: str,
+        stop_dir: str | None,
+    ) -> tuple[List[str], List[str]]:
+        patterns_out: List[str] = []
+        sources_out: List[str] = []
+
+        cur = os.path.normpath(start_dir)
+        stop_norm = os.path.normcase(os.path.normpath(stop_dir)) if stop_dir else None
+
+        visited: set[str] = set()
+        while cur and cur not in visited:
+            visited.add(cur)
+
+            ig_path = os.path.join(cur, ".nexusignore")
+            if os.path.isfile(ig_path):
+                sources_out.append(ig_path)
+                invalid: List[str] = []
+                with open(ig_path, "r", encoding="utf-8") as ig:
+                    for line in ig:
+                        raw = line.rstrip("\n\r")
+                        stripped = raw.strip()
+                        if not stripped or stripped.startswith("#"):
+                            continue
+                        if "/" in stripped or "\\" in stripped:
+                            invalid.append(stripped)
+                            continue
+                        patterns_out.append(stripped)
+
+                if invalid:
+                    print(
+                        "[NEXUS MAP] Ignoring .nexusignore patterns with path separators in "
+                        f"{ig_path!r}: {invalid!r}",
+                        file=sys.stderr,
+                    )
+
+            if stop_norm and os.path.normcase(cur) == stop_norm:
+                break
+
+            parent = os.path.dirname(cur)
+            if not parent or parent == cur:
+                break
+            cur = parent
+
+        # De-dupe while preserving order
+        seen: set[str] = set()
+        deduped: List[str] = []
+        for p in patterns_out:
+            if p not in seen:
+                seen.add(p)
+                deduped.append(p)
+
+        return (deduped, sources_out)
+
+    try:
+        start_dir = root_path if os.path.isdir(root_path) else os.path.dirname(root_path)
+        if start_dir and os.path.isdir(start_dir):
+            ignore_patterns, ignore_sources = _collect_nexusignore_patterns(
+                start_dir=str(start_dir),
+                stop_dir=str(repo_root) if repo_root else None,
+            )
+            if ignore_patterns:
+                print(
+                    f"[NEXUS MAP] Using .nexusignore patterns={ignore_patterns!r} from sources={ignore_sources!r}",
+                    file=sys.stderr,
+                )
+            else:
+                ignore_patterns = None
+    except Exception as e:  # pragma: no cover - safety net
+        print(
+            f"[NEXUS MAP] Failed to discover .nexusignore via ancestor walk from {root_path!r}: {e}",
+            file=sys.stderr,
+        )
+        ignore_patterns = None
+
+    # @beacon[
+    #   id=auto-beacon@map_codebase._is_ignored_name-e2df,
+    #   role=map_codebase._is_ignored_name,
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def _is_ignored_name(name: str) -> bool:
+        if name == "__pycache__":
+            return True
+        if not ignore_patterns:
+            return False
+        # Simple fnmatch-style globbing over basenames (no path semantics).
+        import fnmatch
+
+        for pat in ignore_patterns:
+            if fnmatch.fnmatch(name, pat):
+                return True
+        return False
+
+    # Portability: descendant FILE/FOLDER nodes should usually store relative Path:
+    # values. When repo_root is supplied, we use it; otherwise, for directory maps
+    # we default to root_path as the note root.
+    repo_root_for_notes: str | None = None
+    if repo_root and isinstance(repo_root, str):
+        repo_root_for_notes = repo_root
+    elif os.path.isdir(root_path):
+        repo_root_for_notes = root_path
+
+    # @beacon[
+    #   id=auto-beacon@map_codebase.should_include-td2v,
+    #   role=ƒ should_include(name: str),
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def should_include(name: str) -> bool:
+        if exclude_patterns:
+            for pat in exclude_patterns:
+                if pat in name:
+                    return False
+
+        if _is_ignored_name(name):
+            return False
+
+        # If include list is provided, must match extension (files only)
+        if include_exts:
+            _, ext = os.path.splitext(name)
+            if ext.lower() not in include_exts:
+                return False
+        return True
+
+    # @beacon[
+    #   id=auto-beacon@map_codebase.scan_dir-k123,
+    #   role=ƒ scan_dir(current_path: str),
+    #   slice_labels=carto-fwd-source,
+    #   kind=ast,
+    # ]
+    def scan_dir(current_path: str) -> List[Dict[str, Any]]:
+        nodes = []
+        try:
+            items = sorted(os.listdir(current_path))
+            for item in items:
+                full_path = os.path.join(current_path, item)
+
+                # Ignore hidden/system dirs
+                if item.startswith('.') or item == "__pycache__":
+                    continue
+
+                # Apply .nexusignore semantics (directories and files)
+                if _is_ignored_name(item):
+                    continue
+
+                if exclude_patterns and any(pat in item for pat in exclude_patterns):
+                    continue
+
+                if os.path.isdir(full_path):
+                    # Directories are filtered only by exclude_patterns and .nexusignore;
+                    # include_exts apply to files, not folders.
+                    children = scan_dir(full_path)
+                    if children:  # Only add non-empty directories
+                        folder_note = format_file_note(full_path, repo_root=repo_root_for_notes)
+                        nodes.append({
+                            "name": f"{EMOJI_FOLDER} {item}",
+                            "note": folder_note,
+                            "children": children,
+                        })
+
+                elif os.path.isfile(full_path):
+                    # Extension Check for files only
+                    _, ext = os.path.splitext(item)
+                    ext = ext.lower()
+
+                    if include_exts and ext not in include_exts:
+                        continue
+
+                    # Dispatch
+                    line_count: Optional[int] = None
+                    if ext == '.py':
+                        icon = EMOJI_PYTHON
+                        children = parse_file_outline(full_path)
+                        line_count = _get_line_count(full_path)
+                    elif ext == '.md':
+                        icon = EMOJI_MARKDOWN
+                        children = parse_markdown_structure(full_path)
+                        line_count = _get_line_count(full_path)
+                    elif ext in {'.js', '.jsx'}:
+                        icon = EMOJI_JS
+                        children = parse_js_ts_outline(full_path)
+                        line_count = _get_line_count(full_path)
+                    elif ext in {'.ts', '.tsx'}:
+                        icon = EMOJI_TS
+                        children = parse_js_ts_outline(full_path)
+                        line_count = _get_line_count(full_path)
+                    elif ext == '.vue':
+                        icon = EMOJI_VUE
+                        children = parse_vue_outline(full_path)
+                        line_count = _get_line_count(full_path)
+                    elif ext == '.sql':
+                        icon = EMOJI_SQL
+                        with open(full_path, 'r', encoding='utf-8') as f:
+                            sql_lines = f.read().splitlines()
+                        line_count = len(sql_lines)
+                        children: List[Dict[str, Any]] = []
+                        sql_beacons = parse_sql_beacon_blocks(sql_lines)
+                        apply_sql_beacons(sql_lines, children, sql_beacons)
+                    elif ext == '.sh':
+                        icon = EMOJI_SHELL
+                        with open(full_path, 'r', encoding='utf-8') as f:
+                            sh_lines = f.read().splitlines()
+                        line_count = len(sh_lines)
+                        children = []
+                        sh_beacons = parse_sh_beacon_blocks(sh_lines)
+                        apply_sh_beacons(sh_lines, children, sh_beacons)
+                    else:
+                        icon = EMOJI_FILE
+                        children = []  # Generic file = Leaf node
+                        line_count = _get_line_count(full_path)
+
+                    note = format_file_note(full_path, line_count=line_count, repo_root=repo_root_for_notes)
+
+                    nodes.append({
+                        "name": f"{icon} {item}",
+                        "note": note,
+                        "children": children,
+                    })
+
+        except Exception as e:
+            print(f"Error scanning {current_path}: {e}")
+
+        return nodes
+
+    root_name = os.path.basename(root_path) or "Source Code"
+    if os.path.isfile(root_path):
+        # Single file mode dispatch
+        _, ext = os.path.splitext(root_path)
+        ext = ext.lower()
+        if ext == '.py':
+            children = parse_file_outline(root_path)
+            lc = _get_line_count(root_path)
+            note = format_file_note(root_path, line_count=lc, repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_PYTHON} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children
+            }
+        elif ext == '.md':
+            children = parse_markdown_structure(root_path)
+            lc = _get_line_count(root_path)
+            note = format_file_note(root_path, line_count=lc, repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_MARKDOWN} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children
+            }
+        elif ext in ('.js', '.jsx'):
+            children = parse_js_ts_outline(root_path)
+            lc = _get_line_count(root_path)
+            note = format_file_note(root_path, line_count=lc, repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_JS} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children,
+            }
+        elif ext in ('.ts', '.tsx'):
+            children = parse_js_ts_outline(root_path)
+            lc = _get_line_count(root_path)
+            note = format_file_note(root_path, line_count=lc, repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_TS} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children,
+            }
+        elif ext == '.vue':
+            children = parse_vue_outline(root_path)
+            lc = _get_line_count(root_path)
+            note = format_file_note(root_path, line_count=lc, repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_VUE} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children,
+            }
+        elif ext == '.sql':
+            with open(root_path, 'r', encoding='utf-8') as f:
+                sql_lines = f.read().splitlines()
+            children: List[Dict[str, Any]] = []
+            sql_beacons = parse_sql_beacon_blocks(sql_lines)
+            apply_sql_beacons(sql_lines, children, sql_beacons)
+            note = format_file_note(root_path, line_count=len(sql_lines), repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_SQL} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children,
+            }
+        elif ext == '.sh':
+            with open(root_path, 'r', encoding='utf-8') as f:
+                sh_lines = f.read().splitlines()
+            children: List[Dict[str, Any]] = []
+            sh_beacons = parse_sh_beacon_blocks(sh_lines)
+            apply_sh_beacons(sh_lines, children, sh_beacons)
+            note = format_file_note(root_path, line_count=len(sh_lines), repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_SHELL} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children,
+            }
+        elif ext in ('.yml', '.yaml'):
+            with open(root_path, 'r', encoding='utf-8') as f:
+                yml_lines = f.read().splitlines()
+            children: List[Dict[str, Any]] = []
+            yml_beacons = parse_yaml_beacon_blocks(yml_lines)
+            apply_yaml_beacons(yml_lines, children, yml_beacons)
+            note = format_file_note(root_path, line_count=len(yml_lines), repo_root=repo_root_for_notes)
+            return {
+                "name": f"{EMOJI_FILE} {os.path.basename(root_path)}",
+                "note": note,
+                "children": children,
+            }
+        else:
+             lc = _get_line_count(root_path)
+             note = format_file_note(root_path, line_count=lc, repo_root=repo_root_for_notes)
+             return {
+                "name": f"{EMOJI_FILE} {os.path.basename(root_path)}",
+                "note": note,
+                "children": []
+            }
+    
+    # Directory mode
+    return {
+        "name": f"🗺️ Source Map: {root_name}",
+        "note": f"Root: {repo_root_for_notes or root_path}",
+        "children": scan_dir(root_path)
+    }

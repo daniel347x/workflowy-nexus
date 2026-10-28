@@ -1,0 +1,39 @@
+{
+  "extension_baseline": "a926d58855727caa800cbdd62fc2ce7876a37655",
+  "workspace_root": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+  "workspace_node_count": 36,
+  "source_export_nodes_sha256": "67e76845630bdaaccfbc93145c0b8560ce07af8e5b81e4e17de635e5ae3a764d",
+  "captured_at": "2026-10-27",
+  "calls": [
+    {"tool": "glimpse", "verb": "run", "params": {"render_spec": {"tags": ["offline"], "root": "63a894eb"}, "headings_only": false, "include_rows": true}, "output": "offline-mode.json"},
+    {"tool": "glimpse", "verb": "run", "params": {"render_spec": {"tags": ["sharing"], "root": "63a894eb"}, "headings_only": false, "include_rows": true}, "output": "sharing.json"},
+    {"tool": "anchor", "verb": "dock.render", "params": {"dock_handle": "786aeb66", "descend_policy": "all", "include_rows": true}, "output": "customer-feedback.json"},
+    {"tool": "anchor", "verb": "dock.render", "params": {"dock_handle": "786aeb66", "descend_policy": "all", "output_file": "/mnt/c/tmp/nexus-readme-001/source/customer-feedback.md"}, "output": "customer-feedback.md"},
+    {"tool": "lightning_rod", "verb": "render_search", "params": {"root_handle": "63a894eb", "query": "basement OR signal", "headings_only": false}, "output": "basement-or-signal.md"},
+    {"tool": "glimpse", "verb": "run", "params": {"render_spec": {"kind": "lightning_rod", "root_uuid": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8", "lightning": {"mode": "render_search", "query": "basement OR signal", "query_mode": "smart", "match_scope": "name_and_note"}, "headings_only": false}, "include_rows": true}, "output": "basement-or-signal.json"}
+  ],
+  "markdown_storage": "Each Markdown file was written directly by its tool's output_file option, not composed by the fixture. JSON envelopes retain that Markdown, the returned canonical row selection/fields and render_spec from include_rows, plus the render_scope from each output_file acknowledgement. The latter uses selection for the former's lightning payload.",
+  "customer_feedback_refresh": {
+    "baseline": "37efcad1377c02946d9d31eb31000e0c626c264e",
+    "descend_policy": "all",
+    "row_count": 6,
+    "markdown_sha256": "fecf98e5c82917c0ba37bf02a442e70bcbe73661a2d129d4301d4eb980fdcf31",
+    "markdown_unchanged": true,
+    "reason": "Match the Anchor Docks drawer's enabled Descend setting; fresh real tool spec and scope, not a suppressed warning."
+  },
+  "checks": {
+    "direct_tag_render_crosses_all_three_docks": true,
+    "offline_deprecated_node_absent": true,
+    "offline_expand_has_three_children": true,
+    "all_render_rows_inside_workspace": true,
+    "saved_group_render_verified": false
+  },
+  "saved_groups": {
+    "status": "blocked",
+    "created": [],
+    "error": "slice_group.create: _get_nodes_export_cache_nodes: no operation cache snapshot is active in this task (cache-backed code must run inside a cache_operation_boundary; pass an explicit view= for sanctioned bootstrap/coherence internals) [recovery=bug]",
+    "attempts": ["root_handle=63a894eb", "root_handle=63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8"],
+    "fixture_only_definitions": ["fixture-pantry-offline: Pantry example|Offline mode [1]", "fixture-pantry-sharing: Pantry example|Sharing [2]"],
+    "limitation": "The two picker definitions exist only in the offline fixture. Their documents are real direct-tag renders of the real workspace using the full slice postfix policy, not verified persisted-group renders. No production code or existing saved group was changed. Create the two real groups and replace these fixture ids when the daemon bug is resolved."
+  }
+}

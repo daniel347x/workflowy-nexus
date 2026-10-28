@@ -1,0 +1,316 @@
+{
+  "provenance": {
+    "commit": "8dd6e0f444e00c476bc912f50aa8d80cf0c76e3b",
+    "clientSha256": "fc48feecce30316119763904eb5cdd886de971d8fe72f291c6bd284aaee8cb8a",
+    "captureCommand": "node tmp/capture-md-oracle.js",
+    "assets": {
+      "marked.min.js": "3e7e7d7feb3e5d58cb6c804f68ab5c24cc7e5eb6270fd6e5cbb9124739217d0c",
+      "katex/katex.min.js": "2ec5916941ef4383e0314eaabcc712301b06001d9fb68e08d751d2bae5a27a1a",
+      "marked-katex-init.js": "d32a49086f433cea2754914100785f539402421e2515a193ab9566d9b7ffd86c"
+    }
+  },
+  "cases": [
+    {
+      "name": "headings-lists",
+      "text": "# One\n## Two\n### Three\n#### Four\n##### Five\n###### Six\n\n- parent\n  - child\n    - grandchild\n\n1. first\n2. second\n\n> quoted\n\n[link](https://example.com) ![image](x.png)\n\n---",
+      "expected": {
+        "html": "<h1>One</h1>\n<h2>Two</h2>\n<h3>Three</h3>\n<h4>Four</h4>\n<h5>Five</h5>\n<h6>Six</h6>\n<ul>\n<li>parent<ul>\n<li>child<ul>\n<li>grandchild</li>\n</ul>\n</li>\n</ul>\n</li>\n</ul>\n<ol>\n<li>first</li>\n<li>second</li>\n</ol>\n<blockquote>\n<p>quoted</p>\n</blockquote>\n<p><a href=\"https://example.com\">link</a> <img src=\"x.png\" alt=\"image\"></p>\n<hr>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "table",
+      "text": "| A | B |\n|---|---|\n| one | two |",
+      "expected": {
+        "html": "<table>\n<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n<tbody><tr>\n<td>one</td>\n<td>two</td>\n</tr>\n</tbody></table>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "single-newlines",
+      "text": "one\ntwo\nthree",
+      "expected": {
+        "html": "<p>one<br>two<br>three</p>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "fenced-code",
+      "text": "```js\nconst x = \"<>&\";\n```\n\n`inline`",
+      "expected": {
+        "html": "<pre><code class=\"language-js\">const x = &quot;&lt;&gt;&amp;&quot;;\n</code></pre>\n<p><code>inline</code></p>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "raw-html",
+      "text": "<section data-x=\"raw\"><b>raw</b><a href=\"javascript:example()\">link</a></section>\n\n<script>window.rawNote = true;</script>",
+      "expected": {
+        "html": "<section data-x=\"raw\"><b>raw</b><a href=\"javascript:example()\">link</a></section>\n\n<script>window.rawNote = true;</script>",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "entities-unicode",
+      "text": "&amp; &lt; &copy; < > café 漢字 🪟 é",
+      "expected": {
+        "html": "<p>&amp; &lt; &copy; &lt; &gt; café 漢字 🪟 é</p>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "empty",
+      "text": "",
+      "expected": {
+        "html": "",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "inline-math",
+      "text": "The value $x^2 + \\alpha$ is math.",
+      "expected": {
+        "html": "<p>The value <span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><mi>α</mi></mrow><annotation encoding=\"application/x-tex\">x^2 + \\alpha</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.8974em;vertical-align:-0.0833em;\"></span><span class=\"mord\"><span class=\"mord mathnormal\">x</span><span class=\"msupsub\"><span class=\"vlist-t\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height:0.8141em;\"><span style=\"top:-3.063em;margin-right:0.05em;\"><span class=\"pstrut\" style=\"height:2.7em;\"></span><span class=\"katex-sizing reset-size6 size3 mtight\"><span class=\"mord mtight\">2</span></span></span></span></span></span></span></span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span><span class=\"mbin\">+</span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span></span><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.4306em;\"></span><span class=\"mord mathnormal\" style=\"margin-right:0.0037em;\">α</span></span></span></span> is math.</p>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "display-math",
+      "text": "$$\nx^2 + y^2 = z^2\n$$\n\nAnd $$x+1$$ inline display.",
+      "expected": {
+        "html": "<span class=\"katex-display\"><span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><msup><mi>y</mi><mn>2</mn></msup><mo>=</mo><msup><mi>z</mi><mn>2</mn></msup></mrow><annotation encoding=\"application/x-tex\">x^2 + y^2 = z^2</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.9474em;vertical-align:-0.0833em;\"></span><span class=\"mord\"><span class=\"mord mathnormal\">x</span><span class=\"msupsub\"><span class=\"vlist-t\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height:0.8641em;\"><span style=\"top:-3.113em;margin-right:0.05em;\"><span class=\"pstrut\" style=\"height:2.7em;\"></span><span class=\"katex-sizing reset-size6 size3 mtight\"><span class=\"mord mtight\">2</span></span></span></span></span></span></span></span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span><span class=\"mbin\">+</span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span></span><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:1.0585em;vertical-align:-0.1944em;\"></span><span class=\"mord\"><span class=\"mord mathnormal\" style=\"margin-right:0.0359em;\">y</span><span class=\"msupsub\"><span class=\"vlist-t\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height:0.8641em;\"><span style=\"top:-3.113em;margin-right:0.05em;\"><span class=\"pstrut\" style=\"height:2.7em;\"></span><span class=\"katex-sizing reset-size6 size3 mtight\"><span class=\"mord mtight\">2</span></span></span></span></span></span></span></span><span class=\"mspace\" style=\"margin-right:0.2778em;\"></span><span class=\"mrel\">=</span><span class=\"mspace\" style=\"margin-right:0.2778em;\"></span></span><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.8641em;\"></span><span class=\"mord\"><span class=\"mord mathnormal\" style=\"margin-right:0.044em;\">z</span><span class=\"msupsub\"><span class=\"vlist-t\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height:0.8641em;\"><span style=\"top:-3.113em;margin-right:0.05em;\"><span class=\"pstrut\" style=\"height:2.7em;\"></span><span class=\"katex-sizing reset-size6 size3 mtight\"><span class=\"mord mtight\">2</span></span></span></span></span></span></span></span></span></span></span></span>\n<p>And <span class=\"katex-display\"><span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding=\"application/x-tex\">x+1</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.6667em;vertical-align:-0.0833em;\"></span><span class=\"mord mathnormal\">x</span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span><span class=\"mbin\">+</span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span></span><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.6444em;\"></span><span class=\"mord\">1</span></span></span></span></span> inline display.</p>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "currency-parentheses-bad-tex",
+      "text": "Costs $5 and $10. Significant ($p < 0.05$). Bad $\\notARealCommand{x}$.",
+      "expected": {
+        "html": "<p>Costs $5 and <span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mn>10.</mn><mi>S</mi><mi>i</mi><mi>g</mi><mi>n</mi><mi>i</mi><mi>f</mi><mi>i</mi><mi>c</mi><mi>a</mi><mi>n</mi><mi>t</mi><mo stretchy=\"false\">(</mo></mrow><annotation encoding=\"application/x-tex\">10. Significant (</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:1em;vertical-align:-0.25em;\"></span><span class=\"mord\">10.</span><span class=\"mord mathnormal\" style=\"margin-right:0.0576em;\">S</span><span class=\"mord mathnormal\">i</span><span class=\"mord mathnormal\" style=\"margin-right:0.0359em;\">g</span><span class=\"mord mathnormal\">ni</span><span class=\"mord mathnormal\" style=\"margin-right:0.1076em;\">f</span><span class=\"mord mathnormal\">i</span><span class=\"mord mathnormal\">c</span><span class=\"mord mathnormal\">an</span><span class=\"mord mathnormal\">t</span><span class=\"mopen\">(</span></span></span></span>p &lt; 0.05$). Bad <span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle mathcolor=\"#cc0000\"><mtext>\\notARealCommand</mtext></mstyle><mi>x</mi></mrow><annotation encoding=\"application/x-tex\">\\notARealCommand{x}</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:1em;vertical-align:-0.25em;\"></span><span class=\"mord text\" style=\"color:#cc0000;\"><span class=\"mord\" style=\"color:#cc0000;\">\\notARealCommand</span></span><span class=\"mord\"><span class=\"mord mathnormal\">x</span></span></span></span></span>.</p>\n",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "absent-fallback",
+      "text": "<x>& plain\nline",
+      "marked": "absent",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\">&lt;x&gt;&amp; plain\nline</pre>",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "throwing-fallback",
+      "text": "<x>& plain\nline",
+      "marked": "throw",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\">&lt;x&gt;&amp; plain\nline</pre>",
+        "count": 17,
+        "current": 9
+      }
+    },
+    {
+      "name": "source-escape",
+      "text": "<b a=\"x\">&\n漢字</b>",
+      "view": "source",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\">&lt;b a=\"x\"&gt;&amp;\n漢字&lt;/b&gt;</pre>",
+        "count": 0,
+        "current": -1
+      }
+    },
+    {
+      "name": "source-multiple-current",
+      "text": "invoice and Invoice <b>invoice</b>",
+      "view": "source",
+      "query": "invoice",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\"><mark class=\"glimpse-dock-src-hit glimpse-dock-src-hit--current\">invoice</mark> and <mark class=\"glimpse-dock-src-hit\">Invoice</mark> &lt;b&gt;<mark class=\"glimpse-dock-src-hit\">invoice</mark>&lt;/b&gt;</pre>",
+        "count": 3,
+        "current": 0
+      }
+    },
+    {
+      "name": "source-no-match",
+      "text": "nothing here",
+      "view": "source",
+      "query": "invoice",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\">nothing here</pre>",
+        "count": 0,
+        "current": -1
+      }
+    },
+    {
+      "name": "source-empty",
+      "text": "",
+      "view": "source",
+      "query": "invoice",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\"></pre>",
+        "count": 0,
+        "current": -1
+      }
+    },
+    {
+      "name": "source-blank",
+      "text": "invoice <x>",
+      "view": "source",
+      "query": "  ",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\">invoice &lt;x&gt;</pre>",
+        "count": 0,
+        "current": -1
+      }
+    },
+    {
+      "name": "source-negated",
+      "text": "invoice draft",
+      "view": "source",
+      "query": "-invoice !draft",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\">invoice draft</pre>",
+        "count": 0,
+        "current": -1
+      }
+    },
+    {
+      "name": "source-smart",
+      "text": "invoice BIG receipt monitor draft",
+      "view": "source",
+      "query": "invoice OR \"big receipt\" AND mon* -draft",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\"><mark class=\"glimpse-dock-src-hit glimpse-dock-src-hit--current\">invoice</mark> <mark class=\"glimpse-dock-src-hit\">BIG receipt</mark> <mark class=\"glimpse-dock-src-hit\">monitor draft</mark></pre>",
+        "count": 3,
+        "current": 0
+      }
+    },
+    {
+      "name": "raw-text-rendered",
+      "text": "# raw <tag> & invoice INVOICE",
+      "contentFormat": "raw_text",
+      "query": "invoice",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\"># raw &lt;tag&gt; &amp; <mark class=\"glimpse-dock-src-hit glimpse-dock-src-hit--current\">invoice</mark> <mark class=\"glimpse-dock-src-hit\">INVOICE</mark></pre>",
+        "count": 2,
+        "current": 0
+      }
+    },
+    {
+      "name": "raw-text-source",
+      "text": "# raw <tag> & invoice",
+      "contentFormat": "raw_text",
+      "view": "source",
+      "query": "invoice",
+      "expected": {
+        "html": "<pre class=\"glimpse-md-preview-plain\"># raw &lt;tag&gt; &amp; <mark class=\"glimpse-dock-src-hit glimpse-dock-src-hit--current\">invoice</mark></pre>",
+        "count": 1,
+        "current": 0
+      }
+    }
+  ],
+  "search": [
+    {
+      "query": "",
+      "expected": {
+        "ok": true,
+        "source": null,
+        "flags": null
+      }
+    },
+    {
+      "query": "   ",
+      "expected": {
+        "ok": true,
+        "source": null,
+        "flags": null
+      }
+    },
+    {
+      "query": "-draft !invoice",
+      "expected": {
+        "ok": true,
+        "source": null,
+        "flags": null
+      }
+    },
+    {
+      "query": "OR AND",
+      "expected": {
+        "ok": true,
+        "source": null,
+        "flags": null
+      }
+    },
+    {
+      "query": "*",
+      "expected": {
+        "ok": true,
+        "source": null,
+        "flags": null
+      }
+    },
+    {
+      "query": "\"unbalanced",
+      "expected": {
+        "ok": false,
+        "error": "unbalanced quotes"
+      }
+    },
+    {
+      "query": "invoice OR \"big receipt\" mon* -draft",
+      "expected": {
+        "ok": true,
+        "source": "(invoice|big receipt|mon.*)",
+        "flags": "gi"
+      }
+    },
+    {
+      "query": "a.c",
+      "expected": {
+        "ok": true,
+        "source": "(a\\.c)",
+        "flags": "gi"
+      }
+    },
+    {
+      "query": "monit?r",
+      "expected": {
+        "ok": true,
+        "source": "(monit.r)",
+        "flags": "gi"
+      }
+    }
+  ],
+  "escape": [
+    {
+      "text": null,
+      "html": ""
+    },
+    {
+      "text": "",
+      "html": ""
+    },
+    {
+      "text": "<>&\"'漢字",
+      "html": "&lt;&gt;&amp;\"'漢字"
+    },
+    {
+      "text": 0,
+      "html": "0"
+    }
+  ],
+  "renderCss": "#glimpse-md-dock-render, #glimpse-md-dock-render * { user-select: text; -webkit-user-select: text; }\n#glimpse-md-dock-render h1 { font-size: 1.5em; }\n#glimpse-md-dock-render h2 { font-size: 1.35em; }\n#glimpse-md-dock-render h3 { font-size: 1.2em; }\n#glimpse-md-dock-render h4 { font-size: 1.08em; }\n#glimpse-md-dock-render h1,#glimpse-md-dock-render h2,#glimpse-md-dock-render h3,\n#glimpse-md-dock-render h4,#glimpse-md-dock-render h5,#glimpse-md-dock-render h6 {\n  margin: 1.1em 0 0.5em 0; font-weight: 600; line-height: 1.25; color: #f5f6f8;\n}\n#glimpse-md-dock-render > *:first-child { margin-top: 0; }\n#glimpse-md-dock-render p { margin: 0 0 0.9em 0; }\n#glimpse-md-dock-render pre { margin: 0 0 0.9em 0; padding: 0.7em 0.9em;\n  background: rgba(0,0,0,0.35); border-radius: 4px; overflow-x: auto;\n  font-size: 0.92em; line-height: 1.4; }\n#glimpse-md-dock-render :not(pre) > code { background: rgba(255,255,255,0.08);\n  padding: 0.05em 0.35em; border-radius: 3px; color: #f0d2a0; }\n#glimpse-md-dock-render code { font-family: \"SFMono-Regular\", Consolas, monospace; font-size: 0.92em; }\n#glimpse-md-dock-render pre > code { background: transparent; padding: 0; color: inherit; }\n#glimpse-md-dock-render blockquote { margin: 0 0 0.9em 0; padding: 0.2em 0.9em;\n  border-left: 3px solid rgba(158,203,255,0.4); color: #c9ccd1;\n  background: rgba(255,255,255,0.03); border-radius: 0 3px 3px 0; }\n#glimpse-md-dock-render table { margin: 0 0 0.9em 0; border-collapse: collapse; font-size: 0.95em;\n  table-layout: fixed; width: 100%; }\n#glimpse-md-dock-render th,#glimpse-md-dock-render td { padding: 0.3em 0.7em; border: 1px solid rgba(255,255,255,0.15);\n  overflow-wrap: break-word; }\n#glimpse-md-dock-render th { background: rgba(255,255,255,0.05); font-weight: 600;\n  resize: horizontal; overflow: auto; }\n#glimpse-md-dock-render ul,#glimpse-md-dock-render ol { margin: 0 0 0.9em 0; padding-left: 1.5em; }\n#glimpse-md-dock-render ul { list-style: disc outside; }\n#glimpse-md-dock-render ul ul { list-style: circle; }\n#glimpse-md-dock-render ul ul ul { list-style: square; }\n#glimpse-md-dock-render ol { list-style: decimal outside; }\n#glimpse-md-dock-render li { margin: 0.25em 0; }\n#glimpse-md-dock-render li > ul,#glimpse-md-dock-render li > ol { margin: 0.25em 0; }\n#glimpse-md-dock-render a { color: #9ecbff; text-decoration: underline; }\n#glimpse-md-dock-render img { max-width: 100%; height: auto; }\n#glimpse-md-dock-render hr { margin: 1.2em 0; border: 0; border-top: 1px solid rgba(255,255,255,0.12); }\n#glimpse-md-dock-render mark.glimpse-dock-src-hit { background: rgba(255,213,79,0.40);\n  color: inherit; border-radius: 2px; padding: 0 1px; }\n#glimpse-md-dock-render mark.glimpse-dock-src-hit--current { background: #ffb300;\n  color: #1a1a1a; outline: 1px solid #ffd54f; }",
+  "hostCss": "#glimpse-md-dock-panel, #glimpse-md-dock-panel * { box-sizing: border-box; }\n#glimpse-md-dock-panel .glimpse-md-dock-row {\n  display: block; white-space: pre; cursor: pointer; font-size: 12.5px;\n  padding: 1px 8px 1px 0;\n  font-family: \"SFMono-Regular\", Consolas, \"Liberation Mono\", monospace;\n  color: #cdd2d8; border-left: 3px solid transparent;\n  position: relative;\n}\n#glimpse-md-dock-panel .glimpse-md-dock-row::before {\n  content: \"\"; position: absolute; top: 0; bottom: 0; pointer-events: none;\n  left: 10px; width: calc(var(--glimpseDockDepth, 0) * 14px);\n  background-image:\n    repeating-linear-gradient(to right, transparent 0, transparent 55px, rgba(205,216,232,0.20) 55px, rgba(205,216,232,0.20) 56px),\n    repeating-linear-gradient(to right, transparent 0, transparent 13px, hsla(205,48%,66%,0.20) 13px, hsla(205,48%,66%,0.20) 14px, transparent 14px, transparent 84px),\n    repeating-linear-gradient(to right, transparent 0, transparent 27px, hsla(150,40%,60%,0.20) 27px, hsla(150,40%,60%,0.20) 28px, transparent 28px, transparent 84px),\n    repeating-linear-gradient(to right, transparent 0, transparent 41px, hsla(45,45%,62%,0.20) 41px, hsla(45,45%,62%,0.20) 42px, transparent 42px, transparent 84px),\n    repeating-linear-gradient(to right, transparent 0, transparent 55px, hsla(15,50%,66%,0.20) 55px, hsla(15,50%,66%,0.20) 56px, transparent 56px, transparent 84px),\n    repeating-linear-gradient(to right, transparent 0, transparent 69px, hsla(275,40%,70%,0.20) 69px, hsla(275,40%,70%,0.20) 70px, transparent 70px, transparent 84px),\n    repeating-linear-gradient(to right, transparent 0, transparent 83px, hsla(185,40%,58%,0.20) 83px, hsla(185,40%,58%,0.20) 84px);\n}\n#glimpse-md-dock-panel .glimpse-md-dock-bullet {\n  font-size: 0.8em; color: #8a9099;\n}\n#glimpse-md-dock-panel .glimpse-md-dock-bullet--halo {\n  color: #cfe6ff;\n  border-radius: 50%;\n  box-shadow: 0 0 0 3px rgba(102,179,255,0.35), 0 0 4px 2px rgba(102,179,255,0.45);\n}\n#glimpse-md-dock-panel .glimpse-md-dock-icon {\n  display: inline-block; margin-right: 5px;\n}\n#glimpse-md-dock-panel .glimpse-md-dock-label { }\n#glimpse-md-dock-panel .glimpse-md-dock-row:hover { background: rgba(255,255,255,0.05); }\n#glimpse-md-dock-panel .glimpse-md-dock-row.selected {\n  background: rgba(102,179,255,0.16); color: #f5f6f8;\n  border-left: 3px solid #66b3ff;\n}\n#glimpse-md-dock-panel .glimpse-md-dock-marker {\n  display: inline-block; width: 10px; color: #66b3ff;\n}"
+}

@@ -1,0 +1,7 @@
+    def find_function_wrapper_body(self, v: Any) -> Any:
+        """Detect ``computed(() => ...)`` wrapper calls and return inner body.
+
+        Wrapper around the Phase B.1 module-level
+        ``_js_find_function_wrapper_body``.
+        """
+        return _js_find_function_wrapper_body(v, self.source_bytes)

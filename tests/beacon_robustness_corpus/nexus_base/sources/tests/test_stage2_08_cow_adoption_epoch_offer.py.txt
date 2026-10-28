@@ -1,0 +1,384 @@
+"""Stage2-08 (Locked Work Order §6.8) — REAL COW / adoption / epoch-offer
+composition (CF-S03CR-10 — the 🔴🛑 MANDATORY GATE before S07).
+
+Three actors on one jobs/coherence root:
+  - the LOCAL COW PUBLISHER and the ADOPTER, both inside ONE real MCP
+    client process (a real ``WorkFlowyClientCore`` whose publisher carries
+    the real transition-effect policy);
+  - a SECOND real OS process publishing the epoch offer (TEST 1: a full
+    refresh advancing the epoch plus a post-offer journal tail; TEST 2: a
+    same-epoch journal append that forces the adopter's clean-base
+    recovery).
+
+Deterministic forcing (never probability sleeps): the adopter's recovery /
+reload materialization is PAUSED on a sentinel via an in-actor
+``_materialize_reload`` seam; the local COW patch lands strictly INSIDE
+that pause; the parent releases the resume only after observing the pause
+marker.  Proven in both compositions:
+
+  - the JOURNAL TAIL survives (the post-offer / pending record is replayed
+    into the adopted view), AND
+  - the SPARSE COW EFFECT survives (the racing local write is carried by
+    the one transition-effect merge — the forbidden outcome, a recovered
+    journal view that erases the racing COW, is asserted absent).
+
+TEST 1 (epoch-offer reload): the second process publishes E1 via a real
+full refresh and appends the post-offer record; the adopter (still on E0)
+epoch-reloads through ``_publish_epoch_view`` — tail + COW survive.
+
+TEST 2 (clean-base recovery, the literal CF-S03CR-10 shape): the second
+process appends in the SAME epoch; the adopter's incremental tail replay
+is forced to fail (in-actor ``apply_journal_transaction`` seam, exactly
+like the in-process CF matrix), so the real clean-base recovery runs with
+the COW landing inside its materialization pause — tail + COW survive.
+
+SENSITIVITY (would-it-fail): ``STAGE2_NEUTRALIZE_MERGE=1`` neutralizes the
+sparse merge in the MCP actor (the recovered/reloaded view publishes
+without carrying effects — the pre-7d8e7cd forbidden outcome); the
+``a_name == "cow-write"`` assertion then fails.  Never set in the shipped
+tests.
+
+Every actor logs its real PID; the parent asserts pairwise distinctness.
+"""
+
+from __future__ import annotations
+
+import os
+
+from coherence_harness import (
+    make_coherence_root,
+    s02_node,
+    s04_install_base_manifest,
+    s04_write_base_snapshot,
+)
+from stage2_harness import (
+    REPO,
+    collect_distinct_pids,
+    finish_actor,
+    launch_actor,
+    read_result,
+    touch,
+    wait_for_file,
+)
+
+from workflowy_mcp import carto_job_governance as gov
+from workflowy_mcp.coherence.schema import read_manifest
+
+_BASE_NODES = [
+    {"id": "A", "name": "alpha"},
+    {"id": "B", "name": "beta", "parent_id": "A"},
+]
+
+# The test client derives its account scope from these credentials; the
+# parent seeds the shared lineage at exactly that account root.
+_API_BASE_URL = "https://workflowy.com/api/v1"
+_API_KEY = "test-key-1234"
+
+
+def _account() -> str:
+    return gov.derive_account_scope_id(gov.normalize_api_base_url(_API_BASE_URL), _API_KEY)
+
+
+def _seed(root) -> None:
+    """Shared epoch-0 lineage: transition manifest + base (A, B), head 0."""
+
+    account = _account()
+    paths = make_coherence_root(root, account)
+    snapshot_dir = root / "nodes_export_cache"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    base = s04_write_base_snapshot(
+        paths,
+        snapshot_dir,
+        [s02_node("A", name="alpha"), s02_node("B", name="beta", parent_id="A")],
+        epoch_number=0,
+        epoch_id="b" * 32,
+    )
+    s04_install_base_manifest(paths, base_snapshot_path=base, epoch_id="b" * 32)
+
+
+# ---------------------------------------------------------------------------
+# The MCP actor: real WorkFlowyClientCore, COW publisher + adopter in one
+# process.  argv[3] = "reload" (TEST 1) or "recover" (TEST 2).
+# ---------------------------------------------------------------------------
+
+_MCP = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "root = Path(sys.argv[1])\n"
+    'os.environ["WORKFLOWY_MCP_TEST_RUNTIME_DIR"] = str(root)\n'
+    "from coherence_harness import touch, wait_for_file\n"
+    "from stage2_harness import write_result\n"
+    "from pydantic import SecretStr\n"
+    "from workflowy_mcp.client.api_client_core import WorkFlowyClientCore\n"
+    "from workflowy_mcp.models import APIConfiguration, WorkFlowyNode\n"
+    "from workflowy_mcp.coherence import adoption as adoption_module\n"
+    "from workflowy_mcp.coherence.effects import EffectApplicationError\n"
+    f"BASE_URL = {_API_BASE_URL!r}\n"
+    f"API_KEY = {_API_KEY!r}\n"
+    + """
+mode = sys.argv[3]
+touch(root / "pid_mcp", str(os.getpid()))
+config = APIConfiguration(api_key=SecretStr(API_KEY), base_url=BASE_URL)
+client = WorkFlowyClientCore(config)
+# Warm start loaded the epoch-0 base lineage into this process's publisher.
+touch(root / "mcp_ready")
+assert wait_for_file(root / "offer_published", timeout=120)
+
+if os.environ.get("STAGE2_NEUTRALIZE_MERGE"):
+    # SENSITIVITY-ONLY (never set in the shipped test): simulate the
+    # pre-7d8e7cd publication path — the recovered/reloaded view publishes
+    # WITHOUT carrying the sparse effects, so the racing COW is erased
+    # (the forbidden outcome; the a_name assertion then fails).
+    from types import SimpleNamespace
+
+    def _no_merge(view, effects, *, publication_kind=None):
+        return SimpleNamespace(
+            rebased=view, surviving_effects={}, dirty_ids=frozenset()
+        )
+
+    adoption_module.merge_offer_with_transition_effects = _no_merge
+
+if mode == "recover":
+    # Force the clean-base recovery path: the incremental tail replay fails
+    # once on injected local divergence (the recovery path replays through
+    # snapshot_store, unpatched — the same seam shape as the in-process CF
+    # matrix).
+    def _always_fail(*_args, **_kwargs):
+        raise EffectApplicationError("injected local divergence")
+
+    adoption_module.apply_journal_transaction = _always_fail
+
+real_materialize = adoption_module._materialize_reload
+fired = {"done": False}
+
+
+def _cow_then_materialize(*args, **kwargs):
+    if not fired["done"]:
+        fired["done"] = True
+        touch(root / "recovery_paused")
+        assert wait_for_file(root / "cow_go", timeout=120)
+        # The LOCAL COW PUBLISHER (same process): a verified local write
+        # lands strictly INSIDE the recovery/reload materialization pause.
+        client._apply_update_to_nodes_export_cache(
+            WorkFlowyNode(id="A", name="cow-write")
+        )
+        touch(root / "cow_landed")
+    return real_materialize(*args, **kwargs)
+
+
+adoption_module._materialize_reload = _cow_then_materialize
+
+result = asyncio.run(client._adopt_coherence_head())
+view = client._cache_view_publisher.capture()
+write_result(root / "mcp_result.json", {
+    "disposition": result.disposition,
+    "records_applied": result.records_applied,
+    "adopted_sequence": view.adopted_sequence,
+    "epoch_number": view.epoch_number,
+    "epoch_id": view.epoch_id,
+    "a_name": view.nodes_by_id["A"]["name"],
+    "j1_present": "J1" in view.nodes_by_id,
+    "effects": sorted(client._transition_cow_effects.keys()),
+    "dirty": sorted(client._nodes_export_dirty_ids),
+})
+asyncio.run(client.close())
+"""
+)
+
+# ---------------------------------------------------------------------------
+# The epoch-offer publisher (second OS process): TEST 1 publishes E1 via a
+# real full refresh, then appends the post-offer journal tail record.
+# ---------------------------------------------------------------------------
+
+_PUBLISHER_EPOCH_OFFER = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import touch, wait_for_file\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "from workflowy_mcp.coherence import (\n"
+    "    JournalProducer,\n"
+    "    SemanticEffect,\n"
+    "    append_journal_transaction,\n"
+    "    run_full_refresh,\n"
+    ")\n"
+    "from workflowy_mcp.coherence.paths import coherence_paths\n"
+    "from coherence_harness import s02_node\n"
+    "root = Path(sys.argv[1])\n"
+    f"BASE_URL = {_API_BASE_URL!r}\n"
+    f"API_KEY = {_API_KEY!r}\n"
+    + """
+ACCOUNT = gov.derive_account_scope_id(gov.normalize_api_base_url(BASE_URL), API_KEY)
+paths = coherence_paths(ACCOUNT, jobs_root=str(root / "cartographer_jobs"))
+touch(root / "pid_publisher", str(os.getpid()))
+assert wait_for_file(root / "mcp_ready", timeout=120)
+
+
+async def fetch():
+    # The export reflects the SAME Workflowy state (the local COW is a
+    # process-local transition write — it is not in any export).
+    return {"nodes": [
+        {"id": "A", "name": "alpha", "note": "", "parent_id": None,
+         "priority": 100, "createdAt": 1, "modifiedAt": 1,
+         "completed": None, "data": None},
+        {"id": "B", "name": "beta", "note": "", "parent_id": "A",
+         "priority": 100, "createdAt": 1, "modifiedAt": 1,
+         "completed": None, "data": None},
+    ]}
+
+
+outcome = asyncio.run(run_full_refresh(
+    paths=paths, fetch=fetch, refresh_kind="system", settle_seconds=0.0,
+    snapshot_dir=str(root / "nodes_export_cache"), poll_seconds=0.05,
+))
+# The post-offer journal tail: a record ABOVE the new base watermark.
+append_journal_transaction(
+    paths,
+    operation_kind="capture",
+    effects=[SemanticEffect.node_create(s02_node("J1", name="tail-record"))],
+    producer=JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0,
+        owner_kind="process", ownership_kind="none",
+    ),
+    transaction_id="c" * 32,
+)
+touch(root / "offer_published")
+write_result(root / "publisher_result.json", {
+    "status": outcome.status,
+    "epoch_number": outcome.epoch_number,
+    "epoch_id": outcome.epoch_id,
+})
+"""
+)
+
+# ---------------------------------------------------------------------------
+# The same-epoch appender (second OS process, TEST 2): one journal record,
+# no epoch cut — forces the adopter's same-epoch incremental replay, which
+# the MCP actor converts into the clean-base recovery.
+# ---------------------------------------------------------------------------
+
+_PUBLISHER_SAME_EPOCH = (
+    "import asyncio, os, sys\n"
+    "sys.path.insert(0, sys.argv[2] + '/tests')\n"
+    "from pathlib import Path\n"
+    "from coherence_harness import s02_node, touch, wait_for_file\n"
+    "from stage2_harness import write_result\n"
+    "from workflowy_mcp import carto_job_governance as gov\n"
+    "from workflowy_mcp.coherence import (\n"
+    "    JournalProducer,\n"
+    "    SemanticEffect,\n"
+    "    append_journal_transaction,\n"
+    ")\n"
+    "from workflowy_mcp.coherence.paths import coherence_paths\n"
+    "root = Path(sys.argv[1])\n"
+    f"BASE_URL = {_API_BASE_URL!r}\n"
+    f"API_KEY = {_API_KEY!r}\n"
+    + """
+ACCOUNT = gov.derive_account_scope_id(gov.normalize_api_base_url(BASE_URL), API_KEY)
+paths = coherence_paths(ACCOUNT, jobs_root=str(root / "cartographer_jobs"))
+touch(root / "pid_publisher", str(os.getpid()))
+assert wait_for_file(root / "mcp_ready", timeout=120)
+append_journal_transaction(
+    paths,
+    operation_kind="capture",
+    effects=[SemanticEffect.node_create(s02_node("J1", name="tail-record"))],
+    producer=JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0,
+        owner_kind="process", ownership_kind="none",
+    ),
+    transaction_id="c" * 32,
+)
+touch(root / "offer_published")
+write_result(root / "publisher_result.json", {"appended": True})
+"""
+)
+
+
+def test_epoch_offer_reload_preserves_journal_tail_and_racing_cow(tmp_path):
+    """TEST 1 (epoch-offer reload): a second OS process publishes E1 via a
+    real full refresh and appends the post-offer record; the adopter's
+    reload materialization pauses; the local COW lands inside the pause;
+    the journal tail AND the sparse COW effect both survive."""
+    root = tmp_path / "share"
+    _seed(root)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    mcp = launch_actor(_MCP, str(root), str(REPO), "reload")
+    publisher = launch_actor(_PUBLISHER_EPOCH_OFFER, str(root), str(REPO))
+    try:
+        # The adopter must be paused mid-materialization before the resume.
+        assert wait_for_file(root / "recovery_paused", timeout=180)
+        touch(root / "cow_go")
+        assert wait_for_file(root / "cow_landed", timeout=60)
+
+        mcp_result = read_result(root / "mcp_result.json", timeout=120)
+        pub_result = read_result(root / "publisher_result.json", timeout=120)
+
+        assert pub_result["status"] == "published"
+        assert pub_result["epoch_number"] == 1
+
+        assert mcp_result["disposition"] == "epoch_reloaded"
+        assert mcp_result["epoch_number"] == 1
+        assert mcp_result["epoch_id"] == pub_result["epoch_id"]
+        # The JOURNAL TAIL survives (post-offer record replayed to head).
+        assert mcp_result["adopted_sequence"] == 1
+        assert mcp_result["j1_present"] is True
+        # THE FORBIDDEN-OUTCOME CHECK: the racing COW effect must survive.
+        assert mcp_result["a_name"] == "cow-write"
+        assert mcp_result["effects"] == ["A"]
+        assert "A" in mcp_result["dirty"]
+
+        manifest = read_manifest(make_coherence_root(root, _account(), bootstrap=False))
+        assert manifest.journal_head_seq == 1
+
+        pids = collect_distinct_pids(root, ["parent", "mcp", "publisher"])
+        assert len(set(pids.values())) == 3
+    finally:
+        finish_actor(mcp, label="mcp (cow publisher + adopter)")
+        finish_actor(publisher, label="epoch-offer publisher")
+
+
+# @beacon[
+#   id=auto-beacon@test_clean_base_recovery_preserves_journal_tail_and_racing_cow-67co,
+#   role=test_clean_base_recovery_preserves_journal_tail_and_racing_cow,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_clean_base_recovery_preserves_journal_tail_and_racing_cow(tmp_path):
+    """TEST 2 (the literal CF-S03CR-10 shape): a second OS process appends
+    in the SAME epoch; the adopter's incremental replay is forced to fail,
+    so the REAL clean-base recovery runs; the COW lands inside its
+    materialization pause; the journal tail AND the sparse COW effect both
+    survive (the recovered view never erases the racing COW)."""
+    root = tmp_path / "share"
+    _seed(root)
+    touch(root / "pid_parent", str(os.getpid()))
+
+    mcp = launch_actor(_MCP, str(root), str(REPO), "recover")
+    publisher = launch_actor(_PUBLISHER_SAME_EPOCH, str(root), str(REPO))
+    try:
+        assert wait_for_file(root / "recovery_paused", timeout=180)
+        touch(root / "cow_go")
+        assert wait_for_file(root / "cow_landed", timeout=60)
+
+        mcp_result = read_result(root / "mcp_result.json", timeout=120)
+        read_result(root / "publisher_result.json", timeout=120)
+
+        assert mcp_result["disposition"] == "recovered_from_base"
+        assert mcp_result["epoch_number"] == 0
+        # The JOURNAL TAIL survives (record replayed through the recovery).
+        assert mcp_result["adopted_sequence"] == 1
+        assert mcp_result["records_applied"] == 1
+        assert mcp_result["j1_present"] is True
+        # THE FORBIDDEN-OUTCOME CHECK: the racing COW effect must survive.
+        assert mcp_result["a_name"] == "cow-write"
+        assert mcp_result["effects"] == ["A"]
+        assert "A" in mcp_result["dirty"]
+
+        pids = collect_distinct_pids(root, ["parent", "mcp", "publisher"])
+        assert len(set(pids.values())) == 3
+    finally:
+        finish_actor(mcp, label="mcp (cow publisher + adopter)")
+        finish_actor(publisher, label="same-epoch appender")

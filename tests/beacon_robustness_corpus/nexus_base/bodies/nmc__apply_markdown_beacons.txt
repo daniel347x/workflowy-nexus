@@ -1,0 +1,384 @@
+def apply_markdown_beacons(
+    lines: list[str],
+    root_children: List[Dict[str, Any]],
+    beacons: list[dict[str, Any]],
+) -> None:
+    """Attach Markdown beacons under headings or decorate headings directly.
+
+    V2:
+      - Supports both kind=span and kind=ast beacons.
+      - kind=ast beacons decorate the nearest heading node's name and note.
+      - kind=span beacons remain child nodes under the nearest enclosing
+        heading (or at the top level if no heading is found).
+
+    Auto-promotion:
+      - For beacons where ``kind`` is *not* explicitly set and the first
+        non-blank, non-HTML-comment line after the beacon block is a heading
+        (e.g. a line starting with one or more ``#`` followed by a space),
+        we auto-upgrade ``kind`` from ``span`` to ``ast``.
+    """
+    if not beacons or not root_children:
+        return
+    _prepend_duplicate_beacon_id_warning_nodes(root_children, beacons, language="MD")
+
+    # Normalize kind and optionally auto-promote some span beacons to AST
+    # based on their position relative to the next heading.
+    for beacon in beacons:
+        kind = (beacon.get("kind") or "span").strip().lower() or "span"
+        beacon["kind"] = kind
+        if kind != "span":
+            continue
+        # Only auto-promote when the user did not explicitly specify kind.
+        if beacon.get("kind_explicit"):
+            continue
+        # Never auto-promote an explicit span region (paired opener/closer).
+        if isinstance(beacon.get("span_lineno_end"), int):
+            continue
+        comment_line = beacon.get("comment_line") or 0
+        if not isinstance(comment_line, int) or comment_line <= 0:
+            continue
+        # Find end of the @beacon[...] block (the STRUCTURAL closing ']'
+        # line, NOT merely the first line containing a ']' -- role=/comment=
+        # values can legitimately contain ']'; see parse_markdown_beacon_blocks
+        # for the full explanation of the bracketed-heading bug, Dan June 2026).
+        def _is_structural_beacon_close_promote(raw_line: str) -> bool:
+            t = raw_line.strip()
+            if t.startswith("<!--"):
+                t = t[4:].lstrip()
+            if t.startswith("#"):
+                t = t.lstrip("#").lstrip()
+            elif t.startswith("//"):
+                t = t[2:].lstrip()
+            return t.startswith("]")
+        block_end = comment_line
+        k = comment_line
+        while k <= len(lines):
+            if _is_structural_beacon_close_promote(lines[k - 1]):
+                block_end = k
+                # If the very next line closes the same HTML comment block,
+                # treat that "-->" line as part of the beacon block so that
+                # auto-promotion starts scanning AFTER the entire comment.
+                if block_end < len(lines) and "-->" in lines[block_end]:
+                    block_end += 1
+                break
+            k += 1
+        j = block_end + 1
+        in_html_comment = False
+        while j <= len(lines):
+            raw = lines[j - 1]
+            stripped = raw.strip()
+            if not stripped:
+                j += 1
+                continue
+            # Track and skip non-beacon HTML comment blocks (multi-line), so
+            # we only consider real content lines when deciding whether to
+            # auto-promote this beacon to an AST beacon.
+            if not in_html_comment and "<!--" in raw and "@beacon[" not in raw:
+                in_html_comment = True
+            if in_html_comment:
+                if "-->" in raw:
+                    in_html_comment = False
+                j += 1
+                continue
+            # First significant line after the beacon block: if it's a
+            # heading of any level (we accept up to 32 '#' chars for
+            # extended Markdown), upgrade this beacon to AST.
+            if re.match(r"^#{1,32}\s", stripped):
+                beacon["kind"] = "ast"
+            break
+
+    # @beacon[
+    #   id=auto-beacon@apply_markdown_beacons.iter_nodes-rva1,
+    #   role=apply_markdown_beacons.iter_nodes,
+    #   slice_labels=test-beacon,
+    #   kind=ast,
+    # ]
+    def iter_nodes(nodes: List[Dict[str, Any]]):
+        for node in nodes:
+            yield node
+            for ch in node.get("children") or []:
+                if isinstance(ch, dict):
+                    yield from iter_nodes([ch])
+
+    all_nodes = list(iter_nodes(root_children))
+
+    # Precompute heading positions (line numbers) in the Markdown source so
+    # we can attach beacons relative to concrete headings.
+    #
+    # Architecturally correct Markdown attachment rule (Dan, May 2026): do
+    # NOT infer heading identity by searching raw heading names. Duplicate
+    # headings are common in long 99 files. tokens_to_nexus_tree(...) stamps
+    # every parsed heading node with _md_heading_line from markdown-it's token
+    # map, so we can attach AST beacons by concrete source line number.
+    heading_positions: list[tuple[Dict[str, Any], int]] = []
+    for node in all_nodes:
+        ln_raw = node.get("_md_heading_line")
+        try:
+            ln = int(ln_raw) if ln_raw is not None else 0
+        except Exception:
+            ln = 0
+        if ln > 0:
+            heading_positions.append((node, ln))
+    heading_positions.sort(key=lambda pair: pair[1])
+
+    if DEBUG_MD_BEACONS and heading_positions:
+        print("[MD-HEAD-LIST] headings:")
+        for h_node, h_ln in heading_positions:
+            print(f"  - name={h_node.get('name')!r} lineno={h_ln}")
+
+    # PASS 1: AST beacons – decorate heading nodes.
+    for beacon in beacons:
+        if beacon.get("kind") != "ast":
+            continue
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        # Defaults: derive role from id prefix (before '@')
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "md-ast-beacon"
+        display_slice = slice_labels or "-"
+        # Never synthesize a '#-' tag from the '-' display placeholder: feed
+        # ONLY real slice_labels into tag generation (Dan, May 2026).
+        tag_suffix = _slice_label_tags(slice_labels) if slice_labels else ""
+
+        comment_line = beacon.get("comment_line") or 0
+        owner: Optional[Dict[str, Any]] = None
+
+        # Preferred: nearest heading *after* the beacon block.
+        if isinstance(comment_line, int) and comment_line > 0 and heading_positions:
+            best_node: Optional[Dict[str, Any]] = None
+            best_lineno: Optional[int] = None
+            for node, h_lineno in heading_positions:
+                if h_lineno > comment_line and (best_lineno is None or h_lineno < best_lineno):
+                    best_lineno = h_lineno
+                    best_node = node
+            if best_node is not None:
+                owner = best_node
+
+        # Fallback: use start_snippet text if it looks like a header line.
+        if owner is None:
+            start_snippet = beacon.get("start_snippet") or ""
+            header_text = None
+            m = (
+                re.match(r"^#{1,32}\\s*(.*)", start_snippet.strip())
+                if start_snippet
+                else None
+            )
+            if m:
+                header_text = m.group(1).strip()
+
+            if header_text:
+                norm_target = normalize_for_match(header_text)
+                for node in all_nodes:
+                    node_name = (node.get("name") or "")
+                    node_norm = normalize_for_match(node_name)
+                    if node_norm == norm_target or (
+                        norm_target and norm_target in node_norm
+                    ):
+                        owner = node
+                        break
+
+        if owner is None:
+            # If we couldn't find a heading to decorate, fall back to SPAN
+            # semantics by resetting kind; the SPAN pass will handle it.
+            beacon["kind"] = "span"
+            continue
+
+        name = owner.get("name") or "Untitled"
+        if "🔱" not in name:
+            name = f"{name} 🔱"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+        owner["name"] = name
+
+        context_lines = _extract_markdown_beacon_context(
+            lines, beacon.get("comment_line") or 0
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        meta_lines = [
+            "BEACON (MD AST)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: ast",
+        ]
+        if comment:
+            meta_lines.append(f"comment: {comment}")
+        if context_lines:
+            meta_lines.append("")
+            meta_lines.append("CONTEXT COMMENTS (MD):")
+            meta_lines.extend(context_lines)
+        # Visual separator between beacon metadata and body text
+        meta_lines.append("---")
+
+        note = owner.get("note") or ""
+        meta_block = "\n".join(meta_lines)
+        if not note:
+            owner["note"] = meta_block
+        else:
+            # Insert beacon metadata block just after the MD_PATH header
+            # (the first line that is exactly '---' following 'MD_PATH:').
+            lines_note = note.splitlines()
+            insert_idx = len(lines_note)
+            saw_md_path = False
+            for idx, line in enumerate(lines_note):
+                if line.strip() == "MD_PATH:":
+                    saw_md_path = True
+                elif saw_md_path and line.strip() == "---":
+                    insert_idx = idx + 1
+                    break
+            new_lines: list[str] = []
+            new_lines.extend(lines_note[:insert_idx])
+            # Ensure a blank line before the beacon block when joining
+            if insert_idx < len(lines_note) and lines_note[insert_idx].strip():
+                new_lines.append("")
+            new_lines.append(meta_block)
+            # Blank line between beacon block and any existing body text
+            if insert_idx < len(lines_note):
+                if lines_note[insert_idx].strip():
+                    new_lines.append("")
+                new_lines.extend(lines_note[insert_idx:])
+            owner["note"] = "\n".join(new_lines)
+
+    # PASS 2: SPAN beacons – unchanged behavior, with optional comment support.
+    for beacon in beacons:
+        if beacon.get("kind") != "span":
+            continue
+
+        start_snippet = beacon.get("start_snippet") or ""
+        span_start = beacon.get("span_lineno_start")
+        span_end = beacon.get("span_lineno_end")
+        # Fallback for snippet-less beacons: anchor to the line after the beacon block
+        if span_start is None:
+            comment_line = beacon.get("comment_line") or 0
+            if isinstance(comment_line, int) and comment_line > 0:
+                span_start = comment_line + 1
+
+        # Derive heading text from start_snippet if it looks like a Markdown header
+        header_text = None
+        m = re.match(r"^#{1,6}\\s*(.*)", start_snippet.strip()) if start_snippet else None
+        if m:
+            header_text = m.group(1).strip()
+
+        # Prefer the nearest preceding heading in the actual Markdown source,
+        # using span_lineno_start as the anchor. This makes placement robust even
+        # if start_snippet is not a header line.
+        owner_header_text = None
+        if isinstance(span_start, int):
+            for idx in range(span_start, 0, -1):
+                line = lines[idx - 1].strip()
+                m2 = re.match(r"^#{1,6}\\s*(.*)", line)
+                if m2:
+                    owner_header_text = m2.group(1).strip()
+                    break
+
+        target_header = owner_header_text or header_text
+
+        owner: Optional[Dict[str, Any]] = None
+
+        # Preferred: line-number based nearest-previous-heading resolution.
+        if isinstance(span_start, int) and heading_positions:
+            best_node = None
+            best_lineno = -1
+            for node, h_lineno in heading_positions:
+                if h_lineno <= span_start and h_lineno > best_lineno:
+                    best_lineno = h_lineno
+                    best_node = node
+            if best_node is not None:
+                owner = best_node
+
+        # Fallback: header-text based resolution when line-based match fails.
+        if owner is None and target_header:
+            norm_target = normalize_for_match(target_header)
+            for node in all_nodes:
+                node_name = (node.get("name") or "")
+                node_norm = normalize_for_match(node_name)
+                if node_norm == norm_target or (
+                    norm_target and norm_target in node_norm
+                ):
+                    owner = node
+                    break
+
+        b_id = (beacon.get("id") or "").strip()
+        role = (beacon.get("role") or "").strip()
+        raw_slice_labels = (beacon.get("slice_labels") or "").strip()
+        # Defaults: derive role from id prefix (before '@')
+        if not role and b_id and "@" in b_id:
+            role = b_id.split("@", 1)[0]
+        slice_labels = _canonicalize_slice_labels(raw_slice_labels, role)
+
+        if DEBUG_MD_BEACONS:
+            print(
+                "[MD-BEACON] id=%r span_start=%r target_header=%r owner=%r" % (
+                    b_id,
+                    span_start,
+                    target_header,
+                    (owner.get("name") if owner else None),
+                )
+            )
+
+        show_span, show_span_explicit = _beacon_show_span(beacon)
+
+        display_role = strip_leading_decoration_symbols(role) or b_id or "md-span-beacon"
+        display_slice = slice_labels or "-"
+
+        # Never synthesize a '#-' tag from the '-' display placeholder: feed
+        # ONLY real slice_labels into tag generation (Dan, May 2026).
+        tag_suffix = _slice_label_tags(slice_labels) if slice_labels else ""
+        name = f"🔱 {display_role}"
+        if tag_suffix:
+            name = f"{name} {tag_suffix}"
+
+        context_lines = _extract_markdown_beacon_context(
+            lines, beacon.get("comment_line") or 0
+        )
+        comment = strip_leading_decoration_symbols(beacon.get("comment"))
+
+        note_lines = [
+            "BEACON (MD SPAN)",
+            f"id: {b_id}",
+            f"role: {role}",
+            f"slice_labels: {slice_labels}",
+            "kind: span",
+        ]
+        if show_span_explicit:
+            note_lines.append(f"show_span: {'true' if show_span else 'false'}")
+        if comment:
+            note_lines.append(f"comment: {comment}")
+        if context_lines:
+            note_lines.append("")
+            note_lines.append("CONTEXT COMMENTS (MD):")
+            note_lines.extend(context_lines)
+
+        # Raw Markdown span text between @beacon[...] and @beacon-close[...]
+        span_text_lines: list[str] = []
+        if isinstance(span_start, int) and isinstance(span_end, int):
+            if 1 <= span_start <= span_end <= len(lines):
+                span_text_lines = lines[span_start - 1 : span_end]
+                # Trim leading/trailing blank lines inside the span
+                while span_text_lines and not span_text_lines[0].strip():
+                    span_text_lines.pop(0)
+                while span_text_lines and not span_text_lines[-1].strip():
+                    span_text_lines.pop()
+        if show_span and span_text_lines:
+            note_lines.append("")
+            note_lines.append("SPAN TEXT:")
+            note_lines.extend(span_text_lines)
+
+        span_node = {
+            "name": name,
+            "note": "\n".join(note_lines),
+            "children": [],
+        }
+
+        if owner is not None:
+            children = owner.get("children") or []
+            children.append(span_node)
+            owner["children"] = children
+        else:
+            root_children.append(span_node)

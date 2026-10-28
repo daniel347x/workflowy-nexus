@@ -1,0 +1,12 @@
+    def _insert_child_in_source_order(
+        siblings: List[Dict[str, Any]],
+        child_node: Dict[str, Any],
+        sort_line: int,
+    ) -> None:
+        span_sort_lines[id(child_node)] = sort_line
+        insert_at = len(siblings)
+        for idx, existing in enumerate(siblings):
+            if _node_source_order_line(existing) > sort_line:
+                insert_at = idx
+                break
+        siblings.insert(insert_at, child_node)

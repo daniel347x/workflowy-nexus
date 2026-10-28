@@ -1,0 +1,6 @@
+    def iter_nodes(nodes: List[Dict[str, Any]]):
+        for node in nodes:
+            yield node
+            for ch in node.get("children") or []:
+                if isinstance(ch, dict):
+                    yield from iter_nodes([ch])

@@ -1,0 +1,324 @@
+{
+ "schema": "beacon_robustness/u01/area1_c1c2_keylist@1",
+ "generated_at": "2026-10-19T04:33:42.422606+00:00",
+ "derived_from": {
+  "file": "area1/area1_c1c2_delta.json",
+  "sha256": "7137c12fbc2030c8017757e76dadd791282d42f8f6834fb50d7a963f2587a297"
+ },
+ "base_rev": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+ "clause": "U01 §6.3",
+ "counts": {
+  "keys_total": 20,
+  "keys_own_language": 1,
+  "keys_cross_language": 19,
+  "deltas_total": 575,
+  "deltas_new_block_surfaced": 549,
+  "deltas_anomalous_block_changed": 26,
+  "deltas_new_block_surfaced|cross_language": 548,
+  "deltas_anomalous_block_changed|cross_language": 25,
+  "deltas_anomalous_block_changed|own_language": 1,
+  "deltas_new_block_surfaced|own_language": 1
+ },
+ "keys": [
+  {
+   "source": "corpus:SKILL.md",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 3,
+   "delta_counts": {
+    "new_block_surfaced": 2,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 2
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['corpus:SKILL.md']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "corpus:block-format.md",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 2,
+   "patched_beacons": 4,
+   "delta_counts": {
+    "new_block_surfaced": 2,
+    "anomalous_block_changed": 1,
+    "CLEAN_block_changed": 0,
+    "total": 3
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['corpus:block-format.md']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "corpus:nexus_map_codebase.py",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 25,
+   "patched_beacons": 269,
+   "delta_counts": {
+    "new_block_surfaced": 236,
+    "anomalous_block_changed": 12,
+    "CLEAN_block_changed": 0,
+    "total": 248
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['corpus:nexus_map_codebase.py']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "corpus:server.py",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 39,
+   "patched_beacons": 314,
+   "delta_counts": {
+    "new_block_surfaced": 270,
+    "anomalous_block_changed": 10,
+    "CLEAN_block_changed": 0,
+    "total": 280
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['corpus:server.py']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:clean_py",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 3,
+   "delta_counts": {
+    "new_block_surfaced": 2,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 2
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:clean_py']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:comment_rejected",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 2,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 1
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:comment_rejected']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:decorated_py",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 6,
+   "delta_counts": {
+    "new_block_surfaced": 5,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 5
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:decorated_py']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:diag_py",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 6,
+   "delta_counts": {
+    "new_block_surfaced": 5,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 5
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:diag_py']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:diag_sh",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 6,
+   "delta_counts": {
+    "new_block_surfaced": 5,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 5
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:diag_sh']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:diag_sql",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 6,
+   "delta_counts": {
+    "new_block_surfaced": 5,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 5
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:diag_sql']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:diag_yml",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 6,
+   "delta_counts": {
+    "new_block_surfaced": 5,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 5
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:diag_yml']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:duplicate_id",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 2,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 1
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:duplicate_id']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:info_rows",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 3,
+   "delta_counts": {
+    "new_block_surfaced": 2,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 2
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:info_rows']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:legacy_field",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 2,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 1
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:legacy_field']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:two_blocks_one_symbol",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 2,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 1
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:two_blocks_one_symbol']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:unterminated_block",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 3,
+   "delta_counts": {
+    "new_block_surfaced": 2,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 2
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:unterminated_block']['js']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:unterminated_block",
+   "parser": "python",
+   "tag": "own_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 3,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 1,
+    "CLEAN_block_changed": 0,
+    "total": 2
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:unterminated_block']['python']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:unterminated_block",
+   "parser": "sh",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 3,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 1,
+    "CLEAN_block_changed": 0,
+    "total": 2
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:unterminated_block']['sh']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:unterminated_block",
+   "parser": "yaml",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 3,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 1,
+    "CLEAN_block_changed": 0,
+    "total": 2
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:unterminated_block']['yaml']",
+   "clause": "U01 §6.3"
+  },
+  {
+   "source": "fixture:writer_anchor_ambiguous",
+   "parser": "js",
+   "tag": "cross_language",
+   "pinned_beacons": 1,
+   "patched_beacons": 2,
+   "delta_counts": {
+    "new_block_surfaced": 1,
+    "anomalous_block_changed": 0,
+    "CLEAN_block_changed": 0,
+    "total": 1
+   },
+   "test_case": "tests/beacon_seams_baseline.json :: parsers['fixture:writer_anchor_ambiguous']['js']",
+   "clause": "U01 §6.3"
+  }
+ ]
+}

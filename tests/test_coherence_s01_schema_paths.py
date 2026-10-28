@@ -1,0 +1,697 @@
+"""S01 §13.1 — schema and path tests."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import subprocess
+import sys
+
+import pytest
+from coherence_harness import ACCOUNT_A, ACCOUNT_B, NOW, make_coherence_root
+
+from workflowy_mcp.coherence import (
+    CoherenceManifest,
+    DirtyBarrierState,
+    ExternalDirtState,
+    JournalProducer,
+    JournalTransaction,
+    SemanticEffect,
+    VerificationEvidence,
+    coherence_lock_async,
+    coherence_paths,
+    effect_from_dict,
+    initialize_manifest_if_absent,
+    manifest_with_updates,
+    new_bootstrap_manifest,
+    read_external_dirt,
+    read_manifest,
+    write_external_dirt,
+)
+from workflowy_mcp.coherence.errors import (
+    CoherenceAccountMismatchError,
+    CoherenceSchemaError,
+    CoherenceStateMissingError,
+    EffectValidationError,
+    ManifestConflictError,
+    UnsupportedCoherenceSchemaError,
+)
+from workflowy_mcp.coherence.schema import write_manifest
+
+
+def _producer() -> JournalProducer:
+    return JournalProducer(
+        pid=os.getpid(), pid_create_time=1.0, owner_kind="process", ownership_kind="none"
+    )
+
+
+def _tx(sequence: int, account: str = ACCOUNT_A, epoch: str = "e" * 32) -> JournalTransaction:
+    return JournalTransaction(
+        schema_version=1,
+        account_scope_id=account,
+        sequence=sequence,
+        previous_sequence=sequence - 1,
+        transaction_id="tx" + "0" * 30,
+        published_epoch_id=epoch,
+        operation_kind="create",
+        committed_at=NOW,
+        producer=_producer(),
+        verification=(),
+        effects=(SemanticEffect.tombstone(["x"]),),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round-trips
+# ---------------------------------------------------------------------------
+
+
+def test_manifest_roundtrip_bootstrap():
+    manifest = new_bootstrap_manifest(ACCOUNT_A, now=NOW)
+    assert CoherenceManifest.from_dict(manifest.to_dict()) == manifest
+    assert manifest.journal_floor_seq == manifest.journal_head_seq + 1  # empty journal
+
+
+def test_dirty_barrier_roundtrip_and_active_requires_reason():
+    clean = DirtyBarrierState.clean(ACCOUNT_A)
+    assert DirtyBarrierState.from_dict(clean.to_dict()) == clean
+    assert clean.generation == 0 and not clean.active
+    active = DirtyBarrierState(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        active=True,
+        generation=3,
+        reason_code="ambiguous_commit",
+        detail="d",
+        transaction_id="t",
+        affected_region={"parent_uuid": "p"},
+        raised_at=NOW,
+    )
+    assert DirtyBarrierState.from_dict(active.to_dict()) == active
+    with pytest.raises(CoherenceSchemaError):
+        DirtyBarrierState(
+            schema_version=1,
+            account_scope_id=ACCOUNT_A,
+            active=True,
+            generation=4,
+            reason_code=None,
+            detail=None,
+            transaction_id=None,
+            affected_region=None,
+            raised_at=None,
+        )
+
+
+def test_external_dirt_roundtrip_and_kinds():
+    clean = ExternalDirtState.clean(ACCOUNT_A)
+    assert ExternalDirtState.from_dict(clean.to_dict()) == clean
+    dirty = ExternalDirtState(
+        schema_version=1,
+        account_scope_id=ACCOUNT_A,
+        active=True,
+        generation=1,
+        observed_at=NOW,
+        mutation_kind="structural",
+        node_uuid="n",
+        parent_uuid="p",
+        detail="gui edit",
+    )
+    assert ExternalDirtState.from_dict(dirty.to_dict()) == dirty
+    with pytest.raises(CoherenceSchemaError):
+        ExternalDirtState(
+            schema_version=1,
+            account_scope_id=ACCOUNT_A,
+            active=False,
+            generation=1,
+            observed_at=None,
+            mutation_kind="bogus",
+            node_uuid=None,
+            parent_uuid=None,
+            detail=None,
+        )
+
+
+def test_journal_transaction_roundtrip():
+    record = _tx(7)
+    decoded = JournalTransaction.from_dict(record.to_dict(), effect_decoder=effect_from_dict)
+    assert decoded == record
+
+
+def test_verification_evidence_bounded_and_roundtrip():
+    evidence = VerificationEvidence(kind="authoritative_listing", outcome="committed", detail="x" * 900)
+    assert len(evidence.detail) == 500
+    assert VerificationEvidence.from_dict(evidence.to_dict()) == evidence
+
+
+# ---------------------------------------------------------------------------
+# Version / type strictness
+# ---------------------------------------------------------------------------
+
+
+def test_missing_and_noninteger_and_future_versions_fail():
+    good = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    del good["schema_version"]
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest.from_dict(good)
+    for bad_version in (True, "1", 1.0, None):
+        doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+        doc["schema_version"] = bad_version
+        with pytest.raises(CoherenceSchemaError):
+            CoherenceManifest.from_dict(doc)
+    doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    doc["schema_version"] = 2
+    with pytest.raises(UnsupportedCoherenceSchemaError):
+        CoherenceManifest.from_dict(doc)
+
+
+def test_bool_does_not_satisfy_integer_fields():
+    doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    doc["epoch_number"] = True
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest.from_dict(doc)
+
+
+def test_unknown_control_keys_fail_closed_but_node_payloads_preserve():
+    doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    doc["surprise"] = 1
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest.from_dict(doc)
+
+    effect_doc = SemanticEffect.tombstone(["a"]).to_dict()
+    effect_doc["surprise"] = 1
+    with pytest.raises(CoherenceSchemaError):
+        effect_from_dict(effect_doc)
+
+    # Node payloads embedded inside effects are the extensibility surface.
+    effect = SemanticEffect.node_create({"id": "n1", "name": "x", "future_field": {"a": 1}})
+    decoded = effect_from_dict(effect.to_dict())
+    assert decoded.payload["node"]["future_field"] == {"a": 1}
+
+
+def test_malformed_timestamp_rejected():
+    doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    doc["created_at"] = "not-a-time"
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest.from_dict(doc)
+    doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    doc["created_at"] = "2026-11-01T00:00:00"  # naive
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest.from_dict(doc)
+    doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    doc["created_at"] = "2026-11-01T02:00:00+02:00"  # not UTC
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest.from_dict(doc)
+    doc = new_bootstrap_manifest(ACCOUNT_A, now=NOW).to_dict()
+    doc["created_at"] = "2026-11-01T00:00:00Z"  # Z accepted as UTC
+    assert CoherenceManifest.from_dict(doc).created_at.endswith("Z")
+
+
+def test_wrong_account_rejected(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A, bootstrap=False)
+    manifest = new_bootstrap_manifest(ACCOUNT_B, now=NOW)
+    with pytest.raises(CoherenceAccountMismatchError):
+        initialize_manifest_if_absent(paths, manifest)
+    # dirty_status account must match the manifest account
+    with pytest.raises(CoherenceAccountMismatchError):
+        CoherenceManifest(
+            schema_version=1,
+            account_scope_id=ACCOUNT_A,
+            epoch_number=0,
+            epoch_id="e" * 32,
+            base_snapshot_path=None,
+            base_incorporated_through_seq=0,
+            journal_floor_seq=1,
+            journal_head_seq=0,
+            coherence_mode="bootstrap",
+            dirty_status=DirtyBarrierState.clean(ACCOUNT_B),
+            created_at=NOW,
+            updated_at=NOW,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Manifest lineage invariants
+# ---------------------------------------------------------------------------
+
+
+def _manifest_kwargs(**overrides):
+    base = {
+        "schema_version": 1,
+        "account_scope_id": ACCOUNT_A,
+        "epoch_number": 0,
+        "epoch_id": "e" * 32,
+        "base_snapshot_path": None,
+        "base_incorporated_through_seq": 0,
+        "journal_floor_seq": 1,
+        "journal_head_seq": 0,
+        "coherence_mode": "bootstrap",
+        "dirty_status": DirtyBarrierState.clean(ACCOUNT_A),
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_manifest_lineage_invariants():
+    CoherenceManifest(**_manifest_kwargs())  # baseline valid
+    with pytest.raises(CoherenceSchemaError):  # incorporated > head
+        CoherenceManifest(**_manifest_kwargs(base_incorporated_through_seq=2, journal_head_seq=1, journal_floor_seq=3))
+    with pytest.raises(CoherenceSchemaError):  # floor != incorporated + 1
+        CoherenceManifest(**_manifest_kwargs(journal_floor_seq=7))
+    with pytest.raises(CoherenceSchemaError):  # negative sequence
+        CoherenceManifest(**_manifest_kwargs(journal_head_seq=-1))
+    with pytest.raises(CoherenceSchemaError):  # empty epoch id
+        CoherenceManifest(**_manifest_kwargs(epoch_id=""))
+
+
+def test_bootstrap_vs_transition_base_path_constraints(tmp_path):
+    with pytest.raises(CoherenceSchemaError):  # null base outside bootstrap
+        CoherenceManifest(**_manifest_kwargs(coherence_mode="transition"))
+    with pytest.raises(CoherenceSchemaError):  # relative base path
+        CoherenceManifest(
+            **_manifest_kwargs(coherence_mode="transition", base_snapshot_path="relative/x.json")
+        )
+    absolute = str(tmp_path / "base.json")
+    manifest = CoherenceManifest(
+        **_manifest_kwargs(coherence_mode="transition", base_snapshot_path=absolute)
+    )
+    assert manifest.base_snapshot_path == absolute
+    # S01 schema supports 'enforced' as a value (no runtime path promotes to it).
+    enforced = CoherenceManifest(
+        **_manifest_kwargs(coherence_mode="enforced", base_snapshot_path=absolute)
+    )
+    assert enforced.coherence_mode == "enforced"
+
+
+def test_manifest_with_updates_validates_and_refreshes(tmp_path):
+    manifest = new_bootstrap_manifest(ACCOUNT_A, now=NOW)
+    updated = manifest_with_updates(manifest, journal_head_seq=5, journal_floor_seq=1,
+                                    base_incorporated_through_seq=0)
+    assert updated.journal_head_seq == 5 and updated.updated_at != manifest.updated_at
+    assert manifest.journal_head_seq == 0  # original untouched
+    with pytest.raises(CoherenceSchemaError):
+        manifest_with_updates(manifest, bogus_field=1)
+    with pytest.raises(CoherenceSchemaError):
+        manifest_with_updates(manifest, schema_version=2)
+
+
+def test_write_manifest_cas(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    manifest = read_manifest(paths)
+    advanced = manifest_with_updates(manifest, journal_head_seq=0, epoch_number=0)
+    write_manifest(paths, advanced, expected_epoch_id=manifest.epoch_id, expected_head_seq=0)
+    with pytest.raises(ManifestConflictError):
+        write_manifest(paths, advanced, expected_epoch_id="f" * 32)
+    with pytest.raises(ManifestConflictError):
+        write_manifest(paths, advanced, expected_head_seq=9)
+
+
+# ---------------------------------------------------------------------------
+# External dirt / hard dirt separation
+# ---------------------------------------------------------------------------
+
+
+def test_external_dirt_and_hard_dirt_never_share_a_type(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    barrier = DirtyBarrierState.clean(ACCOUNT_A)
+    dirt = ExternalDirtState.clean(ACCOUNT_A)
+    with pytest.raises(CoherenceSchemaError):
+        DirtyBarrierState.from_dict(dirt.to_dict())
+    with pytest.raises(CoherenceSchemaError):
+        ExternalDirtState.from_dict(barrier.to_dict())
+    # External dirt lives in its own artifact, never in the manifest.
+    write_external_dirt(paths, dirt)
+    assert read_external_dirt(paths) == dirt
+    manifest = read_manifest(paths)
+    assert isinstance(manifest.dirty_status, DirtyBarrierState)
+    assert not hasattr(manifest, "external_dirt")
+
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+
+def test_account_scope_validation_and_isolation(tmp_path):
+    with pytest.raises(CoherenceSchemaError):
+        coherence_paths("A" * 32, jobs_root=tmp_path)  # uppercase
+    with pytest.raises(CoherenceSchemaError):
+        coherence_paths("a" * 31, jobs_root=tmp_path)
+    with pytest.raises(CoherenceSchemaError):
+        coherence_paths("../" + "a" * 30, jobs_root=tmp_path)
+    with pytest.raises(CoherenceSchemaError):
+        coherence_paths("g" * 32, jobs_root=tmp_path)
+    a = coherence_paths(ACCOUNT_A, jobs_root=tmp_path)
+    b = coherence_paths(ACCOUNT_B, jobs_root=tmp_path)
+    for attr in ("manifest_path", "external_dirt_path", "journal_dir", "quarantine_dir"):
+        pa = getattr(a, attr)
+        pb = getattr(b, attr)
+        assert pa != pb
+        pa.relative_to(a.account_root)
+        pb.relative_to(b.account_root)
+    # pure path computation creates no directories
+    assert not (tmp_path / ".coherence").exists()
+
+
+def test_no_api_key_bytes_on_disk(tmp_path):
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    secret = "sk-test-SECRET-api-key"
+    read_manifest(paths)
+    write_external_dirt(
+        paths,
+        ExternalDirtState(
+            schema_version=1,
+            account_scope_id=ACCOUNT_A,
+            active=True,
+            generation=1,
+            observed_at=NOW,
+            mutation_kind="input",
+            node_uuid=None,
+            parent_uuid=None,
+            detail="ordinary edit",
+        ),
+    )
+    for artifact in (paths.manifest_path, paths.external_dirt_path):
+        assert secret.encode() not in artifact.read_bytes()
+
+
+def test_missing_manifest_is_bootstrap_error(tmp_path):
+    paths = coherence_paths(ACCOUNT_A, jobs_root=tmp_path / "jobs")
+    with pytest.raises(CoherenceStateMissingError):
+        read_manifest(paths)
+    assert read_manifest(paths, required=False) is None
+
+
+# ---------------------------------------------------------------------------
+# Short in-process lock — task contention, cancellation and no late body
+# ---------------------------------------------------------------------------
+
+
+def test_coherence_mutex_exclusion_and_taxonomy_across_subprocesses(tmp_path, monkeypatch):
+    """Historical name: same-loop wait/busy/cancel, without a file or late acquire."""
+    from workflowy_mcp import carto_job_governance as gov
+    from workflowy_mcp.coherence import paths as locks
+    from workflowy_mcp.coherence.errors import CoherenceLockError
+    paths = coherence_paths(ACCOUNT_A, jobs_root=tmp_path / "jobs")
+    if os.environ.get("CUT2B_NEUTRALIZE_COHERENCE_ACQUIRE"):
+        monkeypatch.setattr(locks, "_coherence_lock_for", lambda paths: asyncio.Lock())
+    if os.environ.get("CUT2B_NEUTRALIZE_CANCEL_WAIT"):
+        async def no_cancel(*args):
+            return None
+        monkeypatch.setattr(gov, "_check_cancel_async", no_cancel)
+
+    async def scenario():
+        ticks = []
+        stop = asyncio.Event()
+        async def ticker():
+            while not stop.is_set():
+                ticks.append(True)
+                await asyncio.sleep(.001)
+        clock = asyncio.create_task(ticker())
+        bodies = []
+        async def contender():
+            async with coherence_lock_async(paths, timeout_seconds=.2, poll_seconds=.001):
+                bodies.append("late")
+        try:
+            async with coherence_lock_async(paths, timeout_seconds=0):
+                before = len(ticks)
+                with pytest.raises(CoherenceLockError, match="coherence lock busy") as caught:
+                    async with coherence_lock_async(paths, timeout_seconds=.03, poll_seconds=.001):
+                        bodies.append("busy")
+                assert caught.value.busy and caught.value.path == str(paths.account_root)
+                assert len(ticks) > before
+                for awaitable in (False, True):
+                    checked = []
+                    def cancel():
+                        checked.append(True)
+                        return True
+                    async def async_cancel():
+                        await asyncio.sleep(0)
+                        return cancel()
+                    with pytest.raises(gov.MutexWaitCancelledError):
+                        async with coherence_lock_async(
+                            paths, timeout_seconds=.03, poll_seconds=.001,
+                            cancel_check=async_cancel if awaitable else cancel,
+                        ):
+                            bodies.append("cancel")
+                    assert checked, "cancellation probe was not observed"
+                task = asyncio.create_task(contender())
+                await asyncio.sleep(.01)
+                assert not task.done() and bodies == []
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            await asyncio.sleep(0)
+            assert bodies == [], "cancelled acquisition ran after holder released"
+            beat = []
+            asyncio.get_running_loop().call_soon(lambda: beat.append(True))
+            async with coherence_lock_async(paths, timeout_seconds=0):
+                assert beat == [], "uncontended immediate attempt yielded"
+        finally:
+            stop.set()
+            await clock
+    asyncio.run(scenario())
+    assert not paths.account_root.exists(), "short lock created a filesystem artifact"
+
+
+# ---------------------------------------------------------------------------
+# Audit-gate additions (A1, A6, A9, secondary #5)
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_first_manifest_initialization(tmp_path, monkeypatch):
+    """A1: two loop tasks return the one run-to-completion first manifest."""
+    jobs_root = tmp_path / "jobs"
+    jobs_root.mkdir()
+    from workflowy_mcp.coherence import schema
+    if os.environ.get("CUT2B_NEUTRALIZE_INITIALIZE_EXISTING"):
+        monkeypatch.setattr(schema, "read_manifest", lambda *a, **k: None)
+    paths = coherence_paths(ACCOUNT_A, jobs_root=jobs_root)
+    async def scenario():
+        async def initialize():
+            await asyncio.sleep(0)
+            return initialize_manifest_if_absent(paths, new_bootstrap_manifest(ACCOUNT_A)).epoch_id
+        return await asyncio.gather(initialize(), initialize())
+    epochs = asyncio.run(scenario())
+    assert len(set(epochs)) == 1, f"distinct epochs returned: {set(epochs)}"
+    persisted = read_manifest(coherence_paths(ACCOUNT_A, jobs_root=jobs_root))
+    assert epochs[0] == persisted.epoch_id
+    assert not (paths.account_root / "coherence.mutex").exists()
+
+
+def test_wrong_account_artifacts_under_path_rejected(tmp_path):
+    """A6: valid account-B artifacts beneath account-A paths fail closed."""
+    paths_a = make_coherence_root(tmp_path, ACCOUNT_A)
+    paths_b = coherence_paths(ACCOUNT_B, jobs_root=paths_a.account_root.parent.parent)
+    # Plant account-B artifacts under account-A paths.
+    paths_a.manifest_path.write_text(
+        __import__("json").dumps(new_bootstrap_manifest(ACCOUNT_B).to_dict()), encoding="utf-8"
+    )
+    with pytest.raises(CoherenceAccountMismatchError):
+        read_manifest(paths_a)
+    dirt_b = ExternalDirtState.clean(ACCOUNT_B)
+    paths_a.external_dirt_path.write_text(
+        __import__("json").dumps(dirt_b.to_dict()), encoding="utf-8"
+    )
+    with pytest.raises(CoherenceAccountMismatchError):
+        read_external_dirt(paths_a)
+    with pytest.raises(CoherenceAccountMismatchError):
+        write_external_dirt(paths_a, dirt_b)
+    del paths_b  # paths for B were never materialized; A stays authoritative
+
+
+def test_constructor_strictness_direct():
+    """A9: direct constructors reject schema violations, not just from_dict."""
+    with pytest.raises(CoherenceSchemaError):
+        JournalProducer(
+            pid=1, pid_create_time=1.0, owner_kind="process",
+            ownership_kind="lease", ownership_token=123,
+        )
+    with pytest.raises(CoherenceSchemaError):
+        JournalProducer(
+            pid=1, pid_create_time=1.0, owner_kind="process",
+            ownership_kind="none", job_id=object(),
+        )
+    with pytest.raises(CoherenceSchemaError):
+        VerificationEvidence(kind="k", outcome="ok", node_uuid=42)
+    with pytest.raises(CoherenceSchemaError):
+        DirtyBarrierState(
+            schema_version=1, account_scope_id=ACCOUNT_A, active=True, generation=1,
+            reason_code=42, detail=None, transaction_id=None, affected_region=None,
+            raised_at=NOW,
+        )
+    with pytest.raises(CoherenceSchemaError):
+        ExternalDirtState(
+            schema_version=1, account_scope_id=ACCOUNT_A, active=False, generation=0,
+            observed_at=None, mutation_kind=None, node_uuid=7, parent_uuid=None, detail=None,
+        )
+    with pytest.raises(CoherenceSchemaError):
+        JournalTransaction(
+            schema_version=1, account_scope_id=ACCOUNT_A, sequence=1, previous_sequence=0,
+            transaction_id="t" * 32, published_epoch_id="e" * 32, operation_kind="op",
+            committed_at=NOW, producer=_producer(),
+            verification=("not-evidence",),
+            effects=(SemanticEffect.tombstone(["x"]),),
+        )
+    with pytest.raises(CoherenceSchemaError):
+        JournalTransaction(
+            schema_version=1, account_scope_id=ACCOUNT_A, sequence=1, previous_sequence=0,
+            transaction_id="t" * 32, published_epoch_id="e" * 32, operation_kind="op",
+            committed_at=NOW, producer=_producer(), verification=(),
+            effects=("not-an-effect",),
+        )
+    with pytest.raises(EffectValidationError):  # non-JSON-safe node payload
+        SemanticEffect.node_create({"id": "n", "name": object()})
+
+
+def test_malformed_artifact_errors_carry_path_context(tmp_path):
+    """Secondary #5: a malformed on-disk artifact never reports path=None."""
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+    doc = read_manifest(paths).to_dict()
+    doc["journal_floor_seq"] = 99  # lineage violation
+    paths.manifest_path.write_text(__import__("json").dumps(doc), encoding="utf-8")
+    with pytest.raises(CoherenceSchemaError) as excinfo:
+        read_manifest(paths)
+    assert excinfo.value.path == str(paths.manifest_path)
+
+
+# ---------------------------------------------------------------------------
+# Audit residuals S1/S2 — deep immutability + lineage invariants
+# ---------------------------------------------------------------------------
+
+
+def test_dirty_barrier_affected_region_deeply_immutable():
+    region = {"x": [1, 2]}
+    barrier = DirtyBarrierState(
+        schema_version=1, account_scope_id=ACCOUNT_A, active=True, generation=1,
+        reason_code="ambiguous_commit", detail=None, transaction_id=None,
+        affected_region=region, raised_at=NOW,
+    )
+    # Caller mutation after construction cannot affect the model.
+    region["x"].append(3)
+    assert barrier.affected_region == {"x": [1, 2]}
+    # Mutation through the property hits a copy, never the model.
+    barrier.affected_region["x"].append(99)
+    assert barrier.affected_region == {"x": [1, 2]}
+    assert barrier.to_dict()["affected_region"] == {"x": [1, 2]}
+
+
+def test_previous_epoch_invariants():
+    # epoch 0 with a predecessor -> impossible
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest(**_manifest_kwargs(previous_epoch_id="f" * 32))
+    # post-cut epoch without a predecessor -> impossible
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest(**_manifest_kwargs(epoch_number=1, epoch_id="f" * 32))
+    # predecessor equal to current epoch -> impossible
+    with pytest.raises(CoherenceSchemaError):
+        CoherenceManifest(**_manifest_kwargs(epoch_number=1, epoch_id="f" * 32, previous_epoch_id="f" * 32))
+    # valid post-cut lineage
+    manifest = CoherenceManifest(
+        **_manifest_kwargs(epoch_number=1, epoch_id="f" * 32, previous_epoch_id="e" * 32)
+    )
+    assert manifest.previous_epoch_id == "e" * 32
+
+
+def test_dirty_barrier_public_constructor_surface():
+    """The SPECIFIED public constructor surface: ``affected_region=`` works
+    directly (S04 will construct production barriers this way), while the
+    stored value stays deep-owned and escapes only as a copy."""
+    region = {"parent_uuid": "P", "tags": ["a"]}
+    barrier = DirtyBarrierState(
+        schema_version=1, account_scope_id=ACCOUNT_A, active=True, generation=1,
+        reason_code="ambiguous_commit", detail=None, transaction_id=None,
+        affected_region=region, raised_at=NOW,
+    )
+    region["tags"].append("MUTATED")
+    assert barrier.affected_region == {"parent_uuid": "P", "tags": ["a"]}
+    barrier.affected_region["tags"].append("x")
+    assert barrier.affected_region == {"parent_uuid": "P", "tags": ["a"]}
+    assert DirtyBarrierState.from_dict(barrier.to_dict()) == barrier
+
+
+def test_symlinked_account_root_escape_fails_closed(tmp_path):
+    """A symlinked account directory pointing OUTSIDE the coherence root
+    fails closed at path computation (where symlink privilege permits)."""
+    jobs_root = tmp_path / "jobs"
+    coherence_root = jobs_root / ".coherence"
+    coherence_root.mkdir(parents=True)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    link = coherence_root / ACCOUNT_A
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink privilege unavailable on this platform")
+    with pytest.raises(CoherenceSchemaError):
+        coherence_paths(ACCOUNT_A, jobs_root=jobs_root)
+
+
+# ---------------------------------------------------------------------------
+# Round 4.1 — physical containment (junction escape) + extended-prefix
+# normalization + F-6.2 locked-body pins
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="NTFS directory junctions are a Windows-only semantic (cmd mklink /J)",
+)
+def test_junctioned_account_root_escape_fails_closed(tmp_path):
+    """An ordinary Windows directory junction at .coherence/<account>
+    pointing OUTSIDE the coherence root fails closed (no privilege needed)."""
+    jobs_root = tmp_path / "jobs"
+    coherence_root = jobs_root / ".coherence"
+    coherence_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = coherence_root / ACCOUNT_A
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode != 0 or not link.exists():
+        pytest.skip(f"junction creation unavailable: {result.stdout}{result.stderr}")
+    with pytest.raises(CoherenceSchemaError):
+        coherence_paths(ACCOUNT_A, jobs_root=jobs_root)
+
+
+def test_extended_prefix_normalization():
+    from workflowy_mcp.coherence.paths import _resolve_physical_normalized
+
+    class _FakePath:
+        def __init__(self, resolved: str) -> None:
+            self._resolved = resolved
+
+        def resolve(self, strict: bool = False) -> str:
+            return self._resolved
+
+    assert str(_resolve_physical_normalized(_FakePath(r"\\?\C:\foo\bar"))) == str(
+        __import__("pathlib").Path(r"C:\foo\bar")
+    )
+    assert str(_resolve_physical_normalized(_FakePath(r"\\?\UNC\server\share\dir"))) == str(
+        __import__("pathlib").Path(r"\\server\share\dir")
+    )
+    assert str(_resolve_physical_normalized(_FakePath(r"C:\plain\path"))) == str(
+        __import__("pathlib").Path(r"C:\plain\path")
+    )
+    assert str(_resolve_physical_normalized(_FakePath(r"\\server\share"))) == str(
+        __import__("pathlib").Path(r"\\server\share")
+    )
+
+
+def test_locked_body_errors_propagate_unwrapped_async(tmp_path):
+    from workflowy_mcp.carto_job_governance import AdmissionBusyTimeoutError
+    from workflowy_mcp.coherence import coherence_lock_async
+
+    paths = make_coherence_root(tmp_path, ACCOUNT_A)
+
+    async def _run():
+        with pytest.raises(AdmissionBusyTimeoutError):
+            async with coherence_lock_async(paths):
+                raise AdmissionBusyTimeoutError("nested busy", path=paths.account_root)
+
+    import asyncio
+
+    asyncio.run(_run())

@@ -1,0 +1,265 @@
+"""Multi-line beacon field values (program Multi-line Beacon Comments).
+
+Every per-language beacon block parser shares ONE field parser,
+``beacon_mutation_contract.parse_beacon_field_lines``: a line starts a field
+only if it begins with a known key followed by ``=``; any other line continues
+the previous field (joined with one space); the trailing ``,``/``]`` run is
+stripped from the value's LAST line only. Single-line blocks parse exactly as
+the historical per-site loops did.
+"""
+
+import os
+import re
+import sys
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import beacon_mutation_contract as bmc  # noqa: E402
+import nexus_map_codebase as nmc  # noqa: E402
+
+WRAPPED = [
+    "Version-aware activator for the params-schema override: attaches",
+    "ParamsSchemaTransform only when mode == 'object' and the Transform API exists;",
+    "no-ops (False + stderr line) on FastMCP 2.x, mirroring the strip workaround,",
+]
+JOINED = " ".join(WRAPPED)[:-1]  # last line's trailing comma stripped
+
+
+def _legacy_fields(texts):
+    """The historical per-site loop, verbatim in behaviour (the reference)."""
+    fields = {}
+    for raw in texts:
+        text = raw.strip()
+        while text and text[-1] in ",]":
+            text = text[:-1].rstrip()
+        if not text or "=" not in text:
+            continue
+        key, val = text.split("=", 1)
+        key = key.strip()
+        val = val.strip()
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
+            val = val[1:-1]
+        fields[key] = val
+    return fields
+
+
+# ---------------------------------------------------------------------------
+# The shared helper
+# ---------------------------------------------------------------------------
+
+
+def test_helper_joins_wrapped_value_and_keeps_equals_inside():
+    texts = ["id=x@1,", "kind=ast,", "comment=" + WRAPPED[0], WRAPPED[1], WRAPPED[2]]
+    fields = bmc.parse_beacon_field_lines(texts)
+    assert fields == {"id": "x@1", "kind": "ast", "comment": JOINED}
+    # the '=' inside the continuation did NOT become a field
+    assert not any("mode" in k for k in fields)
+
+
+def test_helper_inner_trailing_comma_kept_last_stripped():
+    fields = bmc.parse_beacon_field_lines(["comment=alpha, beta,", "gamma,", "delta,"])
+    assert fields["comment"] == "alpha, beta, gamma, delta"
+
+
+def test_helper_field_after_wrapped_comment_still_parses():
+    fields = bmc.parse_beacon_field_lines(
+        ["comment=first line", "second line", "slice_labels=a,b,", "kind=span,"]
+    )
+    assert fields == {"comment": "first line second line", "slice_labels": "a,b", "kind": "span"}
+
+
+def test_helper_ignores_text_before_first_field_and_blank_lines():
+    fields = bmc.parse_beacon_field_lines(["stray words", "", "id=q,", "  ", "role=r,"])
+    assert fields == {"id": "q", "role": "r"}
+
+
+def test_helper_quotes_and_duplicate_keys():
+    fields = bmc.parse_beacon_field_lines(
+        ['start_snippet="def forward(",', "id=a,", "id=b,", "end_snippet='return y',"]
+    )
+    assert fields == {"start_snippet": "def forward(", "id": "b", "end_snippet": "return y"}
+
+
+def test_helper_wrapped_quoted_value():
+    fields = bmc.parse_beacon_field_lines(['end_snippet="return', 'y",'])
+    assert fields["end_snippet"] == "return y"
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        ["id=a@1,", "role=ƒ f(x=1, y=[2]),", "slice_labels=s1,s2,", "kind=ast,"],
+        ["id=a", "comment=has = inside, and ] bracket],"],
+        ["id = spaced ,", "kind=span", "show_span=false,"],
+        ['start_snippet="x",', "end_snippet='y'],", "comments=legacy alias,"],
+        ["id=,", "comment=,"],
+        ["id=]"],
+    ],
+)
+def test_helper_single_line_fields_match_legacy(texts):
+    assert bmc.parse_beacon_field_lines(texts) == _legacy_fields(texts)
+
+
+# ---------------------------------------------------------------------------
+# Every per-language parser, through the shared helper
+# ---------------------------------------------------------------------------
+
+
+def _block(prefix, cont_indent="    "):
+    return [
+        f"{prefix} @beacon[",
+        f"{prefix}   id=m@1,",
+        f"{prefix}   slice_labels=keep-me,drop-me,",
+        f"{prefix}   kind=ast,",
+        f"{prefix}   comment={WRAPPED[0]}",
+        f"{prefix}   {cont_indent}{WRAPPED[1]}",
+        f"{prefix}   {cont_indent}{WRAPPED[2]}",
+        f"{prefix} ]",
+    ]
+
+
+def _only(beacons):
+    assert len(beacons) == 1, beacons
+    return beacons[0]
+
+
+def test_python_parser_wrapped_comment():
+    lines = _block("#") + ["def f():", "    return 1", ""]
+    b = _only(nmc.parse_python_beacon_blocks(lines))
+    assert b["comment"] == JOINED
+    assert b["slice_labels"] == "keep-me,drop-me"
+    assert b["kind"] == "ast"
+
+
+def test_js_parser_wrapped_comment():
+    lines = _block("//") + ["function f() {", "  return 1;", "}", ""]
+    b = _only(nmc.parse_js_beacon_blocks(lines))
+    assert b["comment"] == JOINED
+    assert b["slice_labels"] == "keep-me,drop-me"
+
+
+def test_sql_parser_wrapped_comment():
+    lines = _block("--") + ["SELECT 1;", ""]
+    b = _only(nmc.parse_sql_beacon_blocks(lines))
+    assert b["comment"] == JOINED
+
+
+def test_shell_parser_wrapped_comment():
+    lines = _block("#") + ["echo hi", ""]
+    b = _only(nmc.parse_sh_beacon_blocks(lines))
+    assert b["comment"] == JOINED
+
+
+def test_yaml_parser_wrapped_comment():
+    lines = _block("#") + ["key: value", ""]
+    b = _only(nmc.parse_yaml_beacon_blocks(lines))
+    assert b["comment"] == JOINED
+
+
+def test_markdown_parser_wrapped_comment():
+    lines = [
+        "<!--",
+        "@beacon[",
+        "  id=m@1,",
+        "  slice_labels=keep-me,",
+        "  kind=ast,",
+        f"  comment={WRAPPED[0]}",
+        f"    {WRAPPED[1]}",
+        f"    {WRAPPED[2]}",
+        "]",
+        "-->",
+        "# Heading",
+        "",
+        "Body.",
+        "",
+    ]
+    b = _only(nmc.parse_markdown_beacon_blocks(lines))
+    assert b["comment"] == JOINED
+    assert b["slice_labels"] == "keep-me"
+
+
+def test_continuation_line_with_known_key_shape_is_the_one_accepted_collision():
+    # Documented limit: a continuation line that itself begins with a known
+    # key and '=' starts a new field (the agreed rule). Pinned so a future
+    # change is deliberate.
+    fields = bmc.parse_beacon_field_lines(["comment=wrapped", "kind=span"])
+    assert fields == {"comment": "wrapped", "kind": "span"}
+
+
+# ---------------------------------------------------------------------------
+# Real repository blocks: every single-line block parses exactly as before;
+# the known wrapped block now parses whole.
+# ---------------------------------------------------------------------------
+
+_SKIP_DIRS = {".git", ".venv", ".venv-wsl", "node_modules", "__pycache__", ".runs"}
+_PREFIXES = {".py": "#", ".js": "//", ".ts": "//", ".vue": "//"}
+_KEY_START = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+def _iter_repo_blocks():
+    for dirpath, dirnames, filenames in os.walk(_REPO_ROOT):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        for fn in filenames:
+            prefix = _PREFIXES.get(os.path.splitext(fn)[1])
+            if not prefix:
+                continue
+            path = os.path.join(dirpath, fn)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    lines = fh.read().split("\n")
+            except (OSError, UnicodeDecodeError):
+                continue
+            i = 0
+            while i < len(lines):
+                body = lines[i].strip()
+                if body.startswith(prefix) and body[len(prefix):].strip() == "@beacon[":
+                    texts = []
+                    i += 1
+                    while i < len(lines):
+                        t = lines[i].strip()
+                        if t.startswith(prefix):
+                            t = t[len(prefix):].strip()
+                        if t.startswith("]"):
+                            break
+                        texts.append(t)
+                        i += 1
+                    yield path, texts
+                i += 1
+
+
+def test_every_single_line_repo_block_parses_identically():
+    checked = 0
+    for path, texts in _iter_repo_blocks():
+        nonempty = [t for t in texts if t]
+        wrapped = any(
+            not (_KEY_START.match(t) and _KEY_START.match(t).group(1) in bmc.BEACON_FIELD_KEYS)
+            for t in nonempty
+        )
+        if wrapped:
+            continue
+        assert bmc.parse_beacon_field_lines(texts) == _legacy_fields(texts), path
+        checked += 1
+    assert checked > 500  # the repository carries well over a thousand blocks
+
+
+def test_real_transforms_module_block_parses_whole():
+    path = os.path.join(_REPO_ROOT, "src", "workflowy_mcp", "transforms.py")
+    if not os.path.exists(path):
+        pytest.skip("transforms.py not present")
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    by_id = {b["id"]: b for b in nmc.parse_python_beacon_blocks(lines)}
+    b = by_id.get("transforms@module")
+    if b is None or "hosts the" not in (b.get("comment") or ""):
+        pytest.skip("transforms@module block changed since this test was written")
+    assert b["comment"].endswith("for the six family tools")
+    assert "Claude-Desktop-Windows outputSchema workaround" in b["comment"]

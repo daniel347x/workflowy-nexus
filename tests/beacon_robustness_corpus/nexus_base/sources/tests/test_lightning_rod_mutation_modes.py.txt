@@ -1,0 +1,1835 @@
+"""Lightning Rod beacon mutation modes -- SPEC v5 regression locks.
+
+Covers: the ONE mutation normalizer (§10.1), the contracts validator (§3),
+the comment resolver ordered contract (§5 step 7), the tool boundary (§4),
+and the commit-6 orchestrator: preflight-all-then-JIT-commit with real temp
+sources and a controlled client whose Workflowy-mutating methods RAISE
+(the ZERO-Workflowy-API lock, invariant 9 / §10.6).
+"""
+
+import asyncio
+import os
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SRC = os.path.join(_REPO_ROOT, "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from workflowy_mcp import server as srv  # noqa: E402
+from workflowy_mcp.client import api_client_nexus as acn  # noqa: E402
+from workflowy_mcp.lightning_rod_mutation_spec import LightningRodMutationSpec  # noqa: E402
+import beacon_mutation_contract as bmc  # noqa: E402
+import nexus_map_codebase as nmc  # noqa: E402
+
+_ROOT = "11111111-1111-1111-1111-111111111111"
+_FILE = "22222222-2222-2222-2222-222222222222"
+_NODE = "33333333-3333-3333-3333-333333333333"
+_ALIAS = "44444444-4444-4444-4444-444444444444"
+
+
+def _spec_for(
+    mode, *, operations=None, symbols=None, tags=None, comment=None, roots=None, favor="uuid",
+    atomic=False
+):
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode=mode,
+        symbols=symbols,
+        tags=tags,
+        operations=operations,
+        comment=comment,
+        atomic=atomic,
+        root_uuids=(roots if roots is not None else [_ROOT]),
+        root_uuid=None,
+        favor=favor,
+    )
+    assert err is None, err
+    assert spec is not None
+    return spec
+
+
+# ---------------------------------------------------------------------------
+# §10.1 SPEC NORMALIZATION
+# ---------------------------------------------------------------------------
+
+
+def test_mutation_operations_primary_shape_derives_symbols_and_tags():
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[
+            {"symbol": "foo", "tags": ["#alpha", "beta"], "comment": "ok"},
+            {"symbol": "bar", "tags": ["gamma"]},
+        ],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err is None
+    assert spec is not None
+    assert [op.handle for op in spec.operations] == ["foo", "bar"]
+    assert [list(op.tags) for op in spec.operations] == [["alpha", "beta"], ["gamma"]]
+    assert spec.operations[0].comment.mode == "fill_if_empty"
+    assert spec.operations[0].comment.value == "ok"
+    assert spec.operations[1].comment.mode == "preserve"
+
+
+def test_mutation_granular_shorthand_equivalence():
+    granular, err1 = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"], "comment": "c"}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    shorthand, err2 = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment="c",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err1 is None and err2 is None
+    assert granular == shorthand
+
+
+def test_mutation_operations_reject_ambiguous_mixed_shapes_and_blank_symbols():
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["alpha"],
+        operations=[{"symbol": "foo", "tags": ["beta"]}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "do not mix" in err
+
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo", ""],
+        tags=["alpha"],
+        operations=None,
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "symbols[1]" in err
+
+
+def test_mutation_normalization_unknown_fields_empty_tags_duplicates():
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"], "bogus": 1}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "unknown field" in err
+
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": []}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "non-empty" in err
+
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"]}, {"symbol": "foo", "tags": ["b"]}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "duplicate" in err
+
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo", "foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "duplicate" in err
+
+
+def test_mutation_normalization_roots_favor_and_comment_rules():
+    # root coercion: bare string -> 1-tuple
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        root_uuids="root-1",
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err is None
+    assert spec.root_handles == ("root-1",)
+
+    # root_uuid alone works
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        root_uuids=None,
+        root_uuid="root-1",
+        favor="uuid",
+    )
+    assert err is None
+    assert spec.root_handles == ("root-1",)
+
+    # root_uuid + root_uuids together -> loud mutual-exclusion error
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        root_uuids=["root-1"],
+        root_uuid="root-2",
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "one or the other" in err
+
+    # no roots at all -> loud error
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        root_uuids=None,
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "root_uuids" in err
+
+    # favor validation
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="bogus",
+    )
+    assert spec is None
+    assert err and "favor" in err
+
+    # comment in remove mode rejected (granular and top-level)
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="remove_beacon_tags",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"], "comment": "nope"}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "comment" in err
+
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="remove_beacon_tags",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment="nope",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert spec is None
+    assert err and "comment" in err
+
+
+def test_mutation_normalization_comment_modes():
+    # 2R4E1P: comment_mode rides top-level (shorthand) and per-op (granular).
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment="c",
+        comment_mode="replace",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err is None and spec is not None
+    assert spec.operations[0].comment.mode == "replace"
+
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"], "comment": "c", "comment_mode": "append"}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err is None and spec is not None
+    assert spec.operations[0].comment.mode == "append"
+
+    # default (absent) stays fill_if_empty
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment="c",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err is None and spec.operations[0].comment.mode == "fill_if_empty"
+
+    # an explicit comment_mode without a comment is a loud error
+    _, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        comment_mode="replace",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err and "comment_mode requires comment" in err
+
+    # unknown comment_mode
+    _, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment="c",
+        comment_mode="upsert",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err and "upsert" in err
+
+    # remove mode refuses comment_mode (top-level and per-op)
+    _, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="remove_beacon_tags",
+        symbols=["foo"],
+        tags=["a"],
+        operations=None,
+        comment=None,
+        comment_mode="replace",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err and "comment_mode" in err and "remove_beacon_tags" in err
+    _, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="remove_beacon_tags",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"], "comment": "c", "comment_mode": "fill"}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err and "comment_mode" in err
+
+    # per-op comment_mode without a per-op comment is a loud error
+    _, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"], "comment_mode": "append"}],
+        comment=None,
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err and "comment_mode requires comment" in err
+
+    # top-level comment_mode with granular operations follows comment's
+    # mixing rule: rejected
+    _, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        symbols=None,
+        tags=None,
+        operations=[{"symbol": "foo", "tags": ["a"], "comment": "c"}],
+        comment=None,
+        comment_mode="replace",
+        root_uuids=["root"],
+        root_uuid=None,
+        favor="uuid",
+    )
+    assert err and "comment_mode" in err
+
+
+def test_mutation_spec_to_dict_is_json_serializable():
+    import json
+
+    spec = _spec_for(
+        "ensure_beacons",
+        operations=[{"symbol": "foo", "tags": ["a", "b"], "comment": "c"}],
+    )
+    blob = spec.to_dict()
+    assert blob["mode"] == "ensure_beacons"
+    assert blob["root_handles"] == [_ROOT]
+    assert blob["operations"][0]["tags"] == ["a", "b"]
+    assert blob["operations"][0]["comment"] == {"mode": "fill_if_empty", "value": "c"}
+    assert blob["atomic"] is False  # [ap:LPC157]: the default is per-item
+    json.dumps(blob)  # must not raise
+
+
+def test_mutation_normalization_atomic_opt_in():
+    # [ap:LPC157] residue: batch-level all-or-nothing opt-in, both verbs.
+    for mode in ("ensure_beacons", "remove_beacon_tags"):
+        spec = _spec_for(mode, symbols=["foo"], tags=["t"], atomic=True)
+        assert spec.atomic is True
+        assert _spec_for(mode, symbols=["foo"], tags=["t"]).atomic is False
+        assert _spec_for(mode, symbols=["foo"], tags=["t"], atomic=None).atomic is False
+    spec, err = LightningRodMutationSpec.normalize_from_tool_args(
+        mode="ensure_beacons",
+        operations=None,
+        symbols=["foo"], tags=["t"], comment=None, atomic="yes",
+        root_uuids=[_ROOT], root_uuid=None, favor="uuid",
+    )
+    assert spec is None and err is not None and "atomic must be a boolean" in err
+
+
+# ---------------------------------------------------------------------------
+# §3 COMMENT VALIDATION (the ONE validator)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_beacon_comment_text_accepts_safe_and_delimiter_chars():
+    assert bmc.validate_beacon_comment_text("safe one-liner") == "safe one-liner"
+    assert bmc.validate_beacon_comment_text(None) is None
+    assert bmc.validate_beacon_comment_text("   ") is None
+    # commas / '=' / ']' are SAFE and never rejected (Dan's ruling, §3) --
+    # internal AND trailing.
+    assert bmc.validate_beacon_comment_text("a, b = c ]") == "a, b = c ]"
+    assert bmc.validate_beacon_comment_text("trailing,") == "trailing,"
+    assert bmc.validate_beacon_comment_text("trailing],") == "trailing],"
+
+
+def test_validate_beacon_comment_text_rejects_delimiters_and_controls():
+    for bad in [
+        "line\nbreak",
+        "carriage\rreturn",
+        "nul\x00char",
+        "close */",
+        "open /*",
+        "close -->",
+        "open <!--",
+        "x @beacon[ y",
+        "BEACON (AST)",
+        "bell\x07",
+        "c1\x85control",
+        "del\x7f",
+        "line\u2028sep",
+        "para\u2029sep",
+    ]:
+        try:
+            bmc.validate_beacon_comment_text(bad)
+        except ValueError:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError(f"unsafe comment accepted: {bad!r}")
+
+
+def test_validate_beacon_comment_text_rejects_transport_entities_fixpoint_b():
+    for bad in ["&lt;", "&gt;", "&amp;", "&quot;", "&#34;", "&#x22;", "&#X22;", "&#65;", "&#x41;"]:
+        try:
+            bmc.validate_beacon_comment_text(f"a {bad} b")
+        except ValueError:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError(f"transport entity accepted: {bad!r}")
+
+
+def test_validate_beacon_comment_text_strips_leading_decoration_fixpoint_a():
+    assert bmc.validate_beacon_comment_text("🔱 🔱 my comment") == "my comment"
+    assert bmc.validate_beacon_comment_text("⚡ noted") == "noted"
+    assert bmc.validate_beacon_comment_text("🔱") is None
+
+
+# ---------------------------------------------------------------------------
+# §5 step 7 COMMENT RESOLUTION (the ONE resolver)
+# ---------------------------------------------------------------------------
+
+
+def _resolve(mode, value, note, disk, exists=True):
+    if mode == "preserve":
+        intent = bmc.BeaconCommentIntent.preserve()
+    elif mode == "replace":
+        intent = bmc.BeaconCommentIntent.replace(value)
+    elif mode == "append":
+        intent = bmc.BeaconCommentIntent.append(value)
+    else:
+        intent = bmc.BeaconCommentIntent.fill_if_empty(value)
+    return bmc.resolve_beacon_comment(
+        intent=intent,
+        note_comment=note,
+        disk_comment=disk,
+        beacon_exists_on_disk=exists,
+    )
+
+
+def test_resolve_preserve_keeps_disk_then_note_and_never_conflicts():
+    r = _resolve("preserve", None, note="n", disk="d")
+    assert r.outcome == "preserve" and r.resolved == "d"
+    r = _resolve("preserve", None, note="n", disk="")
+    assert r.outcome == "preserve" and r.resolved == "n"
+    r = _resolve("preserve", None, note="", disk="")
+    assert r.outcome == "preserve" and r.resolved is None
+    # divergent note/disk preserved WITHOUT error, disk value wins
+    r = _resolve("preserve", None, note="n1", disk="d1")
+    assert r.outcome == "preserve" and r.resolved == "d1"
+
+
+def test_resolve_fill_idempotent_and_conflicts():
+    # fill on missing/empty disk
+    r = _resolve("fill", "req", note="", disk="")
+    assert r.outcome == "fill" and r.resolved == "req"
+    # note == requested + disk EMPTY -> FILL (materialize to disk; rerun noops)
+    r = _resolve("fill", "req", note="req", disk="")
+    assert r.outcome == "fill" and r.resolved == "req"
+    # idempotent on equal (disk == requested, note either state)
+    r = _resolve("fill", "req", note="", disk="req")
+    assert r.outcome == "idempotent" and r.resolved == "req"
+    r = _resolve("fill", "req", note="req", disk="req")
+    assert r.outcome == "idempotent"
+    # 2R4E1P: a fill-mode conflict is KEPT, never an error -- labels still
+    # ensured, the existing comment wins, warning carries BOTH texts.
+    r = _resolve("fill", "req", note="", disk="other")
+    assert r.outcome == "kept_existing_conflict" and r.resolved == "other"
+    assert r.existing_comment == "other"
+    assert "other" in (r.warning or "") and "req" in (r.warning or "")
+    assert "replace" in (r.warning or "") and "append" in (r.warning or "")
+    # both sources agree on a DIFFERENT comment -> kept (existing wins)
+    r = _resolve("fill", "req", note="other", disk="other")
+    assert r.outcome == "kept_existing_conflict" and r.resolved == "other"
+    # disk empty but the note disagrees -> kept (the note's claim wins)
+    r = _resolve("fill", "req", note="other", disk="")
+    assert r.outcome == "kept_existing_conflict" and r.resolved == "other"
+    assert r.existing_comment == "other"
+    # note and disk disagree with each other -> kept, DISK WINS
+    r = _resolve("fill", "req", note="n1", disk="d1")
+    assert r.outcome == "kept_existing_conflict" and r.resolved == "d1"
+    assert "d1" in (r.warning or "") and "req" in (r.warning or "")
+
+
+def test_resolve_replace_and_append_modes():
+    # replace: explicit opt-in overwrite
+    r = _resolve("replace", "req", note="whatever", disk="other")
+    assert r.outcome == "replace" and r.resolved == "req"
+    assert r.warning is None  # an explicit overwrite is not a conflict
+    # replace on equal text stays idempotent (re-runs are noops)
+    r = _resolve("replace", "req", note="", disk="req")
+    assert r.outcome == "idempotent" and r.resolved == "req"
+    # replace with nothing on disk = a fill (create carries the comment)
+    r = _resolve("replace", "req", note="", disk="", exists=False)
+    assert r.outcome == "replace" and r.resolved == "req"
+    # append: empty disk fills
+    r = _resolve("append", "req", note="", disk="")
+    assert r.outcome == "fill" and r.resolved == "req"
+    # append extends the existing comment with one separating space
+    r = _resolve("append", "req", note="n", disk="other")
+    assert r.outcome == "append" and r.resolved == "other req"
+    # append re-runs are idempotent (exact text, or already-appended tail)
+    r = _resolve("append", "req", note="", disk="req")
+    assert r.outcome == "idempotent" and r.resolved == "req"
+    r = _resolve("append", "req", note="", disk="other req")
+    assert r.outcome == "idempotent" and r.resolved == "other req"
+
+
+def test_resolve_compares_in_parser_normalized_form():
+    # NORMALIZATION LOCK (Finding A): a trailing-comma request vs a stripped
+    # disk parse converges (idempotent), never a false kept-conflict.
+    r = _resolve("fill", "req,", note="", disk="req")
+    assert r.outcome == "idempotent"
+    # a comma-carrying cached note vs a stripped disk parse does NOT produce
+    # kept_existing_conflict.
+    r = _resolve("fill", "req", note="req,", disk="req")
+    assert r.outcome == "idempotent"
+    r = _resolve("fill", "req", note="req]", disk="req")
+    assert r.outcome == "idempotent"
+
+
+# ---------------------------------------------------------------------------
+# §4 TOOL BOUNDARY
+# ---------------------------------------------------------------------------
+
+
+def test_boundary_mutation_never_parses_since_codec():
+    # An invalid `since` string would fail the render codec; the mutation
+    # boundary must reject it as a render-only ARG instead (codec never runs).
+    res = asyncio.run(
+        srv.lightning_rod(
+            mode="ensure_beacons",
+            root_uuids=[_ROOT],
+            operations=[{"symbol": "foo", "tags": ["a"]}],
+            since="definitely-not-a-since",
+        )
+    )
+    assert res["success"] is False
+    assert "render-only" in res["error"]
+    assert "since" in res["error"]
+
+
+def test_boundary_mutation_rejects_render_only_args():
+    res = asyncio.run(
+        srv.lightning_rod(
+            mode="remove_beacon_tags",
+            root_uuids=[_ROOT],
+            operations=[{"symbol": "foo", "tags": ["a"]}],
+            sort_by="created",
+        )
+    )
+    assert res["success"] is False
+    assert "render-only" in res["error"] and "sort_by" in res["error"]
+
+
+def test_boundary_mutation_rejects_push_to_modal():
+    res = asyncio.run(
+        srv.lightning_rod(
+            mode="ensure_beacons",
+            root_uuids=[_ROOT],
+            operations=[{"symbol": "foo", "tags": ["a"]}],
+            push_to_modal=True,
+        )
+    )
+    assert res["success"] is False
+    assert "pushed to the Markdown modal" in res["error"]
+
+
+def test_boundary_render_mode_rejects_mutation_args():
+    res = asyncio.run(
+        srv.lightning_rod(
+            mode="render_tags",
+            root_uuid=_ROOT,
+            tags=["a"],
+            operations=[{"symbol": "foo", "tags": ["a"]}],
+        )
+    )
+    assert res["success"] is False
+    assert "only valid for the lightning_rod mutation modes" in res["error"]
+
+
+def test_boundary_mutation_normalization_errors_surface():
+    # root_uuid + root_uuids together -> loud mutual-exclusion error
+    res = asyncio.run(
+        srv.lightning_rod(
+            mode="ensure_beacons",
+            root_uuid=_ROOT,
+            root_uuids=[_ROOT],
+            operations=[{"symbol": "foo", "tags": ["a"]}],
+        )
+    )
+    assert res["success"] is False
+    assert "one or the other" in res["error"]
+
+    # no roots at all -> loud error
+    res = asyncio.run(
+        srv.lightning_rod(
+            mode="ensure_beacons",
+            operations=[{"symbol": "foo", "tags": ["a"]}],
+        )
+    )
+    assert res["success"] is False
+    assert "root_uuids" in res["error"]
+
+
+# ---------------------------------------------------------------------------
+# Shared resolver core
+# ---------------------------------------------------------------------------
+
+
+class _FakeSymbolClient:
+    async def read_uuid_from_symbol(self, file_path, symbol, symbol_kind):
+        if symbol == "foo":
+            return {
+                "candidates": [
+                    {"uuid": "child-a", "name": "Foo", "file_path": "x.py", "ast_qualname": "foo"}
+                ]
+            }
+        if symbol == "amb":
+            return {
+                "candidates": [
+                    {"uuid": "child-a", "name": "Foo"},
+                    {"uuid": "child-b", "name": "Bar"},
+                ]
+            }
+        return {"candidates": []}
+
+
+def test_shared_symbol_resolver_preserves_per_input_records(monkeypatch):
+    monkeypatch.setattr(srv, "get_client", lambda: _FakeSymbolClient())
+    cache = {
+        "root": {"id": "root", "name": "Root", "note": "", "parent_id": None},
+        "child-a": {"id": "child-a", "name": "Foo", "note": "", "parent_id": "root"},
+        "child-b": {"id": "child-b", "name": "Bar", "note": "", "parent_id": "root"},
+    }
+    res = asyncio.run(
+        srv._resolve_lightning_rod_symbol_items_from_cache(
+            cache_by_id=cache,
+            symbols=["foo", "amb", "missing"],
+            resolved_roots=["root"],
+            suppress_tags=[],
+            favor="symbol",
+        )
+    )
+    assert res["ok"] is True
+    records = res["records"]
+    assert [r["item"] for r in records] == ["foo", "amb", "missing"]
+    assert records[0]["status"] == "resolved"
+    assert records[0]["uuid"] == "child-a"
+    assert records[1]["status"] == "ambiguous"
+    assert records[2]["status"] == "unresolved"
+
+
+# ---------------------------------------------------------------------------
+# §10.6 ORCHESTRATOR INTEGRATION (real temp source + controlled client)
+# ---------------------------------------------------------------------------
+
+
+class _PipelineClient:
+    """Controlled client for the commit-6 pipeline.
+
+    Delegates preflight/plan to the REAL ``_compute_beacon_write_plan`` and
+    commit to the REAL language helpers (so the same-file CAS behavior is
+    genuinely exercised). Every Workflowy-mutating method RAISES -- the
+    mutation path must perform ZERO Workflowy API calls (invariant 9).
+    """
+
+    def __init__(
+        self, *, nodes, candidates, jit_fail=(), commit_fail=(), force_preflight_actionable=False
+    ):
+        self.nodes = list(nodes)
+        self.cache_by_id = {str(n["id"]): n for n in self.nodes}
+        self.candidates = dict(candidates)
+        self.jit_fail = set(jit_fail)
+        self.commit_fail = set(commit_fail)
+        self.force_preflight_actionable = force_preflight_actionable
+        self.preflight_calls = []
+        self.plan_calls = []
+        self.commit_calls = []
+
+    def _get_nodes_export_cache_nodes(self):
+        return list(self.nodes)
+
+    async def read_uuid_from_symbol(self, file_path, symbol, symbol_kind):
+        uid = self.candidates.get(symbol)
+        return {"candidates": ([{"uuid": uid, "name": symbol}] if uid else [])}
+
+    # -- ZERO-Workflowy-API lock (invariant 9) --
+    async def workflowy_add_tag(self, *a, **k):
+        raise AssertionError("mutation path called workflowy_add_tag")
+
+    async def workflowy_remove_tag(self, *a, **k):
+        raise AssertionError("mutation path called workflowy_remove_tag")
+
+    async def update_beacon_from_node(self, *a, **k):
+        raise AssertionError("mutation path called update_beacon_from_node")
+
+    async def refresh_file_node_beacons(self, *a, **k):
+        raise AssertionError("mutation path called refresh_file_node_beacons")
+
+    async def get_node(self, *a, **k):
+        raise AssertionError("mutation path called get_node")
+
+    async def preflight_beacon_write_from_node(self, node_id, operation, mode):
+        self.preflight_calls.append(node_id)
+        if self.force_preflight_actionable:
+            return {"outcome": "actionable", "target_key": None}
+        plan = acn._compute_beacon_write_plan(
+            self.cache_by_id, node_id, operation, mode, include_fingerprint=False
+        )
+        if not plan.success:
+            return {
+                "outcome": "failure",
+                "error": plan.error,
+                "error_kind": plan.error_kind,
+                "target_key": plan.target_key,
+            }
+        if plan.planned_operation == "noop":
+            return {
+                "outcome": "noop",
+                "target_key": plan.target_key,
+                # mirror the real method's noop shape (2R4E1P: the kept
+                # fill-mode conflict warning rides the noop row too)
+                "noop_reason": getattr(plan, "noop_reason", None),
+                "comment_outcome": getattr(plan, "comment_outcome", None),
+                "comment_warning": getattr(plan, "comment_warning", None),
+            }
+        return {
+            "outcome": "actionable",
+            "planned_operation": plan.planned_operation,
+            "target_key": plan.target_key,
+        }
+
+    async def plan_beacon_write_from_node(self, node_id, operation, mode):
+        self.plan_calls.append(node_id)
+        if node_id in self.jit_fail:
+            return acn.BeaconWritePlan(
+                success=False,
+                planned_operation=None,
+                node_id=node_id,
+                target_key=None,
+                cached_name="",
+                intended_name="",
+                write_intent=None,
+                occurrence=None,
+                file_node_id=None,
+                source_path=None,
+                language=None,
+                beacon_id=None,
+                note_comment=None,
+                disk_comment=None,
+                comment_outcome=None,
+                resolved_comment=None,
+                intended_slice_labels=(),
+                source_sha256=None,
+                error="injected JIT failure",
+                error_kind="beacon_identity_conflict",
+            )
+        return acn._compute_beacon_write_plan(
+            self.cache_by_id, node_id, operation, mode, include_fingerprint=True
+        )
+
+    async def commit_beacon_write_plan(self, *, plan, note):
+        self.commit_calls.append(plan.node_id)
+        if plan.node_id in self.commit_fail:
+            return {
+                "success": False,
+                "error": "injected commit failure",
+                "error_kind": "failed_to_write_file",
+                "disk_changed": False,
+            }
+        ext = os.path.splitext(str(plan.source_path))[1].lower()
+        lang = acn._BEACON_LANGUAGE_BY_EXT.get(ext)
+        carto = acn._import_cartographer_module()
+        helper = getattr(carto, acn._BEACON_LANGUAGE_HELPER_NAME[lang])
+        if lang == "markdown":
+            res = helper(
+                str(plan.source_path),
+                plan.intended_name,
+                note,
+                occurrence=plan.occurrence,
+                write_intent=plan.write_intent,
+                write_plan=plan,
+            )
+        else:
+            res = helper(
+                str(plan.source_path),
+                plan.intended_name,
+                note,
+                write_intent=plan.write_intent,
+                write_plan=plan,
+            )
+        res.setdefault("source_path", str(plan.source_path))
+        res.setdefault("file_node_id", plan.file_node_id)
+        res.setdefault("language", lang)
+        res.setdefault(
+            "disk_changed",
+            bool(
+                res.get("success")
+                and res.get("operation") in {"created_beacon", "updated_beacon", "deleted_beacon"}
+            ),
+        )
+        return res
+
+
+def _pipeline_nodes(source_path, entries):
+    """Build a synthetic cache: ROOT -> FILE(source_path) -> child nodes."""
+    nodes = [
+        {"id": _ROOT, "name": "Root", "note": "", "parent_id": None, "priority": 0},
+        {
+            "id": _FILE,
+            "name": os.path.basename(str(source_path)),
+            "note": f"Path: {source_path}",
+            "parent_id": _ROOT,
+            "priority": 0,
+        },
+    ]
+    for nid, name, note in entries:
+        nodes.append({"id": nid, "name": name, "note": note, "parent_id": _FILE, "priority": 100})
+    return nodes
+
+
+def _run(client, spec):
+    return asyncio.run(srv._lightning_rod_mutate_beacons(spec=spec))
+
+
+def _partial_batch_fixture(path, monkeypatch, names=("foo", "bar")):
+    """Real temporary disk targets plus one resolvable-but-missing AST item."""
+    from uuid import NAMESPACE_URL, uuid5
+
+    path.write_text(
+        "\n".join(
+            f"# @beacon[\n#   id=b-{name},\n#   slice_labels=old,keep,\n#   kind=ast,\n# ]\n"
+            f"def {name}():\n    return 1\n"
+            for name in names
+        ),
+        encoding="utf-8",
+    )
+    identities = {name: str(uuid5(NAMESPACE_URL, f"{path}/{name}")) for name in (*names, "ghost")}
+    nodes = _pipeline_nodes(path, [(uid, name, f"AST_QUALNAME: {name}\n") for name, uid in identities.items()])
+    client = _PipelineClient(nodes=nodes, candidates=identities)
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    return client, identities
+
+
+def _observe_batch_lease_boundary(monkeypatch):
+    """Observe caller sequencing only; the governor itself is not reimplemented."""
+    state = SimpleNamespace(acquisitions=[], releases=[], held=False, refusal=None)
+    tokens = [{"lease_id": "test-only-token"}]
+
+    async def acquire(targets, **kwargs):
+        assert not state.held
+        state.acquisitions.append(list(targets))
+        if state.refusal is not None:
+            raise state.refusal
+        state.held = True
+        return tokens
+
+    async def release(leases, *, primary_error=None):
+        assert state.held and leases is tokens
+        state.releases.append(primary_error)
+        state.held = False
+
+    monkeypatch.setattr(srv, "acquire_q3_leases_async", acquire)
+    monkeypatch.setattr(srv, "_release_q3_leases_preserving_primary", release)
+    return state
+
+
+@pytest.mark.parametrize("mode,tags,operation", [
+    ("ensure_beacons", ["new"], "updated_beacon"),
+    ("remove_beacon_tags", ["old"], "updated_beacon"),
+    ("remove_beacon_tags", ["old", "keep"], "deleted_beacon"),
+])
+@pytest.mark.parametrize("order", [("ghost", "foo", "bar"), ("foo", "ghost", "bar"), ("foo", "bar", "ghost")])
+def test_partial_batch_keeps_order_same_file_jit_and_one_lease_call(tmp_path, monkeypatch, mode, tags, operation, order):
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    commit = client.commit_beacon_write_plan
+
+    async def guarded_commit(**kwargs):
+        assert leases.held  # No writer escapes the existing lease lifetime.
+        return await commit(**kwargs)
+
+    monkeypatch.setattr(client, "commit_beacon_write_plan", guarded_commit)
+    res = _run(client, _spec_for(mode, operations=[{"symbol": name, "tags": tags} for name in order]))
+    assert res["success"] is False and res["partial_success"] is True
+    assert [row["symbol"] for row in res["results"]] == list(order)
+    assert [row["status"] for row in res["results"]] == ["error" if name == "ghost" else "committed" for name in order]
+    assert all(row["operation"] == operation for row in res["results"] if row["status"] == "committed")
+    assert client.plan_calls == client.commit_calls == [identities[name] for name in order if name != "ghost"]
+    assert res["summary"] == {"requested": 3, "committed": 2, "noop": 0, "preflight_failures": 1, "commit_failures": 0, "comment_conflicts_kept": 0}
+    assert res["files_changed"] == [str(path)]
+    assert len(leases.acquisitions) == 1 and len(leases.acquisitions[0]) == 1
+    assert leases.releases == [None] and not leases.held
+
+
+@pytest.mark.parametrize("mode", ["ensure_beacons", "remove_beacon_tags"])
+def test_partial_batch_all_failures_and_noop_failure_need_no_lease(tmp_path, monkeypatch, mode):
+    path = tmp_path / "m.py"
+    client, _ = _partial_batch_fixture(path, monkeypatch, names=("foo",))
+    before = path.read_bytes()
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    tags = ["old"] if mode == "ensure_beacons" else ["absent"]
+    for names, partial, statuses in [
+        (["ghost", "missing"], False, ["error", "unresolved"]),
+        (["foo", "ghost"], True, ["noop", "error"]),
+    ]:
+        res = _run(client, _spec_for(mode, operations=[{"symbol": name, "tags": tags} for name in names]))
+        assert res["success"] is False and res["partial_success"] is partial
+        assert [row["status"] for row in res["results"]] == statuses
+        assert res["summary"]["committed"] == 0 and res["files_changed"] == []
+    assert leases.acquisitions == leases.releases == []
+    assert client.plan_calls == client.commit_calls == []
+    assert path.read_bytes() == before
+
+
+def test_partial_batch_50_items_one_bad_49_updates(tmp_path, monkeypatch):
+    path = tmp_path / "m.py"
+    names = tuple(f"fn_{i}" for i in range(49))
+    client, identities = _partial_batch_fixture(path, monkeypatch, names=names)
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    order = [*names[:25], "ghost", *names[25:]]
+    res = _run(client, _spec_for("ensure_beacons", symbols=order, tags=["new"]))
+    assert res["summary"] == {"requested": 50, "committed": 49, "noop": 0, "preflight_failures": 1, "commit_failures": 0, "comment_conflicts_kept": 0}
+    assert res["partial_success"] is True
+    assert len(res["results"]) == 50 and res["results"][25]["status"] == "error"
+    assert identities["ghost"] not in client.plan_calls
+    assert len(leases.acquisitions) == 1 and len(leases.acquisitions[0]) == 1
+    assert leases.releases == [None]
+    beacons = nmc.parse_python_beacon_blocks(path.read_text(encoding="utf-8").splitlines())
+    assert len(beacons) == 49
+    assert all("new" in beacon["slice_labels"].split(",") for beacon in beacons)
+
+
+def test_summary_line_names_the_single_failure(tmp_path, monkeypatch):
+    # [ap:LPC157] residue: one actable line without re-reading the ledger --
+    # exactly the to-do's shape: 'N committed · M noop · K failed (sym: kind — reason)'.
+    path = tmp_path / "m.py"
+    client, _ = _partial_batch_fixture(path, monkeypatch)
+    res = _run(client, _spec_for("ensure_beacons", symbols=["foo", "ghost"], tags=["new"]))
+    line = res["summary_line"]
+    assert line.startswith("1 committed · 0 noop · 1 failed (ghost: no_beacon_anchor_for_node — ")
+    assert line.endswith(")")
+
+
+def test_atomic_opt_in_refuses_everything_when_any_item_fails(tmp_path, monkeypatch):
+    # [ap:LPC157] residue: atomic=true restores the strict all-or-nothing
+    # gate -- one bad item leaves every other row not_run with zero writes,
+    # no lease, and no plan/commit call at all.
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    before = path.read_bytes()
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    res = _run(client, _spec_for(
+        "ensure_beacons", symbols=["foo", "ghost", "bar"], tags=["new"], atomic=True,
+    ))
+    assert res["success"] is False and res["partial_success"] is False
+    assert [row["status"] for row in res["results"]] == [
+        "not_run_due_to_batch_preflight_failure", "error", "not_run_due_to_batch_preflight_failure",
+    ]
+    # The failing item keeps its own error row; the veto is named at the top.
+    assert res["results"][1]["error_kind"] == "no_beacon_anchor_for_node"
+    assert "atomic=true" in res["error"]
+    assert client.plan_calls == client.commit_calls == []
+    assert leases.acquisitions == leases.releases == []  # veto precedes the lease
+    assert res["files_changed"] == []
+    assert path.read_bytes() == before
+    assert res["summary_line"].startswith("0 committed · 0 noop · 3 failed")
+
+
+def test_atomic_true_with_no_failures_commits_normally(tmp_path, monkeypatch):
+    # atomic=true changes nothing on an all-pass batch.
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch, names=("foo", "bar"))
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    res = _run(client, _spec_for("ensure_beacons", symbols=["foo", "bar"], tags=["new"], atomic=True))
+    assert res["success"] is True and res["partial_success"] is False
+    assert [row["status"] for row in res["results"]] == ["committed", "committed"]
+    assert res["summary_line"] == "2 committed · 0 noop · 0 failed"
+    assert len(leases.acquisitions) == 1 and leases.releases == [None]
+    assert client.commit_calls == [identities["foo"], identities["bar"]]
+    beacons = nmc.parse_python_beacon_blocks(path.read_text(encoding="utf-8").splitlines())
+    assert all("new" in beacon["slice_labels"].split(",") for beacon in beacons)
+
+
+@pytest.mark.parametrize("status", ["ambiguous", "out_of_scope"])
+def test_partial_batch_nonunique_or_out_of_scope_item_is_not_written(tmp_path, monkeypatch, status):
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch, names=("foo",))
+    leases = _observe_batch_lease_boundary(monkeypatch)
+
+    async def resolve(**kwargs):
+        return {"ok": True, "records": [
+            {"item": "foo", "status": "resolved", "uuid": identities["foo"]},
+            {"item": "problem", "status": status, "candidates": [{"uuid": "not-a-write-target"}]},
+        ], "resolution_report": {status: ["problem"]}}
+
+    monkeypatch.setattr(srv, "_resolve_lightning_rod_symbol_items_from_cache", resolve)
+    res = _run(client, _spec_for("ensure_beacons", symbols=["foo", "problem"], tags=["new"]))
+    assert [row["status"] for row in res["results"]] == ["committed", status]
+    assert res["results"][1]["candidates"] == [{"uuid": "not-a-write-target"}]
+    assert client.commit_calls == [identities["foo"]]
+    assert res["partial_success"] is True and leases.releases == [None]
+
+
+def test_partial_batch_unexpected_preflight_exception_still_aborts(tmp_path, monkeypatch):
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    before = path.read_bytes()
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    preflight = client.preflight_beacon_write_from_node
+
+    async def failing_preflight(node_id, operation, mode):
+        if node_id == identities["ghost"]:
+            raise RuntimeError("infrastructure failure, not a returned domain rejection")
+        return await preflight(node_id, operation, mode)
+
+    monkeypatch.setattr(client, "preflight_beacon_write_from_node", failing_preflight)
+    res = _run(client, _spec_for("ensure_beacons", symbols=["foo", "ghost", "bar"], tags=["new"]))
+    assert [row["status"] for row in res["results"]] == ["not_run_due_to_batch_preflight_failure", "error", "not_run_due_to_batch_preflight_failure"]
+    assert res["results"][1]["error_kind"] == "preflight_error"
+    assert res["partial_success"] is False and res["files_changed"] == []
+    assert leases.acquisitions == leases.releases == []
+    assert client.plan_calls == client.commit_calls == []
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("refuse", [False, True])
+def test_partial_batch_lease_admission_remains_one_atomic_multi_file_call(tmp_path, monkeypatch, refuse):
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    # Move bar to a second file so admission really is one multi-file call.
+    second = tmp_path / "second.py"
+    second.write_text("def bar():\n    return 2\n", encoding="utf-8")
+    second_id = "55555555-5555-5555-5555-555555555555"
+    client.nodes.append({"id": second_id, "name": second.name, "note": f"Path: {second}", "parent_id": _ROOT})
+    client.cache_by_id[second_id] = client.nodes[-1]
+    client.cache_by_id[identities["bar"]]["parent_id"] = second_id
+    before = (path.read_bytes(), second.read_bytes())
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    if refuse:
+        leases.refusal = RuntimeError("one target is busy; atomic batch admission refuses")
+    res = _run(client, _spec_for("ensure_beacons", symbols=["foo", "ghost", "bar"], tags=["new"]))
+    assert len(leases.acquisitions) == 1 and len(leases.acquisitions[0]) == 2
+    assert not leases.held
+    if refuse:
+        assert leases.releases == []
+        assert res["partial_success"] is False and res["files_changed"] == []
+        assert [row.get("error_kind") for row in res["results"]] == ["overlap_conflict", "no_beacon_anchor_for_node", "overlap_conflict"]
+        assert client.plan_calls == client.commit_calls == []
+        assert (path.read_bytes(), second.read_bytes()) == before
+    else:
+        assert leases.releases == [None]
+        assert res["partial_success"] is True and res["summary"]["committed"] == 2
+        assert set(res["files_changed"]) == {str(path), str(second)}
+        assert client.commit_calls == [identities["foo"], identities["bar"]]
+
+
+def test_partial_batch_cancel_after_acquisition_releases_with_primary_error(tmp_path, monkeypatch):
+    path = tmp_path / "m.py"
+    client, _ = _partial_batch_fixture(path, monkeypatch)
+    before = path.read_bytes()
+    leases = _observe_batch_lease_boundary(monkeypatch)
+
+    async def cancel_plan(*args):
+        assert leases.held
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(client, "plan_beacon_write_from_node", cancel_plan)
+    with pytest.raises(asyncio.CancelledError):
+        _run(client, _spec_for("ensure_beacons", symbols=["foo", "ghost"], tags=["new"]))
+    assert len(leases.acquisitions) == len(leases.releases) == 1
+    assert isinstance(leases.releases[0], asyncio.CancelledError)
+    assert not leases.held and client.commit_calls == []
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("verb,tags", [("tags.ensure", ["new"]), ("tags.remove", ["old"])])
+def test_partial_batch_public_ack_preserves_changed_and_failure_ledger(tmp_path, monkeypatch, verb, tags):
+    from workflowy_mcp.mcp_api_registry import dispatch_operation
+
+    path = tmp_path / "m.py"
+    _partial_batch_fixture(path, monkeypatch, names=("foo",))
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    ack = asyncio.run(dispatch_operation(srv.build_beacon_registry(), verb, {
+        "symbols": ["foo", "ghost"], "tags": tags, "root_handles": [_ROOT],
+    }))
+    assert ack["success"] is False and ack["changed"] is True
+    assert ack["detail"]["partial_success"] is True
+    assert ack["detail"]["summary"]["committed"] == 1
+    assert [row["status"] for row in ack["detail"]["results"]] == ["committed", "error"]
+    assert leases.releases == [None]
+
+
+def test_partial_batch_real_domain_conflict_leaves_other_symbol_eligible(tmp_path, monkeypatch):
+    # 2R4E1P: the only remaining item-local comment-adjacent domain failure is
+    # the beacon IDENTITY conflict; a comment conflict is a KEPT warning, so
+    # the old parametrized "comment" kind moved to the kept-conflict test below.
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    operations = [{"symbol": "foo", "tags": ["new"]}, {"symbol": "bar", "tags": ["new"]}]
+    client.cache_by_id[identities["foo"]]["note"] += "BEACON (AST)\nid: b-bar\nkind: ast\n"
+    res = _run(client, _spec_for("ensure_beacons", operations=operations))
+    assert [row["status"] for row in res["results"]] == ["error", "committed"]
+    assert res["results"][0]["error_kind"] == "beacon_identity_conflict"
+    assert res["partial_success"] is True
+    assert client.commit_calls == [identities["bar"]] and leases.releases == [None]
+    beacons = {b["id"]: b for b in nmc.parse_python_beacon_blocks(path.read_text(encoding="utf-8").splitlines())}
+    assert "new" not in beacons["b-foo"]["slice_labels"]
+    assert "new" in beacons["b-bar"]["slice_labels"]
+
+
+def test_partial_batch_comment_conflict_kept_labels_ensured_sibling_commits(tmp_path, monkeypatch):
+    # 2R4E1P: a conflicting beacon comment is a WARNING, never an error --
+    # labels still ensured on the conflicted item, comment kept, sibling ops
+    # unaffected, and the batch reports the kept conflict.
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "id=b-foo,\n", "id=b-foo,\n#   comment=Existing documentation,\n"
+        ),
+        encoding="utf-8",
+    )
+    operations = [
+        {"symbol": "foo", "tags": ["new"], "comment": "Do not overwrite existing documentation"},
+        {"symbol": "bar", "tags": ["new"]},
+    ]
+    res = _run(client, _spec_for("ensure_beacons", operations=operations))
+    assert res["success"] is True and res["partial_success"] is False
+    assert [row["status"] for row in res["results"]] == ["committed", "committed"]
+    kept_row = res["results"][0]
+    assert kept_row["comment_outcome"] == "kept_existing_conflict"
+    assert "Existing documentation" in (kept_row["warning"] or "")
+    assert "Do not overwrite existing documentation" in (kept_row["warning"] or "")
+    assert kept_row["disk_changed"] is True  # labels WERE written
+    assert res["results"][1]["comment_outcome"] == "preserve"
+    assert res["summary"]["comment_conflicts_kept"] == 1
+    assert len(res["warnings"]) == 1 and res["warnings"][0].startswith("foo:")
+    assert client.commit_calls == [identities["foo"], identities["bar"]]
+    assert leases.releases == [None]
+    text = path.read_text(encoding="utf-8")
+    beacons = {b["id"]: b for b in nmc.parse_python_beacon_blocks(text.splitlines())}
+    assert "new" in beacons["b-foo"]["slice_labels"]
+    assert beacons["b-foo"]["comment"] == "Existing documentation"
+    assert "new" in beacons["b-bar"]["slice_labels"]
+
+
+def test_partial_batch_comment_conflict_labels_satisfied_is_noop_with_warning(tmp_path, monkeypatch):
+    # 2R4E1P: a kept conflict where the labels are ALREADY satisfied is a
+    # noop row that still carries the warning -- never silent, never an error.
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "id=b-foo,\n", "id=b-foo,\n#   comment=Existing documentation,\n"
+        ),
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[{"symbol": "foo", "tags": ["old"], "comment": "Different text"}],
+        ),
+    )
+    assert res["success"] is True
+    assert [row["status"] for row in res["results"]] == ["noop"]
+    row = res["results"][0]
+    assert row["comment_outcome"] == "kept_existing_conflict"
+    assert "Existing documentation" in (row["warning"] or "")
+    assert len(res["warnings"]) == 1
+    assert res["summary"]["comment_conflicts_kept"] == 1
+    assert client.commit_calls == []
+    assert path.read_bytes() == before  # nothing written
+
+
+def test_partial_batch_public_ack_surfaces_comment_warnings(tmp_path, monkeypatch):
+    # 2R4E1P: make_mutation_ack lifts the batch warnings to the ack's
+    # top-level warnings; a kept conflict is never an error envelope.
+    from workflowy_mcp.mcp_api_registry import dispatch_operation
+
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    _observe_batch_lease_boundary(monkeypatch)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "id=b-foo,\n", "id=b-foo,\n#   comment=Existing documentation,\n"
+        ),
+        encoding="utf-8",
+    )
+    ack = asyncio.run(dispatch_operation(srv.build_beacon_registry(), "tags.ensure", {
+        "operations": [
+            {"symbol": "foo", "tags": ["new"], "comment": "Requested text"},
+            {"symbol": "bar", "tags": ["new"]},
+        ],
+        "root_handles": [_ROOT],
+    }))
+    assert ack["success"] is True
+    assert ack["changed"] is True
+    assert ack["warnings"] and "foo:" in ack["warnings"][0]
+    detail = ack["detail"]
+    assert detail["summary"]["comment_conflicts_kept"] == 1
+    assert detail["results"][0]["comment_outcome"] == "kept_existing_conflict"
+
+
+@pytest.mark.parametrize("failure", ["cache", "resolver", "scope", "duplicate", "disk_collision"])
+def test_partial_batch_global_gates_still_block_innocent_items(tmp_path, monkeypatch, failure):
+    path = tmp_path / "m.py"
+    client, identities = _partial_batch_fixture(path, monkeypatch)
+    before = path.read_bytes()
+    leases = _observe_batch_lease_boundary(monkeypatch)
+    symbols = ["foo", "ghost", "bar"]
+    roots = None
+    if failure == "cache":
+        def broken_cache():
+            raise RuntimeError("cache unavailable")
+        monkeypatch.setattr(client, "_get_nodes_export_cache_nodes", broken_cache)
+    elif failure == "resolver":
+        async def broken_resolver(**kwargs):
+            return {"ok": False, "error": "resolver unavailable"}
+        monkeypatch.setattr(srv, "_resolve_lightning_rod_symbol_items_from_cache", broken_resolver)
+    elif failure == "scope":
+        roots = ["missing-root"]
+    elif failure == "duplicate":
+        client.candidates["alias"] = identities["foo"]
+        symbols = ["foo", "alias", "bar"]
+    else:
+        client.cache_by_id[identities["ghost"]]["note"] = "AST_QUALNAME: foo\n"
+    res = _run(client, _spec_for("ensure_beacons", symbols=symbols, tags=["new"], roots=roots))
+    assert res["success"] is False and res["partial_success"] is False
+    assert res["files_changed"] == [] and res["summary"]["committed"] == 0
+    assert leases.acquisitions == leases.releases == []
+    assert client.plan_calls == client.commit_calls == []
+    assert res["results"][-1]["status"] == "not_run_due_to_batch_preflight_failure"
+    assert path.read_bytes() == before
+
+
+def test_pipeline_ensure_create_commits_real_disk_write(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n", encoding="utf-8")
+    nodes = _pipeline_nodes(p, [(_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(client, _spec_for("ensure_beacons", operations=[{"symbol": "foo", "tags": ["new"]}]))
+    assert res["success"] is True
+    assert res["partial_success"] is False
+    row = res["results"][0]
+    assert row["status"] == "committed"
+    assert row["operation"] == "created_beacon"
+    assert row["disk_changed"] is True
+    assert res["files_changed"] == [str(p)]
+    assert "@beacon[" in p.read_text(encoding="utf-8")
+    assert res["summary"]["committed"] == 1
+
+
+def test_pipeline_same_file_multi_item_both_commit_no_false_cas(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n\n\ndef bar():\n    return 2\n", encoding="utf-8")
+    nodes = _pipeline_nodes(
+        p,
+        [
+            (_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n"),
+            (_ALIAS, "ƒ bar", "AST_QUALNAME: bar\n---\n"),
+        ],
+    )
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE, "bar": _ALIAS})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "foo", "tags": ["a"]},
+                {"symbol": "bar", "tags": ["b"]},
+            ],
+        ),
+    )
+    assert res["success"] is True, res
+    assert [r["status"] for r in res["results"]] == ["committed", "committed"]
+    content = p.read_text(encoding="utf-8")
+    assert "slice_labels=a," in content
+    assert "slice_labels=b," in content
+    assert res["files_changed"] == [str(p)]  # listed ONCE
+
+
+def test_pipeline_preflight_failure_skips_item_valid_item_commits(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n", encoding="utf-8")
+    before = p.read_bytes()
+    nodes = _pipeline_nodes(
+        p,
+        [
+            (_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n"),
+            (_ALIAS, "ƒ ghost", "AST_QUALNAME: missing_fn\n---\n"),
+        ],
+    )
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE, "ghost": _ALIAS})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "foo", "tags": ["a"]},
+                {"symbol": "ghost", "tags": ["b"]},
+            ],
+        ),
+    )
+    assert res["success"] is False
+    assert res["partial_success"] is True
+    assert [r["status"] for r in res["results"]] == ["committed", "error"]
+    assert res["results"][1]["error_kind"] == "no_beacon_anchor_for_node"
+    assert p.read_bytes() != before
+    assert "slice_labels=a," in p.read_text(encoding="utf-8")
+    assert res["files_changed"] == [str(p)]
+    assert res["summary"]["preflight_failures"] == 1
+    assert res["summary"]["committed"] == 1
+    assert client.plan_calls == client.commit_calls == [_NODE]
+
+
+def test_pipeline_resolution_failure_skips_item_with_complete_ledger(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n", encoding="utf-8")
+    before = p.read_bytes()
+    nodes = _pipeline_nodes(p, [(_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})  # "missing" resolves nowhere
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "foo", "tags": ["a"]},
+                {"symbol": "missing", "tags": ["b"]},
+            ],
+        ),
+    )
+    assert res["success"] is False
+    assert res["partial_success"] is True
+    assert [r["status"] for r in res["results"]] == ["committed", "unresolved"]
+    assert p.read_bytes() != before
+    assert res["summary"]["committed"] == 1
+    assert res["summary"]["preflight_failures"] == 1
+    assert client.plan_calls == client.commit_calls == [_NODE]
+
+
+def test_pipeline_preflight_noop_never_aborts(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text(
+        "# @beacon[\n#   id=b1,\n#   role=foo,\n#   slice_labels=a,\n#   kind=ast,\n# ]\n"
+        "def foo():\n    return 1\n\n\ndef bar():\n    return 2\n",
+        encoding="utf-8",
+    )
+    nodes = _pipeline_nodes(
+        p,
+        [
+            (_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\nBEACON (AST)\nid: b1\nkind: ast\n---\n"),
+            (_ALIAS, "ƒ bar", "AST_QUALNAME: bar\n---\n"),
+        ],
+    )
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE, "bar": _ALIAS})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "foo", "tags": ["a"]},  # already present -> preflight noop
+                {"symbol": "bar", "tags": ["b"]},  # create -> committed
+            ],
+        ),
+    )
+    assert res["success"] is True
+    assert [r["status"] for r in res["results"]] == ["noop", "committed"]
+    assert "slice_labels=b," in p.read_text(encoding="utf-8")
+
+
+def test_pipeline_jit_failure_marks_row_batch_continues(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n\n\ndef bar():\n    return 2\n", encoding="utf-8")
+    nodes = _pipeline_nodes(
+        p,
+        [
+            (_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n"),
+            (_ALIAS, "ƒ bar", "AST_QUALNAME: bar\n---\n"),
+        ],
+    )
+    client = _PipelineClient(
+        nodes=nodes, candidates={"foo": _NODE, "bar": _ALIAS}, jit_fail={_ALIAS}
+    )
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "foo", "tags": ["a"]},
+                {"symbol": "bar", "tags": ["b"]},
+            ],
+        ),
+    )
+    assert res["success"] is False
+    assert res["partial_success"] is True  # 1 committed + 1 failed, NOT aborted
+    assert [r["status"] for r in res["results"]] == ["committed", "error"]
+    assert res["results"][1]["disk_changed"] is False
+    assert res["results"][1]["error_kind"] == "beacon_identity_conflict"
+    content = p.read_text(encoding="utf-8")
+    assert "slice_labels=a," in content
+    assert "slice_labels=b," not in content
+    assert res["summary"]["commit_failures"] == 1
+
+
+def test_pipeline_jit_noop_row_batch_continues(tmp_path, monkeypatch):
+    # preflight forced actionable, but the JIT plan discovers the end-state
+    # is already satisfied -> a runtime noop row, and the batch CONTINUES.
+    p = tmp_path / "m.py"
+    p.write_text(
+        "# @beacon[\n#   id=b1,\n#   role=foo,\n#   slice_labels=a,\n#   kind=ast,\n# ]\n"
+        "def foo():\n    return 1\n\n\ndef bar():\n    return 2\n",
+        encoding="utf-8",
+    )
+    nodes = _pipeline_nodes(
+        p,
+        [
+            (_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\nBEACON (AST)\nid: b1\nkind: ast\n---\n"),
+            (_ALIAS, "ƒ bar", "AST_QUALNAME: bar\n---\n"),
+        ],
+    )
+    client = _PipelineClient(
+        nodes=nodes,
+        candidates={"foo": _NODE, "bar": _ALIAS},
+        force_preflight_actionable=True,
+    )
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "foo", "tags": ["a"]},
+                {"symbol": "bar", "tags": ["b"]},
+            ],
+        ),
+    )
+    assert res["success"] is True, res
+    assert [r["status"] for r in res["results"]] == ["noop", "committed"]
+
+
+def test_pipeline_disk_target_collision_aborts_complete_ledger(tmp_path, monkeypatch):
+    # Two DISTINCT Workflowy nodes claiming the SAME disk beacon (one
+    # actionable, one noop) -> batch preflight failure, complete ledger.
+    p = tmp_path / "q.sql"
+    p.write_text(
+        "-- @beacon[\n--   id=q1,\n--   role=q,\n--   slice_labels=a,\n--   kind=span,\n-- ]\nSELECT 1;\n",
+        encoding="utf-8",
+    )
+    note = "BEACON (SQL SPAN)\nid: q1\nkind: span\n---\n"
+    nodes = _pipeline_nodes(
+        p,
+        [
+            (_NODE, "q A", note),
+            (_ALIAS, "q B", note),
+        ],
+    )
+    client = _PipelineClient(nodes=nodes, candidates={"qa": _NODE, "qb": _ALIAS})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    before = p.read_bytes()
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "qa", "tags": ["a"]},  # noop (label a already on disk)
+                {"symbol": "qb", "tags": ["b"]},  # actionable (would add b)
+            ],
+        ),
+    )
+    assert res["success"] is False
+    assert res["partial_success"] is False
+    assert [r["status"] for r in res["results"]] == ["error", "error"]
+    assert all(r["error_kind"] == "disk_target_collision" for r in res["results"])
+    assert p.read_bytes() == before  # zero mutations
+
+
+def test_pipeline_commit_failure_row_reports_disk_unchanged(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n", encoding="utf-8")
+    before = p.read_bytes()
+    nodes = _pipeline_nodes(p, [(_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE}, commit_fail={_NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(client, _spec_for("ensure_beacons", operations=[{"symbol": "foo", "tags": ["a"]}]))
+    assert res["success"] is False
+    assert res["partial_success"] is False
+    row = res["results"][0]
+    assert row["status"] == "error"
+    assert row["disk_changed"] is False
+    assert p.read_bytes() == before  # invariant 9: a failed write mutates NOTHING
+    assert res["files_changed"] == []
+    assert res["summary"]["commit_failures"] == 1
+
+
+def test_pipeline_root_resolution_failure_complete_ledger(monkeypatch):
+    nodes = _pipeline_nodes("x.py", [(_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[{"symbol": "foo", "tags": ["a"]}, {"symbol": "bar", "tags": ["b"]}],
+            roots=["no-such-root-handle"],
+        ),
+    )
+    assert res["success"] is False
+    assert [r["status"] for r in res["results"]] == ["not_run_due_to_batch_preflight_failure"] * 2
+    assert res["partial_success"] is False
+
+
+def test_pipeline_duplicate_resolved_uuid_complete_ledger(monkeypatch):
+    nodes = _pipeline_nodes("x.py", [(_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE, "alias": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[
+                {"symbol": "foo", "tags": ["a"]},
+                {"symbol": "alias", "tags": ["b"]},
+            ],
+        ),
+    )
+    assert res["success"] is False
+    assert res["partial_success"] is False
+    assert [r["status"] for r in res["results"]] == [
+        "duplicate_resolved_uuid",
+        "duplicate_resolved_uuid",
+    ]
+    assert res["summary"]["preflight_failures"] == 2
+
+
+def test_pipeline_ensure_with_comment_fills_on_create(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n", encoding="utf-8")
+    nodes = _pipeline_nodes(p, [(_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client,
+        _spec_for(
+            "ensure_beacons",
+            operations=[{"symbol": "foo", "tags": ["new"], "comment": "safe comment"}],
+        ),
+    )
+    assert res["success"] is True
+    row = res["results"][0]
+    assert row["status"] == "committed"
+    assert row["comment_outcome"] == "fill"
+    content = p.read_text(encoding="utf-8")
+    assert "comment=safe comment," in content
+    assert client.preflight_calls and client.plan_calls and client.commit_calls
+
+
+# --- capability matrix (honest, disk-parse driven) ---------------------------
+
+
+def test_pipeline_ensure_create_sql_unsupported(tmp_path, monkeypatch):
+    p = tmp_path / "q.sql"
+    p.write_text("SELECT 1;\n", encoding="utf-8")
+    nodes = _pipeline_nodes(p, [(_NODE, "q", "plain span note, no beacon")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(client, _spec_for("ensure_beacons", operations=[{"symbol": "foo", "tags": ["new"]}]))
+    assert res["success"] is False
+    row = res["results"][0]
+    assert row["status"] == "error"
+    assert row["error_kind"] == "operation_not_supported_for_target"
+
+
+def test_pipeline_ensure_vue_without_ast_anchor_unsupported(tmp_path, monkeypatch):
+    p = tmp_path / "c.vue"
+    p.write_text("<template><div /></template>\n", encoding="utf-8")
+    nodes = _pipeline_nodes(p, [(_NODE, "div", "plain note, no beacon no AST")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(client, _spec_for("ensure_beacons", operations=[{"symbol": "foo", "tags": ["new"]}]))
+    assert res["success"] is False
+    row = res["results"][0]
+    assert row["status"] == "error"
+    assert row["error_kind"] == "operation_not_supported_for_target"
+
+
+def test_pipeline_remove_final_label_sql_commits_real_delete(tmp_path, monkeypatch):
+    p = tmp_path / "q.sql"
+    p.write_text(
+        "-- @beacon[\n--   id=q1,\n--   role=q,\n--   slice_labels=old,\n--   kind=span,\n-- ]\n"
+        "SELECT 1;\n"
+        "-- @beacon-close[\n--   id=q1,\n-- ]\n",
+        encoding="utf-8",
+    )
+    nodes = _pipeline_nodes(p, [(_NODE, "q #old", "BEACON (SQL SPAN)\nid: q1\nkind: span\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client, _spec_for("remove_beacon_tags", operations=[{"symbol": "foo", "tags": ["old"]}])
+    )
+    assert res["success"] is True
+    row = res["results"][0]
+    assert row["status"] == "committed"
+    assert row["operation"] == "deleted_beacon"
+    content = p.read_text(encoding="utf-8")
+    assert "@beacon[" not in content
+    assert "@beacon-close[" not in content
+
+
+def test_pipeline_remove_partial_label_sql_updates(tmp_path, monkeypatch):
+    p = tmp_path / "q.sql"
+    p.write_text(
+        "-- @beacon[\n--   id=q1,\n--   role=q,\n--   slice_labels=old,other,\n--   kind=span,\n-- ]\nSELECT 1;\n",
+        encoding="utf-8",
+    )
+    nodes = _pipeline_nodes(p, [(_NODE, "q #old", "BEACON (SQL SPAN)\nid: q1\nkind: span\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client, _spec_for("remove_beacon_tags", operations=[{"symbol": "foo", "tags": ["old"]}])
+    )
+    assert res["success"] is True
+    assert res["results"][0]["operation"] == "updated_beacon"
+    content = p.read_text(encoding="utf-8")
+    assert "slice_labels=other," in content
+    assert "slice_labels=old" not in content
+
+
+def test_pipeline_remove_final_label_python_commits_delete(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text(
+        "# @beacon[\n#   id=b1,\n#   role=foo,\n#   slice_labels=old,\n#   kind=ast,\n# ]\ndef foo():\n    return 1\n",
+        encoding="utf-8",
+    )
+    nodes = _pipeline_nodes(
+        p, [(_NODE, "ƒ foo #old", "AST_QUALNAME: foo\n---\nBEACON (AST)\nid: b1\nkind: ast\n---\n")]
+    )
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client, _spec_for("remove_beacon_tags", operations=[{"symbol": "foo", "tags": ["old"]}])
+    )
+    assert res["success"] is True
+    assert res["results"][0]["operation"] == "deleted_beacon"
+    assert "@beacon[" not in p.read_text(encoding="utf-8")
+
+
+def test_pipeline_remove_no_beacon_is_noop(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text("def foo():\n    return 1\n", encoding="utf-8")
+    before = p.read_bytes()
+    nodes = _pipeline_nodes(p, [(_NODE, "ƒ foo", "AST_QUALNAME: foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client, _spec_for("remove_beacon_tags", operations=[{"symbol": "foo", "tags": ["old"]}])
+    )
+    assert res["success"] is True
+    assert res["results"][0]["status"] == "noop"
+    assert p.read_bytes() == before
+
+
+def test_pipeline_remove_absent_label_on_existing_beacon_is_noop(tmp_path, monkeypatch):
+    p = tmp_path / "m.py"
+    p.write_text(
+        "# @beacon[\n#   id=b1,\n#   role=foo,\n#   slice_labels=old,\n#   kind=ast,\n# ]\ndef foo():\n    return 1\n",
+        encoding="utf-8",
+    )
+    before = p.read_bytes()
+    nodes = _pipeline_nodes(
+        p, [(_NODE, "ƒ foo #old", "AST_QUALNAME: foo\n---\nBEACON (AST)\nid: b1\nkind: ast\n---\n")]
+    )
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client, _spec_for("remove_beacon_tags", operations=[{"symbol": "foo", "tags": ["missing"]}])
+    )
+    assert res["success"] is True
+    assert res["results"][0]["status"] == "noop"
+    assert p.read_bytes() == before
+
+
+@pytest.mark.skipif(not nmc._HAVE_TREE_SITTER, reason="tree-sitter not available")
+def test_pipeline_ensure_vue_script_ast_commits_create(tmp_path, monkeypatch):
+    p = tmp_path / "c.vue"
+    p.write_text(
+        "<script>\nfunction foo() { return 1; }\n</script>\n",
+        encoding="utf-8",
+    )
+    nodes = _pipeline_nodes(p, [(_NODE, "ƒ foo", "AST_QUALNAME: vue:script0:foo\n---\n")])
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(client, _spec_for("ensure_beacons", operations=[{"symbol": "foo", "tags": ["new"]}]))
+    assert res["success"] is True
+    assert res["results"][0]["operation"] == "created_beacon"
+    content = p.read_text(encoding="utf-8")
+    assert "// @beacon[" in content
+    assert "slice_labels=new," in content
+
+
+@pytest.mark.skipif(not nmc._HAVE_TREE_SITTER, reason="tree-sitter not available")
+def test_pipeline_remove_final_label_vue_commits_delete(tmp_path, monkeypatch):
+    p = tmp_path / "c.vue"
+    p.write_text(
+        "<script>\n"
+        "// @beacon[\n//   id=v1,\n//   role=foo,\n//   slice_labels=old,\n//   kind=ast,\n// ]\n"
+        "function foo() { return 1; }\n"
+        "</script>\n",
+        encoding="utf-8",
+    )
+    nodes = _pipeline_nodes(
+        p,
+        [
+            (
+                _NODE,
+                "ƒ foo #old",
+                "AST_QUALNAME: vue:script0:foo\n---\nBEACON (JS/TS AST)\nid: v1\nkind: ast\n---\n",
+            )
+        ],
+    )
+    client = _PipelineClient(nodes=nodes, candidates={"foo": _NODE})
+    monkeypatch.setattr(srv, "get_client", lambda: client)
+    res = _run(
+        client, _spec_for("remove_beacon_tags", operations=[{"symbol": "foo", "tags": ["old"]}])
+    )
+    assert res["success"] is True
+    assert res["results"][0]["operation"] == "deleted_beacon"
+    assert "@beacon[" not in p.read_text(encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _no_workflowy_tab_suppress_list(monkeypatch):
+    """NBBW [ap:3ACUQS]: beacon symbol resolution reads the live #wfy-suppress
+    list from a Workflowy tab; these tests have no tab, so it is stubbed empty."""
+
+    async def _empty():
+        return []
+
+    monkeypatch.setattr("workflowy_mcp.server._beacon_symbol_suppress_tags", _empty)

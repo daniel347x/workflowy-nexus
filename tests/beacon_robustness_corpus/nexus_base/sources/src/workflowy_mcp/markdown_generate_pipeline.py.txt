@@ -1,0 +1,1035 @@
+"""F12+3 Markdown Generate Pipeline (detached worker pipeline body).
+
+This module generates Markdown from a Workflowy subtree, writes it to disk,
+reapplies on-disk Markdown AST beacons, and launches a post-flight disk ->
+Workflowy refresh.
+
+ARCHITECTURE:
+    Originally (April 2026), this pipeline ran INLINE inside the MCP server's
+    WebSocket handler `_handle_generate_markdown_file`. That blocked the MCP
+    foreground event loop for 5-10 minutes per F12+3 invocation.
+
+    The fix (May 2026) was to extract the pipeline body into this module,
+    which runs inside a detached `weave_worker.py` subprocess (mode
+    `markdown_generate`). The MCP server's handler now just spawns the
+    subprocess and returns immediately, mirroring the proven F12+1 detached
+    worker pattern.
+
+PIPELINE PHASES:
+    [1] Pre-flight /nodes-export freshness.
+        Owned by the governed launch authority (PRE freshness + region-claim
+        admission) before this worker spawns; the worker never self-refreshes.
+
+    [2] Resolve file_path from the worker's warm /nodes-export mirror.
+
+    [5] Re-export the Workflowy subtree from the preflight-fresh mirror.
+
+    [6] Write beacon-free Markdown to disk via nexus_to_tokens.
+
+    [7] Reapply on-disk Markdown AST beacons via reapply_markdown_ast_beacons.
+
+    [8] Launch a detached post-flight CARTO_REFRESH (disk -> Workflowy).
+        This is fire-and-forget; F12+3 does not await it.
+"""
+
+from __future__ import annotations
+
+import importlib
+import json
+import os
+import re
+import sys
+from collections.abc import Mapping
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from .carto_job_governance import carto_cancel_requested
+
+
+# @beacon[
+#   id=auto-beacon@_now_iso-uk7j,
+#   role=_now_iso,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+
+# @beacon[
+#   id=auto-beacon@_read_job_payload-ty36,
+#   role=_read_job_payload,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _read_job_payload(job_file: str) -> dict[str, Any]:
+    """Read the CARTO job JSON from disk."""
+    with open(job_file, "r", encoding="utf-8") as jf:
+        return json.load(jf)
+
+
+# @beacon[
+#   id=auto-beacon@_write_job_payload-sdhd,
+#   role=_write_job_payload,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _write_job_payload(job_file: str, payload: dict[str, Any]) -> None:
+    """Write the CARTO job JSON to disk (best-effort).
+
+    Routes through the shared guarded merge-write so a status='cancelled'
+    written concurrently by the MCP server (carto_cancel_job / mcp_cancel_job)
+    is kept sticky and never clobbered by this pipeline's progress/finalize
+    writes. The helper writes atomically (temp + os.replace) and never raises.
+    Falls back to a plain best-effort write only if the import is unavailable.
+    """
+    try:
+        from workflowy_mcp.config import merge_write_carto_job_status
+
+        merge_write_carto_job_status(job_file, payload)
+        return
+    except Exception:
+        # Fall back to the original best-effort plain write so a missing import
+        # never breaks the pipeline.
+        try:
+            with open(job_file, "w", encoding="utf-8") as jf:
+                json.dump(payload, jf, indent=2)
+        except Exception:
+            # Don't let job-file write errors crash the pipeline.
+            pass
+
+
+# @beacon[
+#   id=auto-beacon@_append_log-8g1y,
+#   role=_append_log,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _append_log(log_file: str | None, message: str) -> None:
+    """Append a timestamped line to the job log file (best-effort)."""
+    if not log_file:
+        return
+    try:
+        with open(log_file, "a", encoding="utf-8") as lf:
+            lf.write(f"[{_now_iso()}] {message}\n")
+    except Exception:
+        pass
+
+
+# @beacon[
+#   id=auto-beacon@_set_phase-ci16,
+#   role=_set_phase,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _set_phase(
+    job_file: str,
+    job: dict[str, Any],
+    log_file: str | None,
+    phase: str,
+    message: str,
+) -> None:
+    """Update job's current_phase and write a log line."""
+    progress = job.setdefault("progress", {})
+    progress["current_phase"] = phase
+    job["updated_at"] = _now_iso()
+    _write_job_payload(job_file, job)
+    _append_log(log_file, f"[phase={phase}] {message}")
+
+
+_MARKDOWN_DISALLOWED_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _strip_disallowed_markdown_control_chars(text: str | None) -> str:
+    """Repair/remove C0 controls that must never be written to Markdown files.
+
+    Preserve TAB, LF, and CR. Convert common accidental Python escape controls
+    back to visible literal backslash sequences (BEL -> ``\\a``, BS ->
+    ``\\b``, VT -> ``\\v``, FF -> ``\\f``); strip all other illegal C0
+    controls. This keeps F12+3 from persisting accidental backslash-escape
+    corruption while preserving likely user intent when possible.
+    """
+    if not isinstance(text, str):
+        return ""
+
+    visible_escape_repairs = {
+        "\x07": r"\a",
+        "\x08": r"\b",
+        "\x0b": r"\v",
+        "\x0c": r"\f",
+    }
+
+    def _replace(match: re.Match[str]) -> str:
+        return visible_escape_repairs.get(match.group(0), "")
+
+    return _MARKDOWN_DISALLOWED_CONTROL_CHARS_RE.sub(_replace, text)
+
+
+def _normalize_markdown_eof(text: str) -> str:
+    """Trim EOF blank-line runs and end Markdown with exactly one newline.
+
+    F12+3 regenerates Markdown by joining Workflowy-derived heading/body
+    tokens. The token stream intentionally contains blank separator tokens,
+    and very large Workflowy/99-file trees can occasionally surface long
+    blank-token tails. Those tails are semantically meaningless but create
+    noisy diffs with dozens or hundreds of blank lines at EOF.
+
+    This boundary normalizer is deliberately narrow: it removes only final
+    blank/whitespace-only lines and preserves all internal spacing and all
+    trailing spaces on the last nonblank line.
+    """
+    if not isinstance(text, str) or text == "":
+        return ""
+
+    lines = text.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    if not lines:
+        return ""
+
+    return "\n".join(lines) + "\n"
+
+
+def _normalize_markdown_file_eof(file_path: str) -> dict[str, Any]:
+    """Normalize EOF blank lines for an already-written Markdown file.
+
+    Phase 7 beacon reapplication mutates the file after Phase 6's initial
+    write. Therefore the F12+3 pipeline needs this file-level normalizer at
+    the true final disk boundary, after all beacon reapplication is complete.
+    """
+    with open(file_path, "r", encoding="utf-8") as f:
+        before = f.read()
+    after = _normalize_markdown_eof(before)
+    changed = after != before
+    if changed:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(after)
+    return {
+        "changed": changed,
+        "before_chars": len(before),
+        "after_chars": len(after),
+        "delta_chars": len(after) - len(before),
+    }
+
+
+# @beacon[
+#   id=auto-beacon@_disambiguate_duplicate_beacon_ids_in_file-2n7p,
+#   role=_disambiguate_duplicate_beacon_ids_in_file,
+#   slice_labels=carto-rev-markdown-full,ra-reconcile,ra-carto-jobs,
+#   kind=ast,
+#   comment=F12+3 phase-7.5 idempotency guard. After beacon reapplication, scans the FINAL on-disk Markdown for intra-file duplicate beacon ids and rewrites all-but-the-first duplicate's id= line with a --dupN disambiguation postfix. Prevents the non-idempotent F12+1 churn (endless CREATE+DELETE+reorder) that a duplicate id causes, mirroring the F12+1-side detector but repairing the regenerated file in place. Markdown-only; post-write; surgical single-line id rewrites. Returns {changed, duplicates:[{beacon_id,count,renamed:[...]}], renamed_count}.
+# ]
+def _disambiguate_duplicate_beacon_ids_in_file(file_path: str) -> dict[str, Any]:
+    """Rewrite intra-file duplicate beacon ids so the file is F12+1-idempotent.
+
+    WHY THIS EXISTS
+    ---------------
+    Beacon ids are only required unique WITHIN one file, and F12+1's
+    ``reconcile_trees_cartographer`` matches node identity by beacon id FIRST.
+    When two nodes in one file share an id, the match is ambiguous: one node
+    consumes the id, the real owner enters reconcile with ``id=None`` -> CREATE
+    a new node + DELETE the old one + reorder the survivors, endlessly, on
+    every F12+1 (see SESSION_HANDOFF_duplicate_beacon_warning.md).
+
+    F12+3 can PROPAGATE such a duplicate: it regenerates the file purely from
+    Workflowy, and ``reapply_markdown_ast_beacons`` -> ``update_beacon_from_
+    node_markdown`` PRESERVES each node note's existing ``beacon_id`` (Case 1b
+    'recreate' reuses it rather than minting a fresh one). So if two Workflowy
+    heading notes carry BEACON blocks with the same ``id:`` (the corruption
+    state), F12+3 faithfully writes TWO on-disk blocks with that same id.
+
+    THE FIX (Dan's design)
+    ----------------------
+    Run this AFTER phase 7 (beacon reapplication), on the FINAL written file.
+    Parse every ``@beacon[...]`` HTML-comment block with the same parser F12
+    uses (``parse_markdown_beacon_blocks``), group by id, keep the FIRST
+    occurrence of each id untouched, and rewrite every SUBSEQUENT duplicate's
+    ``id=<value>`` line to ``id=<value>--dup2`` / ``--dup3`` / ... (collision-
+    safe against ids already present in the file). That single-line rewrite is
+    all that is needed to make the regenerated file idempotent under the next
+    F12+1; the disambiguated blocks otherwise keep their role/slice_labels/kind.
+
+    SCOPE / SAFETY
+    --------------
+    * Markdown-only, and only touches the ``id=`` line inside a duplicate
+      block; everything else in the file is preserved byte-for-byte.
+    * Best-effort and non-fatal: any failure returns ``changed=False`` with an
+      ``error`` field rather than raising, so it can never break F12+3.
+    * Idempotent: a file with no duplicates is left untouched
+      (``changed=False``, empty ``duplicates``).
+
+    Returns a dict::
+
+        {
+          "changed": bool,
+          "duplicates": [
+            {"beacon_id": str, "count": int,
+             "renamed": [{"to": str, "comment_line": int}, ...]},
+            ...
+          ],
+          "renamed_count": int,
+          "error": str | None,   # present only on failure
+        }
+    """
+    result: dict[str, Any] = {
+        "changed": False,
+        "duplicates": [],
+        "renamed_count": 0,
+    }
+
+    # Resilient import of the Markdown beacon parser, mirroring
+    # reapply_markdown_ast_beacons' strategy (the module lives at the project
+    # root, not under workflowy_mcp).
+    try:
+        cartographer = importlib.import_module("nexus_map_codebase")
+    except Exception:
+        try:
+            here = os.path.dirname(os.path.abspath(__file__))
+            candidate = os.path.join(here, "MCP_Servers", "workflowy_mcp")
+            if os.path.isdir(candidate) and candidate not in sys.path:
+                sys.path.insert(0, candidate)
+            cartographer = importlib.import_module("nexus_map_codebase")
+        except Exception as e:  # noqa: BLE001
+            result["error"] = f"nexus_map_codebase import failed: {e!r}"
+            return result
+
+    parse_blocks = getattr(cartographer, "parse_markdown_beacon_blocks", None)
+    if parse_blocks is None:
+        result["error"] = "parse_markdown_beacon_blocks helper not available"
+        return result
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+    except Exception as e:  # noqa: BLE001
+        result["error"] = f"failed_to_read_file: {e!r}"
+        return result
+
+    # Line array WITHOUT terminators (splitlines), matching the coordinate
+    # system parse_markdown_beacon_blocks emits: comment_line is 1-based and
+    # indexes the line containing '@beacon['.
+    lines = raw.splitlines()
+
+    try:
+        beacons = parse_blocks(lines)
+    except Exception as e:  # noqa: BLE001
+        result["error"] = f"parse_markdown_beacon_blocks failed: {e!r}"
+        return result
+
+    # Group parsed beacons by id, preserving document order (parse order).
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for b in beacons:
+        bid = str((b.get("id") or "")).strip()
+        if not bid:
+            continue
+        by_id.setdefault(bid, []).append(b)
+
+    dup_ids = {bid: blks for bid, blks in by_id.items() if len(blks) > 1}
+    if not dup_ids:
+        # Clean file: nothing to do.
+        return result
+
+    # Set of ids already present so generated disambiguated ids never collide
+    # with an existing id (or with a previously-assigned disambiguated one).
+    existing_ids: set[str] = set(by_id.keys())
+
+    def _next_free_id(base: str) -> str:
+        n = 2
+        while True:
+            candidate = f"{base}--dup{n}"
+            if candidate not in existing_ids:
+                existing_ids.add(candidate)
+                return candidate
+            n += 1
+
+    # Regex to rewrite the value on an 'id=' beacon-field line while preserving
+    # leading whitespace, the optional Markdown comment prefix, and the
+    # trailing ',' punctuation the beacon grammar uses. Matches e.g.
+    #   '  id=auto-beacon@foo-1234,'
+    id_line_re = re.compile(r"^(?P<prefix>\s*(?:#+\s*)?id\s*=\s*)(?P<val>.*?)(?P<suffix>\s*,?\s*)$")
+
+    # Build the set of (comment_line -> new_id) rewrites for the SUBSEQUENT
+    # duplicates (skip the first occurrence of each id). We locate the exact
+    # 'id=' line by scanning DOWN from each block's comment_line (the
+    # '@beacon[' line) to the first matching 'id=' field line within the block
+    # (terminated by the structural ']' close line).
+    rewrites: dict[int, str] = {}  # 0-based line index -> new full line text
+    changed = False
+
+    def _find_id_line_index(comment_line_1based: int, old_id: str) -> int | None:
+        """Return the 0-based index of the 'id=<old_id>' line within this block."""
+        i = comment_line_1based - 1  # 0-based '@beacon[' line
+        # Scan forward to the structural close ']' (inclusive-ish), looking for
+        # the id= field carrying old_id.
+        j = i
+        n = len(lines)
+        while j < n:
+            raw_line = lines[j]
+            stripped = raw_line.strip()
+            # Structural close line: stop (do not scan past this block).
+            t = stripped
+            if t.startswith("<!--"):
+                t = t[4:].lstrip()
+            if t.startswith("#"):
+                t = t.lstrip("#").lstrip()
+            elif t.startswith("//"):
+                t = t[2:].lstrip()
+            m = id_line_re.match(raw_line)
+            if m is not None and m.group("val").strip() == old_id:
+                return j
+            # Terminate at the block's structural ']' close (only after we've
+            # moved past the opener line to avoid a degenerate one-line match).
+            if j > i and t.startswith("]"):
+                break
+            j += 1
+        return None
+
+    duplicates_report: list[dict[str, Any]] = []
+    for bid, blks in dup_ids.items():
+        renamed: list[dict[str, Any]] = []
+        # Keep the FIRST block's id; rewrite every subsequent one.
+        for blk in blks[1:]:
+            cl = blk.get("comment_line")
+            if not isinstance(cl, int) or cl <= 0:
+                continue
+            idx = _find_id_line_index(cl, bid)
+            if idx is None or idx in rewrites:
+                continue
+            new_id = _next_free_id(bid)
+            m = id_line_re.match(lines[idx])
+            if m is None:
+                continue
+            new_line = f"{m.group('prefix')}{new_id}{m.group('suffix')}"
+            rewrites[idx] = new_line
+            renamed.append({"to": new_id, "comment_line": cl})
+            changed = True
+        if renamed:
+            duplicates_report.append({"beacon_id": bid, "count": len(blks), "renamed": renamed})
+
+    if not changed:
+        result["duplicates"] = duplicates_report
+        return result
+
+    # Apply the line rewrites and write the file back, preserving the original
+    # trailing-newline convention (splitlines() drops it; re-add one).
+    for idx, new_line in rewrites.items():
+        lines[idx] = new_line
+    new_text = "\n".join(lines)
+    if raw.endswith("\n"):
+        new_text += "\n"
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(new_text)
+    except Exception as e:  # noqa: BLE001
+        result["error"] = f"failed_to_write_file: {e!r}"
+        return result
+
+    result["changed"] = True
+    result["duplicates"] = duplicates_report
+    result["renamed_count"] = len(rewrites)
+    return result
+
+
+# @beacon[
+#   id=auto-beacon@_job_cancelled-62f3,
+#   role=_job_cancelled,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _job_cancelled(job_file: str) -> bool:
+    """Check durable sentinel authority before compatibility status state."""
+    return carto_cancel_requested(job_file)
+
+
+# @beacon[
+#   id=auto-beacon@run_markdown_generate_pipeline-9qq5,
+#   role=run_markdown_generate_pipeline,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+async def run_markdown_generate_pipeline(
+    *,
+    client: Any,
+    root_uuid: str,
+    job_file: str,
+) -> dict[str, Any]:
+    """Run the F12+3 Markdown generate pipeline.
+
+    Args:
+        client: A WorkFlowyClient instance (worker's own, with warm cache).
+        root_uuid: Workflowy UUID of the file/subtree to generate Markdown for.
+        job_file: Path to the CARTO job JSON file for status/progress updates.
+
+    Returns:
+        Result dict with success/error/file_path/counts. The job JSON is
+        also updated to reflect the final state.
+    """
+    # Initial job state.
+    job = _read_job_payload(job_file)
+    job["_job_file"] = str(job_file)
+    log_file = job.get("logs_path")
+
+    job["status"] = "running"
+    job["pid"] = os.getpid()
+    job["updated_at"] = _now_iso()
+    progress = job.setdefault("progress", {})
+    progress.setdefault("current_phase", "starting")
+    progress.setdefault("nodes_created", 0)
+    progress.setdefault("nodes_updated", 0)
+    progress.setdefault("nodes_moved", 0)
+    progress.setdefault("nodes_deleted", 0)
+    result_summary = job.setdefault("result_summary", {})
+    result_summary.setdefault("errors", [])
+    _write_job_payload(job_file, job)
+    _append_log(
+        log_file,
+        f"Starting F12+3 markdown generate pipeline for root_uuid={root_uuid}",
+    )
+
+    try:
+        if _job_cancelled(job_file):
+            _append_log(log_file, "Cancellation observed before pipeline started.")
+            return _finish_cancelled(job_file, job, log_file)
+
+        # ====================================================================
+        # PHASE [2]: Resolve path + export subtree from worker's warm cache.
+        # ====================================================================
+        _set_phase(
+            job_file, job, log_file, "phase-2-resolve-path", "Resolving file path from cache"
+        )
+
+        # Import the path resolver + the F12+4 saved-regime dummy-block reader.
+        from .client.api_client_nexus import (
+            resolve_cartographer_path_from_node,
+            _extract_dummy_path_from_metadata_block,
+        )
+
+        all_nodes = client._get_nodes_export_cache_nodes()
+        nodes_by_id = {str(n.get("id")): n for n in all_nodes if n.get("id")}
+
+        # F12+4 "saved generated file" regime (Dan, 2026): a node that lives
+        # INSIDE a mapped Markdown file and was materialized with "keep the
+        # generated .md" carries a DUMMY metadata block whose body holds an
+        # ABSOLUTE Path: line (see _extract_dummy_path_from_metadata_block). We
+        # must intercept BEFORE the ancestor walk: resolve_cartographer_path_
+        # from_node would otherwise climb into the primary file's heading
+        # ancestors (which carry no folder Root:) and either resolve to the
+        # WRONG file (the primary .md) or raise. When the dummy block is
+        # present we use its absolute path VERBATIM and skip ancestor
+        # resolution entirely — mirroring the identical short-circuit in
+        # WorkFlowyClientNexus.refresh_file_node_beacons (the F12+1 twin).
+        # The dummy block lives only on the root node's own note; F12+3 emits
+        # that note nowhere (depth==0 recurses into children only) and
+        # _strip_md_path_block strips any leading MD_PATH: block regardless, so
+        # the dummy Path: line is never written to the regenerated file.
+        root_node_for_path = nodes_by_id.get(str(root_uuid)) or {}
+        root_note_for_path = root_node_for_path.get("note") or root_node_for_path.get("no") or ""
+        dummy_saved_path = _extract_dummy_path_from_metadata_block(root_note_for_path)
+        if dummy_saved_path:
+            # Absolute by contract; used verbatim. No ancestor-chain resolution.
+            file_path = dummy_saved_path
+            _append_log(
+                log_file,
+                f"Resolved file_path via F12+4 dummy-block (saved-generated-file "
+                f"regime; no ancestor resolution): {file_path}",
+            )
+        else:
+            resolved = resolve_cartographer_path_from_node(
+                node_id=str(root_uuid),
+                nodes_by_id=nodes_by_id,
+            )
+            file_path = str(resolved.get("abs_path") or "")
+            _append_log(log_file, f"Resolved file_path: {file_path}")
+        if not file_path:
+            raise ValueError(f"Could not resolve absolute path for node {root_uuid}")
+
+        # ====================================================================
+        # PHASE [5]: Re-export from the preflight-fresh cache.
+        # ====================================================================
+        # The governed launcher owns admission (the region claim) and the
+        # mandatory /nodes-export freshness before spawning this worker. The
+        # worker consumes that warm-started snapshot and does not perform a
+        # second refresh.
+        # If the snapshot is missing or malformed, export_nodes/_build_hierarchy
+        # will fail closed below rather than continuing with unknown state.
+        if _job_cancelled(job_file):
+            return _finish_cancelled(job_file, job, log_file)
+
+        _set_phase(
+            job_file,
+            job,
+            log_file,
+            "phase-5-re-export",
+            "Re-exporting subtree from preflight-fresh cache",
+        )
+
+        export_result = await client.export_nodes(node_id=root_uuid)
+        flat_nodes = export_result.get("nodes", []) or []
+        if not flat_nodes:
+            raise ValueError(f"Re-export returned empty nodes for {root_uuid}")
+
+        hierarchical_tree = client._build_hierarchy(flat_nodes, True)
+        if not hierarchical_tree:
+            raise ValueError("Failed to rebuild hierarchical tree from preflight-fresh cache.")
+        root_node = hierarchical_tree[0]
+
+        # ====================================================================
+        # PHASES [6] + [7]: Markdown generation + on-disk beacon reapplication.
+        # ====================================================================
+        if _job_cancelled(job_file):
+            return _finish_cancelled(job_file, job, log_file)
+
+        _set_phase(
+            job_file,
+            job,
+            log_file,
+            "phase-6-write-markdown",
+            "Generating and writing Markdown to disk",
+        )
+
+        # Locate markdown_roundtrip module. It lives at the project root
+        # (the pip-install or editable-install root), not inside src/. We walk
+        # up from this file's location to find it.
+        script_dir = Path(__file__).parent.resolve()  # .../src/workflowy_mcp/
+        src_dir = script_dir.parent  # .../src/
+        project_root = src_dir.parent  # project root (install root)
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+
+        markdown_roundtrip = importlib.import_module("markdown_roundtrip")
+        from markdown_it import MarkdownIt
+
+        frontmatter_text, root_for_render = markdown_roundtrip.detach_yaml_frontmatter_child(
+            root_node
+        )
+
+        raw_markdown = "\n".join(markdown_roundtrip.nexus_to_tokens(root_for_render, depth=0))
+
+        # Parse once for validation (don't re-render through mdformat — see
+        # original handler comments about list-marker normalization).
+        md = MarkdownIt("commonmark")
+        _ = md.parse(raw_markdown)
+
+        final_markdown = markdown_roundtrip.clean_html_entities(raw_markdown)
+        if frontmatter_text is not None:
+            frontmatter_clean = markdown_roundtrip.clean_html_entities(frontmatter_text).strip("\n")
+            body_clean = final_markdown.lstrip("\n")
+            final_markdown = f"---\n{frontmatter_clean}\n---\n\n{body_clean}"
+
+        final_markdown = _strip_disallowed_markdown_control_chars(final_markdown)
+        final_markdown = _normalize_markdown_eof(final_markdown)
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(final_markdown)
+        _append_log(log_file, f"Wrote Markdown to {file_path} ({len(final_markdown)} chars)")
+
+        _set_phase(
+            job_file,
+            job,
+            log_file,
+            "phase-7-reapply-beacons",
+            "Reapplying on-disk Markdown AST beacons",
+        )
+
+        # Phase 7 returns (results, warnings). Per-beacon failures are
+        # NON-FATAL (May 2026): each failure becomes a warning entry and
+        # the loop continues. We persist the warning count + per-warning
+        # detail into the CARTO job JSON and log so the human can review.
+        #
+        # log_callback (May 2026): we route every per-beacon attempt line
+        # into the same job log file via _append_log so the user can watch
+        # progress in real time and post-mortem the run if anything looked
+        # off. The callback is best-effort inside the helper; if it ever
+        # raises, beacon writing continues uninterrupted.
+        # @beacon[
+        #   id=auto-beacon@run_markdown_generate_pipeline._phase7_log-jd0m,
+        #   role=run_markdown_generate_pipeline._phase7_log,
+        #   slice_labels=carto-rev-markdown-full,
+        #   kind=ast,
+        # ]
+        def _phase7_log(msg: str) -> None:
+            try:
+                _append_log(log_file, msg)
+            except Exception:  # noqa: BLE001
+                pass
+
+        beacon_results, beacon_warnings = markdown_roundtrip.reapply_markdown_ast_beacons(
+            file_path, root_for_render, log_callback=_phase7_log
+        )
+        ast_beacon_count = len(beacon_results)
+        # beacon_warnings is the phase-7 skip list; we ACCUMULATE any phase-7.5
+        # duplicate-beacon-id repairs into the SAME list (below) so a single
+        # warning-count / completed_with_warnings decision covers both.
+        beacon_warnings = list(beacon_warnings)
+        _append_log(log_file, f"Reapplied {ast_beacon_count} AST beacons on disk")
+
+        # ====================================================================
+        # PHASE [7.5]: Duplicate-beacon-id disambiguation (idempotency guard).
+        # ====================================================================
+        # F12+3 preserves each Workflowy note's existing beacon_id when it
+        # rehydrates on-disk blocks (reapply_markdown_ast_beacons -> Case 1b
+        # 'recreate' reuses the id). So if two Workflowy heading notes carry
+        # BEACON blocks with the SAME id (the corruption state that causes
+        # non-idempotent F12+1 churn), the freshly-written file now contains
+        # two on-disk blocks with that duplicate id. Detect that on the FINAL
+        # written file and rewrite all-but-the-first duplicate's id= line with
+        # a --dupN postfix so the file is idempotent under the next F12+1. This
+        # mirrors the F12+1-side detector (SESSION_HANDOFF_duplicate_beacon_
+        # warning.md) but REPAIRS the regenerated file rather than only warning.
+        # Non-fatal + best-effort: any failure is logged and surfaced as a
+        # warning; it can never break the pipeline.
+        try:
+            dedup = _disambiguate_duplicate_beacon_ids_in_file(file_path)
+            if dedup.get("error"):
+                _append_log(
+                    log_file,
+                    f"WARNING: duplicate-beacon-id disambiguation could not run: "
+                    f"{dedup.get('error')}",
+                )
+                beacon_warnings.append(
+                    {
+                        "type": "duplicate_beacon_id_disambiguation_failed",
+                        "name": os.path.basename(file_path),
+                        "error": str(dedup.get("error")),
+                        "md_path": None,
+                        "operation": None,
+                    }
+                )
+            elif dedup.get("changed"):
+                renamed_count = int(dedup.get("renamed_count") or 0)
+                dup_groups = dedup.get("duplicates") or []
+                _append_log(
+                    log_file,
+                    f"WARNING: repaired {renamed_count} duplicate beacon id(s) "
+                    f"in {os.path.basename(file_path)} across {len(dup_groups)} "
+                    f"id group(s) (rewrote all-but-first with a --dupN postfix). "
+                    f"This file was carrying an intra-file duplicate beacon id "
+                    f"that would make F12+1 non-idempotent; the duplicates have "
+                    f"been disambiguated on disk.",
+                )
+                for g in dup_groups:
+                    try:
+                        renamed_to = ", ".join(str(r.get("to")) for r in (g.get("renamed") or []))
+                        _append_log(
+                            log_file,
+                            f"  duplicate-id repair: id={g.get('beacon_id')!r} "
+                            f"appeared {g.get('count')}x -> renamed extras to: "
+                            f"{renamed_to}",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                # One structured warning per repaired id group so the widget /
+                # log surface the repair as completed_with_warnings (the user
+                # should know the source-of-truth Workflowy nodes STILL share
+                # the id, and will re-corrupt on the next F12+3 unless fixed).
+                for g in dup_groups:
+                    beacon_warnings.append(
+                        {
+                            "type": "duplicate_beacon_id_repaired",
+                            "name": os.path.basename(file_path),
+                            "error": (
+                                f"Beacon id {g.get('beacon_id')!r} appeared "
+                                f"{g.get('count')} times in the regenerated file; "
+                                f"disambiguated the extras with a --dupN postfix so "
+                                f"F12+1 stays idempotent. NOTE: the Workflowy nodes "
+                                f"still share this id and will re-introduce the "
+                                f"duplicate on the next F12+3 until their notes are "
+                                f"given distinct ids."
+                            ),
+                            "beacon_id": g.get("beacon_id"),
+                            "renamed": g.get("renamed"),
+                            "md_path": None,
+                            "operation": "disambiguated_duplicate_beacon_id",
+                        }
+                    )
+            else:
+                # Clean file (the common case): nothing to log.
+                pass
+        except Exception as e:  # noqa: BLE001
+            # Defensive: the helper is already fail-soft, but never let this
+            # guard's own wiring break the pipeline.
+            _append_log(
+                log_file,
+                f"WARNING: duplicate-beacon-id disambiguation raised unexpectedly: {e}",
+            )
+
+        ast_beacon_warning_count = len(beacon_warnings)
+
+        # Final disk-boundary EOF normalization. Phase 7 beacon reapplication
+        # (and the phase-7.5 duplicate-id repair) may reopen and rewrite the
+        # Markdown file after Phase 6's initial normalized write, so trim EOF
+        # blank-line tails again here.
+        try:
+            eof_norm = _normalize_markdown_file_eof(file_path)
+            if eof_norm.get("changed"):
+                _append_log(
+                    log_file,
+                    "Post-beacon EOF normalization trimmed trailing blank lines "
+                    f"(delta_chars={eof_norm.get('delta_chars')}, "
+                    f"before={eof_norm.get('before_chars')}, "
+                    f"after={eof_norm.get('after_chars')})",
+                )
+        except Exception as e:  # noqa: BLE001
+            _append_log(log_file, f"WARNING: post-beacon EOF normalization failed: {e}")
+
+        if ast_beacon_warning_count:
+            _append_log(
+                log_file,
+                f"WARNING: {ast_beacon_warning_count} phase-7/7.5 warning(s) "
+                f"(per-beacon skips and/or duplicate-beacon-id repairs). "
+                f"Run will be marked completed_with_warnings.",
+            )
+            for w in beacon_warnings:
+                try:
+                    md_path_repr = w.get("md_path")
+                    md_path_str = (
+                        " / ".join(md_path_repr) if isinstance(md_path_repr, list) else "<none>"
+                    )
+                    _append_log(
+                        log_file,
+                        f"  WARNING beacon-skip: name={w.get('name')!r} "
+                        f"error={w.get('error')!r} md_path={md_path_str}",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            # Surface warnings into job JSON so the watcher / widget /
+            # post-mortem inspection can find them without scraping the log.
+            try:
+                job["warnings"] = list(beacon_warnings)
+                job["warning_count"] = ast_beacon_warning_count
+            except Exception:  # noqa: BLE001
+                pass
+
+        # ====================================================================
+        # PHASE [8]: Post-flight file refresh (disk -> Workflowy).
+        #
+        # We launch this as a SEPARATE detached CARTO_REFRESH job and do
+        # NOT await it. F12+3 is "complete" once the disk file is written;
+        # the post-refresh just keeps Workflowy's metadata in sync but
+        # isn't strictly part of the user's "generate markdown" intent.
+        #
+        # The widget will show this follow-up CARTO_REFRESH job in the
+        # active jobs list, so the user knows it's happening.
+        # ====================================================================
+        _set_phase(
+            job_file,
+            job,
+            log_file,
+            "phase-8-post-refresh",
+            "Launching detached post-flight file refresh",
+        )
+
+        # We can't import server.py functions here (we're in a worker
+        # subprocess, server.py isn't imported). Instead, we directly
+        # spawn a new weave_worker.py subprocess in carto_refresh mode.
+        # But: we need to be careful — we're already a worker subprocess.
+        # Spawning ANOTHER subprocess from inside us is fine, but the
+        # MCP server's watcher loop will track both jobs.
+        post_refresh_job_id = None
+        continuation_live = False
+        try:
+            phase8_result = await _launch_phase8_refresh_via_authority(
+                client=client,
+                parent_job=job,
+                root_uuid=root_uuid,
+                log_file=log_file,
+            )
+            if phase8_result.get("success"):
+                post_refresh_job_id = phase8_result.get("job_id")
+                continuation_live = True
+            else:
+                _append_log(
+                    log_file,
+                    f"WARNING: governed post-flight refresh launch failed: {phase8_result.get('error')}",
+                )
+        except Exception as e:
+            _append_log(log_file, f"WARNING: post-flight refresh launch failed: {e}")
+
+        # ====================================================================
+        # SUCCESS  (or SUCCESS-WITH-WARNINGS)
+        #
+        # Tri-state status precedence (May 2026):
+        #   failed > completed_with_warnings > completed
+        # If any phase-7 beacon was skipped due to a per-beacon error, the
+        # job is marked `completed_with_warnings`. The GC sweep in server.py
+        # exempts BOTH `failed` AND `completed_with_warnings` from auto-
+        # cleanup, and the GLIMPSE widget keeps both visible until manually
+        # cleared. This way a single anomalous beacon out of thousands
+        # doesn't silently disappear from the user's view.
+        # ====================================================================
+        progress["current_phase"] = "done"
+        if ast_beacon_warning_count > 0:
+            job["status"] = "completed_with_warnings"
+        else:
+            job["status"] = "completed"
+        job["cache_refresh_required"] = (
+            False  # This job writes disk only; Phase [8] worker handles Workflowy mutations.
+        )
+        result_summary["file_path"] = file_path
+        result_summary["ast_beacons_reapplied"] = ast_beacon_count
+        result_summary["ast_beacons_skipped"] = ast_beacon_warning_count
+        result_summary["post_refresh_job_id"] = post_refresh_job_id
+        result_summary["message"] = (
+            f"Generated markdown for {root_uuid} at {file_path} "
+            f"(ast_beacons={ast_beacon_count}, "
+            f"skipped={ast_beacon_warning_count}, "
+            f"post_refresh_job_id={post_refresh_job_id!r})"
+        )
+        job["updated_at"] = _now_iso()
+        _write_job_payload(job_file, job)
+        if ast_beacon_warning_count > 0:
+            _append_log(
+                log_file,
+                f"F12+3 pipeline completed WITH WARNINGS "
+                f"({ast_beacon_warning_count} beacon(s) skipped, "
+                f"{ast_beacon_count} written successfully).",
+            )
+        else:
+            _append_log(log_file, "F12+3 pipeline completed successfully.")
+
+        return {
+            "success": True,
+            "completed_with_warnings": ast_beacon_warning_count > 0,
+            "file_path": file_path,
+            "ast_beacons_reapplied": ast_beacon_count,
+            "ast_beacons_skipped": ast_beacon_warning_count,
+            "post_refresh_job_id": post_refresh_job_id,
+            "continuation_live": continuation_live,
+        }
+
+    except Exception as e:
+        import traceback
+
+        tb = traceback.format_exc()
+        _append_log(log_file, f"ERROR: F12+3 pipeline failed: {e}\n{tb}")
+        progress["current_phase"] = "failed"
+        job["status"] = "failed"
+        job["error"] = str(e)
+        result_summary.setdefault("errors", []).append(str(e))
+        job["updated_at"] = _now_iso()
+        _write_job_payload(job_file, job)
+        return {"success": False, "error": str(e)}
+
+
+# @beacon[
+#   id=auto-beacon@_finish_cancelled-vcda,
+#   role=_finish_cancelled,
+#   slice_labels=carto-rev-markdown-full,
+#   kind=ast,
+# ]
+def _finish_cancelled(job_file: str, job: dict[str, Any], log_file: str | None) -> dict[str, Any]:
+    """Record cooperative stop; the worker wrapper verifies and finalizes."""
+    progress = job.setdefault("progress", {})
+    progress["current_phase"] = "cancelling"
+    job["status"] = "cancelling"
+    job["cache_refresh_required"] = False
+    job["updated_at"] = _now_iso()
+    _write_job_payload(job_file, job)
+    _append_log(log_file, "Pipeline stopped for cancellation; finalization pending.")
+    return {"success": False, "cancelled": True}
+
+
+# @beacon[
+#   id=carto-governance@phase8-refresh-continuation,
+#   role=_launch_phase8_refresh_via_authority,
+#   slice_labels=carto-governance,ra-carto-jobs,ra-reconcile,ra-workflowy-cache,carto-rev-markdown-full,
+#   kind=ast,
+#   comment=Validated MARKDOWN_GENERATE phase-8 continuation: same-target co-claim through the shared authority, inherited parent snapshot, and no second freshness request.,
+# ]
+async def _launch_phase8_refresh_via_authority(
+    *,
+    client: Any,
+    parent_job: Mapping[str, Any],
+    root_uuid: str,
+    log_file: str | None,
+) -> dict[str, Any]:
+    """Launch the validated phase-8 co-claim through the one shared authority."""
+    from workflowy_mcp.carto_job_governance import launch_carto_refresh_job
+
+    # S04 §7.2: hard-stop admission — the phase-8 child is an independently
+    # owned CARTO launch that may mutate Workflowy; refuse under the hard
+    # barrier BEFORE any job artifact/admission work.
+    from workflowy_mcp.coherence.admission import require_coherence_mutation_admission
+    from workflowy_mcp.coherence.errors import CoherenceBarrierActiveError
+
+    try:
+        await require_coherence_mutation_admission(
+            client._coherence_paths, operation="carto.phase8_refresh_launch"
+        )
+    except CoherenceBarrierActiveError as exc:
+        return {
+            "success": False,
+            "error_kind": "coherence_barrier_active",
+            "error": str(exc),
+            "coherence_admission": exc.refusal_extra(),
+        }
+
+    snapshot_path = str(parent_job.get("snapshot_path") or "")
+    footprint = parent_job.get("footprint")
+    account_scope_id = str(parent_job.get("account_scope_id") or "")
+    parent_job_id = str(parent_job.get("id") or "")
+    if not snapshot_path or not isinstance(footprint, Mapping):
+        return {"success": False, "error": "Parent job lacks inherited snapshot/footprint."}
+    try:
+        api_key = client.config.api_key.get_secret_value()
+    except Exception:
+        api_key = os.environ.get("WORKFLOWY_API_KEY", "")
+    if not api_key:
+        return {"success": False, "error": "No API key available for phase-8 child."}
+    env = os.environ.copy()
+    env["WORKFLOWY_API_KEY"] = api_key
+    worker_script = Path(__file__).parent / "weave_worker.py"
+
+    # Head-currency gate + held-node-lock consult view + head-stale
+    # revalidation hook, derived from this job's pinned snapshot.  The
+    # inherited footprint's basis is the PARENT's admission view (potentially
+    # minutes old), so the phase-8 child enforces the same head-currency
+    # invariant as every other CARTO admission; on a stale basis the hook
+    # adopts the manifest head and re-derives the footprint from the freshly
+    # adopted view (the inherited canonical path is reused as-is).
+    from workflowy_mcp.coherence.operation_cache import current_operation_cache
+
+    admission_kwargs: dict[str, Any] = {}
+    pinned = current_operation_cache(required=False)
+    if pinned is not None and pinned.nodes_by_id:
+        admission_kwargs["footprint_basis_sequence"] = pinned.view.adopted_sequence
+        admission_kwargs["footprint_basis_epoch_id"] = pinned.view.epoch_id
+        admission_kwargs["live_mutation_lease_view"] = dict(pinned.nodes_by_id)
+
+        async def _adopt_phase8() -> dict[str, Any]:
+            # S05 (A1c): adopt the manifest head; the admission wrapper
+            # re-derives the footprint itself from the inherited canonical
+            # path/root/kind via the ONE compute_footprint authority.
+            adoption = await client._adopt_coherence_head()
+            fresh_view = adoption.view
+            return {
+                "view": dict(fresh_view.nodes_by_id),
+                "basis_sequence": fresh_view.adopted_sequence,
+                "basis_epoch_id": fresh_view.epoch_id,
+            }
+
+        admission_kwargs["adopt_fn"] = _adopt_phase8
+
+    result = await launch_carto_refresh_job(
+        root_uuid=str(root_uuid),
+        mode="file",
+        account_scope_id=account_scope_id,
+        footprint_factory=lambda _selection: dict(footprint),
+        jobs_root=Path(str(parent_job.get("_job_file") or "")).parent,
+        worker_script=worker_script,
+        env=env,
+        launcher="system",
+        parent_job_id=parent_job_id,
+        inherited_snapshot_path=snapshot_path,
+        freshness_disposition="inherited_parent",
+        **admission_kwargs,
+    )
+    if result.get("success"):
+        _append_log(
+            log_file,
+            f"Launched governed phase-8 CARTO_REFRESH co-claim "
+            f"(PID={result.get('pid')}, job_id={result.get('job_id')})",
+        )
+    return result

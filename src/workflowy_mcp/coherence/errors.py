@@ -1,0 +1,280 @@
+"""Coherence error taxonomy (S01 §4.1).
+
+One typed hierarchy rooted at :class:`CoherenceError`.  Every error carries
+structured recovery context (artifact path, account scope, epoch/sequence
+where available, and a recovery class) so operators and later sessions can
+classify failures without parsing message text.  Messages never include the
+API key or any credential material.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+class CoherenceError(Exception):
+    """Root of the coherence error hierarchy.
+
+    Attributes:
+        path: artifact path involved in the failure, when known.
+        account_scope_id: 32-hex account scope involved, when known.
+        epoch_id / sequence: lineage context, when known.
+        recovery_class: one of ``bootstrap`` | ``refresh`` | ``quarantine`` |
+            ``retry`` | ``bug`` — the broad recovery route for the failure.
+    """
+
+    recovery_class = "bug"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: Any = None,
+        account_scope_id: str | None = None,
+        epoch_id: str | None = None,
+        sequence: int | None = None,
+    ) -> None:
+        self.path = None if path is None else str(path)
+        self.account_scope_id = account_scope_id
+        self.epoch_id = epoch_id
+        self.sequence = sequence
+        context: list[str] = []
+        if self.path is not None:
+            context.append(f"path={self.path}")
+        if account_scope_id is not None:
+            context.append(f"account={account_scope_id}")
+        if epoch_id is not None:
+            context.append(f"epoch={epoch_id}")
+        if sequence is not None:
+            context.append(f"seq={sequence}")
+        context.append(f"recovery={self.recovery_class}")
+        super().__init__(f"{message} [{', '.join(context)}]")
+
+
+class CoherenceStateMissingError(CoherenceError):
+    """Required bootstrap/base state absent (e.g. manifest not initialized)."""
+
+    recovery_class = "bootstrap"
+
+
+class CoherenceSchemaError(CoherenceError):
+    """Malformed current-version artifact (bad types, invariants, keys)."""
+
+    recovery_class = "refresh"
+
+
+class UnsupportedCoherenceSchemaError(CoherenceError):
+    """Unknown future schema version — fail closed, never best-effort parse."""
+
+    recovery_class = "refresh"
+
+
+class CoherenceAccountMismatchError(CoherenceError):
+    """Artifact belongs to another account scope."""
+
+    recovery_class = "refresh"
+
+
+class CoherenceLockError(CoherenceError):
+    """Dedicated coherence mutex unavailable/broken.
+
+    ``busy`` distinguishes ordinary contention (retry) from a broken lock
+    surface (refresh/operator inspection).  The underlying governance lock
+    detail is preserved in ``detail``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        busy: bool = False,
+        detail: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.busy = busy
+        self.detail = detail
+        # recovery_class must be set BEFORE the base formats the context.
+        self.recovery_class = "retry" if busy else "refresh"
+        super().__init__(message, **kwargs)
+
+
+class ManifestConflictError(CoherenceError):
+    """Compare-and-swap precondition failed (stale writer)."""
+
+    recovery_class = "retry"
+
+
+class JournalIntegrityError(CoherenceError):
+    """Gap, reversal, duplicate sequence, malformed committed record, or a
+    manifest pointing beyond durable records."""
+
+    recovery_class = "quarantine"
+
+
+class JournalPublicationError(CoherenceError):
+    """Physical record/head publication failure."""
+
+    recovery_class = "retry"
+
+
+class EffectValidationError(CoherenceError):
+    """Invalid field mask/payload/inter-effect contract."""
+
+    recovery_class = "bug"
+
+
+class EffectApplicationError(CoherenceError):
+    """Valid effect cannot be safely applied to the supplied cache state."""
+
+    recovery_class = "bug"
+
+
+class CacheViewError(CoherenceError):
+    """Malformed/duplicate cache identity or invalid publication."""
+
+    recovery_class = "bug"
+
+
+class CacheAdoptionError(CoherenceError):
+    """Compatibility error category for the retired journal-adoption engine; no production path raises it."""
+
+    recovery_class = "refresh"
+
+
+class RefreshClaimError(CoherenceError):
+    """Refresh-publication claim acquisition/join/wait failure (S02)."""
+
+    recovery_class = "retry"
+
+
+class CoherenceBarrierActiveError(CoherenceError):
+    """Admission refusal: the durable global hard dirty barrier is active (S04).
+
+    Raised by the shared hard-stop gates (mutation admission, cache-derived
+    identity proofs) BEFORE any side effect.  Family seams convert it into
+    the universal ``coherence_barrier_active`` public error envelope; it
+    must never collapse into a generic ``operation_failed``.
+
+    Attributes beyond the base context carry the refusal diagnostics the
+    public envelope needs (never fabricated — unavailable values are None
+    and are simply omitted downstream).
+    """
+
+    recovery_class = "refresh"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        dirty_generation: int | None = None,
+        reason_code: str | None = None,
+        transaction_id: str | None = None,
+        operation: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.dirty_generation = dirty_generation
+        self.reason_code = reason_code
+        self.transaction_id = transaction_id
+        self.operation = operation
+        super().__init__(message, **kwargs)
+
+    def refusal_extra(self) -> dict[str, Any]:
+        """The structured ``error.extra`` payload (S04 §7.1).
+
+        Omits unavailable diagnostic values rather than fabricating them.
+        """
+
+        extra: dict[str, Any] = {
+            "refresh_required": True,
+            "hard_dirty": True,
+            "recovery": {"family": "system", "verb": "cache.refresh", "params": {}},
+        }
+        if self.dirty_generation is not None:
+            extra["dirty_generation"] = self.dirty_generation
+        if self.reason_code is not None:
+            extra["reason_code"] = self.reason_code
+        if self.transaction_id is not None:
+            extra["transaction_id"] = self.transaction_id
+        return extra
+
+
+# @beacon[
+#   id=auto-beacon@DirtyBarrierPublicationError-2jfm,
+#   role=DirtyBarrierPublicationError,
+#   slice_labels=mci-barrier-hard,
+#   kind=ast,
+# ]
+class DirtyBarrierPublicationError(CoherenceError):
+    """The durable dirty barrier could NOT be published (S04 §5.3).
+
+    Carries the original reason/transaction, the manifest/account/epoch/head
+    known at the attempt, and the underlying durable-I/O failure.  When this
+    surfaces, NO coherent success may be reported for the triggering
+    mutation: the only durable evidence of a possibly-committed unjournaled
+    mutation failed to persist.  ``recovery_required`` is always True.
+
+    Lineage context contract (S04 Remediation Chain 4, work-order item 4):
+
+    - ``journal_head_seq`` is the ACTUAL pre-attempt/current manifest
+      journal head — never the attempted sequence mislabeled as the head;
+    - ``attempted_journal_sequence`` is the DISTINCT sequence the failed
+      transaction attempted (when applicable — e.g. None when publication
+      failed before sequence allocation);
+    - ``account_scope_id`` / ``epoch_id`` ride the base context (never
+      fabricated — None when genuinely unknown, e.g. the manifest itself
+      could not be read; the ACCOUNT is still preserved from the validated
+      paths in that case — Chain 6 Round 2).
+
+    Double-fault failure preservation (S04 Remediation Chain 6 Round 2):
+
+    - ``underlying`` (and the ``__cause__`` chain) is the
+      barrier-publication failure; the original seal/publication failure
+      rides the exception chain beneath it; the optional ``recovery_error``
+      carries a recovery-phase failure that a double fault would otherwise
+      DROP from the raised graph (currently: a CoherenceLockError from the
+      recovery's coherence-mutex acquisition).  None when no recovery
+      failure occurred, and never a string-only diagnostic.
+    - the account is preserved whenever it is knowable at all — including
+      the lock-acquisition double fault, where no manifest was ever read
+      but the validated CoherencePaths already carries the account scope;
+      only genuinely unknowable coordinates (epoch / head / attempted
+      sequence there) stay None.
+    """
+
+    recovery_class = "refresh"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        original_reason_code: str | None = None,
+        original_transaction_id: str | None = None,
+        journal_head_seq: int | None = None,
+        attempted_journal_sequence: int | None = None,
+        underlying: BaseException | None = None,
+        recovery_error: BaseException | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.original_reason_code = original_reason_code
+        self.original_transaction_id = original_transaction_id
+        self.journal_head_seq = journal_head_seq
+        self.attempted_journal_sequence = attempted_journal_sequence
+        self.underlying = underlying
+        self.recovery_error = recovery_error
+        self.recovery_required = True
+        super().__init__(
+            f"{message} — no coherent success may be reported",
+            sequence=journal_head_seq if journal_head_seq is not None else kwargs.pop("sequence", None),
+            **kwargs,
+        )
+
+
+class CheckpointError(CoherenceError):
+    """Checkpoint rotation operational failure (S04).
+
+    A checkpoint failure is never hard dirt by itself: the previous lineage
+    remains wholly authoritative and a later trigger retries.  Typed lineage
+    corruption still propagates as its own S01 error class instead.
+    """
+
+    recovery_class = "retry"

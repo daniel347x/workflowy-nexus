@@ -1,0 +1,331 @@
+{
+  "record_layout": "summary-head/2",
+  "id": "carto-refresh-folder-844471b0",
+  "type": "CARTO_REFRESH",
+  "mode": "folder",
+  "root_uuid": "7834ca3d-2f6b-47a2-aff4-9138aa57612f",
+  "status": "running",
+  "outcome": "running",
+  "has_errors": false,
+  "has_warnings": true,
+  "has_findings": true,
+  "error": null,
+  "created_at": "2026-10-26T11:49:08.564321+00:00",
+  "updated_at": "2026-10-26T13:46:47.711093",
+  "progress": {
+    "total_files": 30,
+    "completed_files": 30,
+    "current_file": "6518398a-f1f1-45ce-a1b0-dac1179a17ad",
+    "current_phase": "folder:file-head",
+    "current_file_relpath": "README.md",
+    "nodes_updated": 31,
+    "nodes_created": 58,
+    "nodes_deleted": 10
+  },
+  "warning_count": 6,
+  "warnings": [
+    {
+      "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\.gitignore",
+      "reason": "unsupported_extension"
+    },
+    {
+      "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\workflowy-glimpse-cache\\manifest.json",
+      "reason": "unsupported_extension"
+    },
+    {
+      "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\workflowy-glimpse-cache\\options.html",
+      "reason": "unsupported_extension"
+    },
+    {
+      "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\uv.lock",
+      "reason": "unsupported_extension"
+    },
+    {
+      "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\coherence_s03b_registry.json",
+      "reason": "unsupported_extension"
+    },
+    {
+      "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\LICENSE",
+      "reason": "unsupported_extension"
+    }
+  ],
+  "execution_model": "daemon_task",
+  "execution_owner": "launcher",
+  "detached": false,
+  "cache_refresh_required": true,
+  "freshness_disposition": "performed",
+  "snapshot_path": "C:\\Users\\danie\\AppData\\Local\\workflowy-mcp\\nodes_export_cache\\20261026-074919-034914_pid106384_nodes_export_snapshot.json",
+  "snapshot_lineage": {
+    "account_scope_id": "b2c63e7017e06f9329083326553a82fd",
+    "epoch_number": 1135,
+    "epoch_id": "4f6e0f7f726fd9bb9179f37640e3c866",
+    "incorporated_through_seq": 0
+  },
+  "preparation_input_digest": "",
+  "source_regime": "standard",
+  "logs_path": "C:\\Users\\danie\\AppData\\Local\\workflowy-mcp\\cartographer_jobs\\20261026-114908_carto-refresh-folder-844471b0.log",
+  "live_basis_lineage": {
+    "account_scope_id": "b2c63e7017e06f9329083326553a82fd",
+    "epoch_number": 1135,
+    "epoch_id": "4f6e0f7f726fd9bb9179f37640e3c866",
+    "adopted_sequence": 0
+  },
+  "claim_id": "6b472fe64c604a94ae87a996fb4ec30e",
+  "dedupe_key": "e639d26b3d0c49668430bda330c47614753ed2e49683bbe367699a53595c18bf",
+  "account_scope_id": "b2c63e7017e06f9329083326553a82fd",
+  "footprint": {
+    "kind": "folder",
+    "path": "e:\\__daniel347x\\__dan_root\\__repos\\workflowy-nexus-mcp-tools",
+    "root_uuid": "7834ca3d-2f6b-47a2-aff4-9138aa57612f",
+    "ancestor_chain": [
+      "7834ca3d-2f6b-47a2-aff4-9138aa57612f",
+      "a7b222f8-55f0-923a-32b2-798ccaea1aa4",
+      "2ee4e273-1d5a-d565-7c87-d1e01a9629f2",
+      "e4ffcbab-fc52-cfdf-cab1-f0926ff8444e",
+      "700eb498-1fdb-392a-b6fc-8498be854db7",
+      "7d7c875a-2bc8-88e1-6a3c-a7891fa65cdd",
+      "5880b5f1-3a12-9b6a-f00e-588f52d60342",
+      "b49affa1-3930-95e3-b2fe-ad9b881285e2"
+    ]
+  },
+  "launcher": "system",
+  "parent_job_id": null,
+  "handoff_state": "preparing",
+  "pid": 106384,
+  "evidence": {
+    "files": {
+      "path": "files.jsonl",
+      "rows": 30,
+      "lines": 30,
+      "bytes": 930786,
+      "pending": 0
+    },
+    "nodes": null
+  },
+  "in_flight": null,
+  "result_summary": {
+    "warnings_total": 6,
+    "warnings_by_type": {
+      "unsupported_extension": 6
+    },
+    "warnings_truncated": 0,
+    "changed": true,
+    "findings_total": 34,
+    "findings_by_code": {
+      "legacy_field": 20,
+      "writer_target_ambiguous": 14
+    },
+    "findings_truncated": 0,
+    "summary_line": "30 successful \u00b7 0 failed \u00b7 0 skipped \u00b7 34 findings \u00b7 0 events",
+    "status": "completed_with_warnings",
+    "successful": 30,
+    "failed": 0,
+    "skipped": 0,
+    "partial_success": false,
+    "success": true,
+    "cancelled": false,
+    "files_refreshed": 26,
+    "files_deleted": 0,
+    "new_files_created": 0,
+    "new_folders_created": 0,
+    "errors_total": 0,
+    "node_errors_total": 0,
+    "phase8_failed": false,
+    "files_changed_total": 18,
+    "events_total": 0,
+    "findings_by_severity": {
+      "error": 14,
+      "info": 20
+    },
+    "findings_preview": [
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+        "line": 222,
+        "finding_id": "bf1:0e29859b2008cf20e4255b6316e83bfec0a831c7bb3c65e0393cd55687daa569"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+        "line": 288,
+        "finding_id": "bf1:db179f052a33b506e93274f3c970f374061174e591b673cfd451ce0b5dc777af"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+        "line": 290,
+        "finding_id": "bf1:e7ab81b902577c4e502a2f0fb7dc0f1277780dd537a35842300ee36dc02f9bd3"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+        "line": 326,
+        "finding_id": "bf1:6a742107f17661a46542ebe62a8fe3d4fa2f13488724709292fab2677de092de"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+        "line": 407,
+        "finding_id": "bf1:ba97ea2eb9edd0970219be85e03adfd971f9e7bcca900a848828f794a17819ff"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+        "line": 418,
+        "finding_id": "bf1:07122d7ee17e7962b2910e9dd340d747c32e8ad78ffee981d02671e21c44140e"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+        "line": 518,
+        "finding_id": "bf1:ed2d7dab5faa2f01384a8b92a52a55140af93058059f4571cbf69bfc04056a25"
+      },
+      {
+        "code": "legacy_field",
+        "severity": "info",
+        "message": "Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\src\\workflowy_mcp\\__init__.py",
+        "line": 1,
+        "finding_id": "bf1:3dacad12ee6ff0584d5bca7a05159dae77ee3399222b5fa99b308476d77fd216"
+      },
+      {
+        "code": "legacy_field",
+        "severity": "info",
+        "message": "Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_stage2_10_write_governor_triple.py",
+        "line": 20,
+        "finding_id": "bf1:14aca45038c3d6e17e08836842dae38ba12a89bae8ec53cfb96833227c504568"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_favorite_postfix_settings.js",
+        "line": 217,
+        "finding_id": "bf1:e928a9ba073bcb8546abd57c6dd71ef1f31ac823c77e71f53d7065e45230c8a2"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_favorite_postfix_settings.js",
+        "line": 240,
+        "finding_id": "bf1:6c5ae6aea0c0e3f386f5b397e013223d595dbe1d72401f897ca6f77da8289c0b"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_n06_daemon_restart.py",
+        "line": 49,
+        "finding_id": "bf1:ed41eac3ff193ab7d0de48a8b3fd4b8ff0c1ddf6ce408f4e717193e07674199e"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_n06_daemon_restart.py",
+        "line": 57,
+        "finding_id": "bf1:448cb5ab051f4796e218bed337075845738865c0e611a51bd4b085c46778675b"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_n06_daemon_restart.py",
+        "line": 73,
+        "finding_id": "bf1:792ede4c610fc54c5fc361020fa4dc5ead5012948f7709b9f36ff8a8d6951304"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_n06_daemon_restart.py",
+        "line": 121,
+        "finding_id": "bf1:a8c63f487feb826bcaa54dee87e8873cadaf4279c3f7555645ee6208daa3c0f0"
+      },
+      {
+        "code": "writer_target_ambiguous",
+        "severity": "error",
+        "message": "This qualified name has several current targets; an independent physical witness can still select a member.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_n06_daemon_restart.py",
+        "line": 157,
+        "finding_id": "bf1:cda5e9710946100f1d2af717340764b181692a187ce59ab8a962d98964c4cb16"
+      },
+      {
+        "code": "legacy_field",
+        "severity": "info",
+        "message": "Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\src\\workflowy_mcp\\config.py",
+        "line": 16,
+        "finding_id": "bf1:c6fcf82141a4538af67769d42ad368e6722da7c763fab29556461a2e8934405d"
+      },
+      {
+        "code": "legacy_field",
+        "severity": "info",
+        "message": "Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\src\\workflowy_mcp\\config.py",
+        "line": 273,
+        "finding_id": "bf1:1f69cc6afcb7417f47a491c9068d47c9ec041574c03f103bef115a2f2bf050da"
+      },
+      {
+        "code": "legacy_field",
+        "severity": "info",
+        "message": "Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\src\\workflowy_mcp\\config.py",
+        "line": 379,
+        "finding_id": "bf1:5ddfd1d7cd53242530412e593ff730205b289293a662662100d6240d3d16a8fe"
+      },
+      {
+        "code": "legacy_field",
+        "severity": "info",
+        "message": "Legacy fields remain readable: comments aliases comment; deprecated role is preserved unless explicitly changed.",
+        "file": "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\src\\workflowy_mcp\\config.py",
+        "line": 537,
+        "finding_id": "bf1:6fa4dca219a8a1f51ea82fc8a5c636f92405c6a483859063ef4feb9ce06b91dc"
+      }
+    ],
+    "files_changed": [
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_saved_tabs_tier1.js",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\workflowy-glimpse-cache\\README.md",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\workflowy-glimpse-cache\\manifest.json",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\workflowy-glimpse-cache\\INSTALL.md",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_favorite_postfix_settings.js",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\workflowy-glimpse-cache\\options.html",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_n07_carto_tasks.py",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_n06_daemon_restart.py",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_cut_2a_fences.py",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\src\\workflowy_mcp\\config.py",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\coherence_s03b_registry.json",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_cut_2b_fences.py",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_md_render_fixture.js",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_md_row_list_fixture.js",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\test_beacon_snippet_outcomes.py",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\docs\\BEACON-CHECK.md",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\src\\workflowy_mcp\\beacon_snippet.py",
+      "E:\\__daniel347x\\__Dan_Root\\__repos\\workflowy-nexus-mcp-tools\\tests\\js\\test_f12_force_override_popup.js"
+    ],
+    "errors": [],
+    "refresh_errors": [],
+    "preview_totals": {
+      "findings_preview": 34,
+      "files_changed": 18,
+      "errors": 0,
+      "refresh_errors": 0
+    }
+  }
+}

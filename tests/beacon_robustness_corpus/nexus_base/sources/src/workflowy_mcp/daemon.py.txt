@@ -1,0 +1,299 @@
+# @beacon[
+#   id=daemon@module,
+#   role=single-daemon HTTP transport: URL/token resolution, liveness probe, ensure-running spawn, and the HTTP run entrypoint,
+#   slice_labels=nexus-loading-flow,nexus--daemon,
+#   kind=span,
+#   show_span=true,
+#   comment=The one Workflowy MCP execution domain as a standalone Streamable-HTTP listener; stdio shims and HTTP-native hosts both attach here,
+# ]
+"""Single-daemon HTTP transport for the Workflowy MCP server.
+
+Architecture (Manager-Session-012 ruling, see Workflowy [ap:ORT2S5]/[ap:EL6I7T]):
+
+  * Exactly ONE Workflowy MCP *execution domain* per machine/account: the
+    **daemon** -- this same FastMCP server, run with ``transport="http"``
+    (Streamable HTTP) instead of stdio. It owns the nodes cache, the write
+    governor, Cartographer jobs and the broker membership.
+  * Hosts that speak Streamable HTTP (OpenCode, Claude Code, Codex, ...) dial
+    the daemon's URL directly.
+  * Hosts that only speak stdio (TypingMind's connector, Claude Desktop, ...)
+    launch the **shim** (``workflowy_mcp.shim`` / console script
+    ``workflowy-mcp-shim``): a thin stdio MCP proxy that calls
+    :func:`ensure_daemon_running` and forwards every request to the daemon.
+
+This module deliberately mirrors the broker pattern already proven in
+``server._ensure_broker_running``: probe the port; if nothing answers, spawn a
+detached singleton; everyone else connects as a client. It imports NOTHING
+from ``server`` at module level so the shim can stay light (importing
+``server`` builds the whole FastMCP app).
+
+Shared secret: the daemon requires a bearer token and reuses the broker's
+shared secret (``broker_protocol.get_or_create_token``) -- one local-mesh
+secret (env ``WORKFLOWY_BROKER_TOKEN`` or the per-user ``broker_token`` file),
+no second file to pair.
+
+Host/Origin protection: FastMCP 4 validates the HTTP ``Host`` header only when
+the server binds a loopback address or an explicit ``allowed_hosts`` list is
+supplied. The daemon binds ``0.0.0.0`` by default (so WSL can reach it at the
+Windows gateway IP, exactly like the broker) and relies on the bearer token
+for access control; set ``WORKFLOWY_MCP_HTTP_ALLOWED_HOSTS`` to opt into an
+explicit allow-list.
+"""
+
+from __future__ import annotations
+
+import os
+import socket
+import subprocess
+import sys
+import time
+from typing import Any
+
+# ---------------------------------------------------------------------------
+# Configuration surface (env names are the single source of truth here).
+# ---------------------------------------------------------------------------
+TRANSPORT_ENV_VAR = "WORKFLOWY_MCP_TRANSPORT"          # "stdio" (default) | "http"
+HTTP_HOST_ENV_VAR = "WORKFLOWY_MCP_HTTP_HOST"          # bind address, default 0.0.0.0
+HTTP_PORT_ENV_VAR = "WORKFLOWY_MCP_HTTP_PORT"          # default 8766 (broker is 8765)
+HTTP_PATH_ENV_VAR = "WORKFLOWY_MCP_HTTP_PATH"          # default /mcp
+HTTP_DIAL_HOST_ENV_VAR = "WORKFLOWY_MCP_HTTP_DIAL_HOST"  # where CLIENTS connect (never a wildcard)
+HTTP_ALLOWED_HOSTS_ENV_VAR = "WORKFLOWY_MCP_HTTP_ALLOWED_HOSTS"  # optional, comma-separated
+HTTP_STATELESS_ENV_VAR = "WORKFLOWY_MCP_HTTP_STATELESS"  # optional, truthy => stateless_http=True
+DAEMON_SPAWN_TIMEOUT_ENV_VAR = "WORKFLOWY_MCP_DAEMON_SPAWN_TIMEOUT_S"  # default 90
+
+DEFAULT_HTTP_HOST = "0.0.0.0"
+DEFAULT_HTTP_PORT = 8766
+DEFAULT_HTTP_PATH = "/mcp"
+DEFAULT_SPAWN_TIMEOUT_S = 90.0
+
+
+def _truthy(raw: str | None) -> bool:
+    return bool(raw) and raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+# @beacon[
+#   id=daemon@resolve-transport,
+#   role=resolve_transport(): stdio|http from CLI arg or env,
+#   slice_labels=nexus-loading-flow,nexus--daemon,
+#   kind=ast,
+# ]
+def resolve_transport(explicit: str | None = None) -> str:
+    """Return ``"stdio"`` or ``"http"`` (CLI value wins over env; default stdio)."""
+    raw = (explicit or os.getenv(TRANSPORT_ENV_VAR) or "stdio").strip().lower()
+    if raw in ("http", "streamable-http", "streamable_http"):
+        return "http"
+    if raw == "stdio":
+        return "stdio"
+    raise SystemExit(
+        f"Unknown Workflowy MCP transport {raw!r}; expected 'stdio' or 'http' "
+        f"(set via --transport or {TRANSPORT_ENV_VAR})."
+    )
+
+
+def http_bind_host() -> str:
+    return (os.getenv(HTTP_HOST_ENV_VAR) or DEFAULT_HTTP_HOST).strip()
+
+
+def http_port() -> int:
+    return int(os.getenv(HTTP_PORT_ENV_VAR) or DEFAULT_HTTP_PORT)
+
+
+def http_path() -> str:
+    path = (os.getenv(HTTP_PATH_ENV_VAR) or DEFAULT_HTTP_PATH).strip() or DEFAULT_HTTP_PATH
+    return path if path.startswith("/") else "/" + path
+
+
+# @beacon[
+#   id=daemon@dial-host,
+#   role=http_dial_host(): concrete address clients dial (never the wildcard bind address),
+#   slice_labels=nexus-loading-flow,nexus--daemon,
+#   kind=ast,
+# ]
+def http_dial_host() -> str:
+    """Address CLIENTS connect to.
+
+    Same rule as ``broker_protocol.BROKER_DIAL_HOST``: a wildcard bind address
+    cannot be dialed, so on the daemon's own machine clients use 127.0.0.1;
+    from across a network boundary (WSL -> Windows) they set
+    ``WORKFLOWY_MCP_HTTP_DIAL_HOST`` to the host's concrete IP.
+    """
+    explicit = os.getenv(HTTP_DIAL_HOST_ENV_VAR)
+    if explicit and explicit.strip():
+        return explicit.strip()
+    bind = http_bind_host()
+    return "127.0.0.1" if bind in ("0.0.0.0", "::", "") else bind
+
+
+def daemon_url() -> str:
+    """Full Streamable-HTTP URL clients (shim / OpenCode) should use."""
+    return f"http://{http_dial_host()}:{http_port()}{http_path()}"
+
+
+# @beacon[
+#   id=daemon@shared-token,
+#   role=shared_token(): the ONE local-mesh secret, reused from the broker,
+#   slice_labels=nexus-loading-flow,nexus--daemon,nexus--broker,
+#   kind=ast,
+# ]
+def shared_token() -> str:
+    """Return the bearer token the daemon requires and the shim presents.
+
+    Reuses the broker's shared secret so a single-machine install has exactly
+    one secret to manage (env ``WORKFLOWY_BROKER_TOKEN`` or the per-user
+    ``broker_token`` file, generated on first use).
+    """
+    from workflowy_mcp.broker_protocol import get_or_create_token
+
+    token, _source = get_or_create_token()
+    return token
+
+
+# @beacon[
+#   id=daemon@is-listening,
+#   role=is_daemon_listening(): TCP liveness probe of the daemon port,
+#   slice_labels=nexus-loading-flow,nexus--daemon,
+#   kind=ast,
+# ]
+def is_daemon_listening(timeout: float = 0.5) -> bool:
+    """True if something accepts TCP connections on the daemon's dial address.
+
+    Uvicorn binds its socket only after the ASGI lifespan startup completes,
+    so an accepted connection implies the FastMCP app (and the server's own
+    ``lifespan``: config, client, broker link) has finished starting.
+    """
+    try:
+        with socket.create_connection((http_dial_host(), http_port()), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _log(msg: str) -> None:
+    # stderr only: the shim shares its stdout with the MCP stdio protocol.
+    print(f"[workflowy-mcp daemon] {msg}", file=sys.stderr, flush=True)
+
+
+# @beacon[
+#   id=daemon@ensure-running,
+#   role=ensure_daemon_running(): probe-or-spawn the detached singleton daemon (the broker pattern applied to the server),
+#   slice_labels=nexus-loading-flow,nexus--daemon,
+#   kind=ast,
+#   comment=Spawns `python -m workflowy_mcp --transport http` with the SAME interpreter/env (no second uv resolution; inherits WORKFLOWY_API_KEY / WORKFLOWY_NEXUS_CONFIG from the host blob); on Windows in its own visible console so the human sees it like the broker,
+# ]
+def ensure_daemon_running(*, wait: bool = True, timeout_s: float | None = None) -> bool:
+    """Make sure the single HTTP daemon is up; spawn it detached if not.
+
+    Returns True once the daemon accepts connections (or immediately if it
+    already did). Returns False if a spawn was attempted but the port never
+    answered within ``timeout_s`` (default 90 s -- a cold start loads the
+    ~30k-node cache and dials the broker).
+
+    Race-safe by construction: if two shims start at once and both spawn, the
+    loser's uvicorn fails to bind and exits; the shim only cares that *someone*
+    is listening.
+    """
+    if is_daemon_listening():
+        return True
+
+    timeout = timeout_s if timeout_s is not None else float(
+        os.getenv(DAEMON_SPAWN_TIMEOUT_ENV_VAR) or DEFAULT_SPAWN_TIMEOUT_S
+    )
+
+    cmd = [sys.executable, "-m", "workflowy_mcp", "--transport", "http"]
+    env = dict(os.environ)
+    env[TRANSPORT_ENV_VAR] = "http"
+
+    popen_kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "env": env,
+        "close_fds": True,
+    }
+    if sys.platform == "win32":
+        # Own console window (human-visible, closable == stop) + own process
+        # group so Ctrl+C in the host's window never reaches the daemon.
+        popen_kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+        # Inherit stdout/stderr into the new console (do not redirect).
+    else:
+        # POSIX: detach into its own session; send output to the shared log dir.
+        popen_kwargs["start_new_session"] = True
+        out: Any = subprocess.DEVNULL
+        try:
+            from workflowy_mcp.broker_protocol import ensure_log_dir, log_dir
+
+            if ensure_log_dir() is not None:
+                out = open(os.path.join(log_dir(), "workflowy-mcp-daemon.log"), "a", encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            out = subprocess.DEVNULL
+        popen_kwargs["stdout"] = out
+        popen_kwargs["stderr"] = subprocess.STDOUT if out is not subprocess.DEVNULL else subprocess.DEVNULL
+
+    _log(f"no daemon on {http_dial_host()}:{http_port()} -- spawning: {' '.join(cmd)}")
+    try:
+        subprocess.Popen(cmd, **popen_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"could not spawn daemon: {exc}")
+        return False
+    finally:
+        out_handle = popen_kwargs.get("stdout")
+        if hasattr(out_handle, "close"):
+            try:
+                out_handle.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    if not wait:
+        return True
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if is_daemon_listening():
+            _log(f"daemon is up at {daemon_url()}")
+            return True
+        time.sleep(0.5)
+    _log(f"daemon did not start listening within {timeout:.0f}s")
+    return False
+
+
+# @beacon[
+#   id=daemon@run-http,
+#   role=run_http_daemon(): attach bearer auth and run the FastMCP app as the Streamable-HTTP daemon,
+#   slice_labels=nexus-loading-flow,nexus--daemon,
+#   kind=ast,
+#   comment=The transport switch itself: same `mcp` object server.py builds, same lifespan, different transport; auth is attached here so server.py construction is untouched,
+# ]
+def run_http_daemon(mcp: Any) -> None:
+    """Run ``mcp`` (the server's FastMCP instance) as the HTTP daemon.
+
+    Blocks until the process exits. Everything about the server -- tools,
+    lifespan, broker membership, Cartographer watchers -- is unchanged; only
+    the transport differs.
+    """
+    from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
+
+    token = shared_token()
+    mcp.auth = StaticTokenVerifier(
+        tokens={token: {"client_id": "workflowy-mcp-local-mesh", "scopes": []}},
+    )
+
+    run_kwargs: dict[str, Any] = {
+        "host": http_bind_host(),
+        "port": http_port(),
+        "path": http_path(),
+    }
+    allowed_raw = os.getenv(HTTP_ALLOWED_HOSTS_ENV_VAR)
+    if allowed_raw and allowed_raw.strip():
+        run_kwargs["allowed_hosts"] = [h.strip() for h in allowed_raw.split(",") if h.strip()]
+    if _truthy(os.getenv(HTTP_STATELESS_ENV_VAR)):
+        run_kwargs["stateless_http"] = True
+
+    _log(
+        f"starting Streamable-HTTP daemon on {run_kwargs['host']}:{run_kwargs['port']}"
+        f"{run_kwargs['path']} (clients dial {daemon_url()}; bearer token required)"
+    )
+    mcp.run(transport="http", **run_kwargs)
+# @beacon-close[
+#   id=daemon@module,
+# ]

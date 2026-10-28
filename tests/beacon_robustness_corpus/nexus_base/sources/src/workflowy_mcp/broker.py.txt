@@ -1,0 +1,2168 @@
+# @beacon[
+#   id=broker@module-overview,
+#   role=singleton localhost websocket broker between browser extension(s) and many MCP servers,
+#   slice_labels=nexus--broker,
+#   kind=span,
+#   show_span=false,
+#   comment=Endpoint-based broker: owns ws://127.0.0.1:8765; routes by request_id + originating MCP socket, and (browser side) by logical tab ENDPOINT multiplexed over one physical per-extension connection. Supports many tabs, many browsers/profiles, many MCP clients.,
+# ]
+"""WorkFlowy GLIMPSE broker.
+
+A small singleton localhost WebSocket server that decouples the Workflowy
+browser extension(s) from the (many) MCP server instances.
+
+Why this exists
+---------------
+Historically each MCP server *was* the WebSocket server, binding
+``ws://localhost:8765`` directly. That works for exactly one MCP server.
+The moment a second MCP server exists (several Claude Code sessions, each
+spawning its own MCP server, plus TypingMind's connector), they fight over
+the single hardcoded port: one wins the bind, the rest become peerless
+ghosts that answer ``WebSocket unavailable`` — and stale frames in the
+shared FIFO queue produced a latched GLIMPSE "off-by-one".
+
+The broker inverts the topology so the *broker* is the only thing that
+binds the port; the browser(s) and every MCP server are all *clients*.
+
+Topology (endpoint-based)
+-------------------------
+A Chrome MV3 extension's service worker is **extension/profile-global**, not
+tab-local. It owns ONE physical WebSocket and proxies all Workflowy tabs
+through it. So the right abstraction is NOT "one browser socket == one tab"
+but two levels:
+
+    * browser CONNECTION  — one physical socket per extension/background
+      instance (one per Chrome profile, one per Firefox profile, ...).
+    * browser ENDPOINT    — one logical Workflowy tab/page context,
+      multiplexed over its owning connection and identified by a per-tab
+      ``endpoint_id`` (and an optional human ``alias``).
+
+        Chrome profile SW socket ──┬── endpoint: tab "spine"
+                                   ├── endpoint: tab "debug"
+                                   └── endpoint: tab "jim"
+        Firefox background socket ──── endpoint: tab "legal"
+        MCP socket (Claude Code A)
+        MCP socket (TypingMind)            ... all clients of the broker
+
+Correlation + routing (the payoff)
+----------------------------------
+Generic, transport-level, not per-tool and not FIFO:
+
+  * MCP -> browser: an MCP request carries ``request_id``. The broker records
+    ``request_id -> originating MCP socket``, resolves a TARGET ENDPOINT
+    (see routing rules), and forwards the frame (tagged with
+    ``target_endpoint_id``) to that endpoint's owning browser connection.
+  * browser -> MCP: the browser echoes ``request_id``. The broker delivers
+    the response to ONLY the originating MCP socket. Stale/foreign frames
+    match no waiter and are dropped.
+  * browser-initiated frames WITHOUT a ``request_id`` (F8/F9/F10/F12 result
+    broadcasts, hover/uuid-path pushes) are fanned out to all MCP clients,
+    preserving historical Pattern-A behavior.
+
+Target endpoint resolution (MCP -> browser):
+  1. explicit ``target_endpoint_id`` -> that endpoint (error if absent).
+  2. else explicit ``target_alias``   -> the unique live endpoint with that
+     alias (error if none / if ambiguous).
+  3. else if exactly ONE endpoint is connected -> use it.
+  4. else (zero, or 2+ endpoints) -> actionable error listing endpoints.
+
+This is deterministic: with multiple tabs open and no target specified, the
+broker returns a clear error rather than silently picking the wrong tab.
+
+Endpoint liveness (the single OWNED invariant — WSLIVE2)
+-------------------------------------------------------
+A live Workflowy tab's endpoint must be reliably registered, and NO
+endpoint-addressed action may silently no-op, opaquely time out, or
+destructively side-effect when that endpoint has GHOSTED (the
+"socket-alive-but-endpoint-ghost" class: the page BridgeSocket mirror reads
+OPEN while the tab's endpoint is absent from this registry, e.g. after an
+MV3 service-worker flap reaped it without an ``endpoint_unregister``). The
+broker OWNS this invariant through exactly TWO justified mechanisms, and
+nothing re-derives ghost-ness independently:
+
+  * REACTIVE heal — ``Broker.miss_is_liveness_ghost`` is the ONE classifier
+    every MCP->browser resolve-miss site consults. A ghost (a TARGETED
+    ``unknown_browser_endpoint`` miss) is normalized to the unified
+    ``code:'unknown_endpoint'`` reply so the caller fails LOUD + actionable
+    (never a silent mask), and the rate-limited
+    ``_broadcast_request_endpoint_register`` (gated by
+    ``reregister_broadcast_allowed``) asks the live tab to re-register in the
+    background. The dead-forward ``_safe_send``-False path and the service
+    worker's ``emitUnknownEndpointToBroker`` feed the SAME unified
+    ``unknown_endpoint`` rail — ``miss_is_liveness_ghost`` is their
+    resolve-path twin, and all feed the ONE client consumer
+    ``_raise_if_unknown_endpoint``.
+  * PROACTIVE reconcile — ``reconcile_browser_roster`` (SW-authoritative, on
+    each keepalive ping) refreshes ``last_seen`` and reaps ghosts when the
+    roster is complete, and ``prune_dead_endpoints`` drops dead-socket
+    endpoints on the hot resolve path.
+
+CALLER-INTENT ROUTING is what puts stale-endpoint misses onto the ghost
+rail in the first place: a caller holding a REAL endpoint_id (e.g. a server
+handler's nested Direction-A read back to the ORIGINATING tab) passes
+``target_endpoint_id`` — routed via ``resolve_target_endpoint`` — instead of
+laundering it through ``target_tab`` (``resolve_target_tab`` ->
+``unknown_target_tab``, an ordinary routing error, NOT a ghost). This
+discriminates BY CONSTRUCTION: a real endpoint miss is a ghost; a human/agent
+``target_tab`` typo is not.
+
+Deliberately NOT a third/fourth reconcile: the page-world
+``ensureSocketReady`` stays TRANSPORT-readiness only and is NOT upgraded to
+assert endpoint registration (that would be a 5th overlapping reconcile
+against a page-world mirror). And the intermittent 1011 keepalive-ping-
+timeout FLAP (symptom 1) is a SEPARATE, instrument-first concern — not part
+of this invariant and not a precondition for it.
+
+Dependency-light (only ``websockets``, already required). No GLIMPSE-specific
+logic lives here.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import sys
+import time
+from datetime import datetime
+from typing import Any
+
+try:
+    import websockets
+except ImportError:  # pragma: no cover - surfaced at runtime
+    websockets = None  # type: ignore[assignment]
+
+
+from workflowy_mcp.broker_protocol import (
+    BROKER_HOST,
+    BROKER_PORT,
+    MAX_SIZE_BYTES as _MAX_SIZE_BYTES,
+    # PING_INTERVAL_SECONDS / PING_TIMEOUT_SECONDS are intentionally NOT applied
+    # to the broker's serve() listener (protocol autoping is disabled there —
+    # see run_broker for the full rationale). They remain imported for parity
+    # with the MCP-client leg (server.connect_to_broker), which still uses them.
+    PING_INTERVAL_SECONDS,  # noqa: F401 - kept for documentation parity
+    PING_TIMEOUT_SECONDS,  # noqa: F401 - kept for documentation parity
+    PROTOCOL_NAME,
+    PROTOCOL_VERSION,
+    broker_log_file,
+    ensure_log_dir,
+    get_or_create_token,
+    log_dir,
+    token_file_path,
+)
+
+# How long a tracked (unanswered) request may live before an opportunistic
+# sweep purges it, so a browser that never replies can't leak routing entries.
+_PENDING_TTL_SECONDS = float(os.getenv("WORKFLOWY_BROKER_PENDING_TTL_S", "120"))
+
+# ---------------------------------------------------------------------------
+# STEP 4 (WSLIVE) instrumentation: opt-in-verbose, correlated, env-gated.
+#
+# The endpoint-liveness hardening ships with correlated diagnostics across all
+# three legs (broker.py here, plus background.js SW + glimpse-cache-client.js
+# page world) so a SINGLE real failure can be reconstructed from logs alone.
+# It is SILENT BY DEFAULT (open-source-clean) and only emits when
+# WORKFLOWY_BROKER_VERBOSE is truthy. Lines are tagged [wslive] and carry the
+# correlating request_id / endpoint_id so a reap -> ghost -> black-hole chain
+# can be stitched together across the legs.
+#
+# On the AMENDMENT-B re-register broadcast the broker fires on a detected
+# ghost, this instrumentation records the fire + any rate-limit suppression.
+_WSLIVE_VERBOSE = os.getenv("WORKFLOWY_BROKER_VERBOSE", "").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "off",
+    "no",
+)
+
+# AMENDMENT B rate-limit: at most one on-demand re-register broadcast per
+# endpoint_id per this cooldown, so a burst of ghost-hits cannot storm the
+# fan-out. Tunable via env for tests / tuning; defaults to a few seconds.
+_REREGISTER_BROADCAST_COOLDOWN_S = float(
+    os.getenv("WORKFLOWY_BROKER_REREGISTER_COOLDOWN_S", "3")
+)
+
+
+def _wslive(msg: str) -> None:
+    """STEP 4 correlated instrumentation sink (broker leg).
+
+    Silent unless ``WORKFLOWY_BROKER_VERBOSE`` is set. Routes through the same
+    best-effort ``_log`` sink (stderr + per-user log file) so a verbose session
+    lands in one place with the ordinary broker log. Never raises.
+    """
+    if _WSLIVE_VERBOSE:
+        _log(f"[wslive] {msg}")
+
+
+def _log(msg: str) -> None:
+    """Lightweight logger: stderr (when visible) + a per-user log file.
+
+    The auto-launched broker is spawned with stdout/stderr -> DEVNULL, so the
+    stderr line vanishes in that (common) case. To keep the broker observable
+    regardless of how it was launched, we ALSO append to a shared per-user log
+    file (broker_protocol.broker_log_file()), on by default. File logging is
+    best-effort and never raises — observability must not crash the router.
+    Disable the file sink with WORKFLOWY_FILE_LOGGING=0.
+    """
+    line = f"[glimpse-broker] {msg}"
+    print(line, file=sys.stderr, flush=True)
+    try:
+        if ensure_log_dir() is not None:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(broker_log_file(), "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {line}\n")
+    except Exception:
+        # Never let logging failure affect routing.
+        pass
+
+
+# @beacon[
+#   id=broker@ws-is-live,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+#   comment=Liveness probe for a browser/MCP websocket. True only when the connection's State is OPEN (websockets>=10 exposes .state; older builds expose .closed/.open). Tolerant by design: an UNKNOWN/unreadable state is treated as LIVE so we never falsely prune a usable socket -- pruning is a targeted fix for demonstrably-CLOSED sockets, not a guess.,
+# ]
+def _ws_is_live(ws: Any) -> bool:
+    """Return True iff ``ws`` is a usable (OPEN) websocket connection.
+
+    Used by ``Broker.prune_dead_endpoints`` to drop endpoints whose owning
+    service-worker socket has died (Chrome MV3 idle-kill, network churn)
+    WITHOUT the broker having received a prompt close event -- the broker's
+    browser-facing listener deliberately runs with protocol autoping DISABLED
+    (see ``run_broker``), so a genuinely-dead socket can linger in the
+    registry. That lingering endpoint is exactly what makes a single-tab
+    GLIMPSE route into a dead socket and time out.
+
+    Detection order (version-tolerant):
+      * modern ``websockets`` (>=10): ``ws.state`` is a ``State`` enum; live
+        iff it equals ``State.OPEN`` (name check avoids importing the enum).
+      * legacy: ``ws.closed`` (True => dead) / ``ws.open`` (True => live).
+    UNKNOWN/unreadable => assume LIVE (fail-open; never falsely prune).
+    """
+    # Modern websockets: a State enum on .state (CONNECTING/OPEN/CLOSING/CLOSED).
+    state = getattr(ws, "state", None)
+    if state is not None:
+        name = getattr(state, "name", None)
+        if isinstance(name, str):
+            return name == "OPEN"
+    # Legacy attributes.
+    closed = getattr(ws, "closed", None)
+    if isinstance(closed, bool):
+        return not closed
+    is_open = getattr(ws, "open", None)
+    if isinstance(is_open, bool):
+        return is_open
+    # Unknown transport shape: assume live so we never falsely prune.
+    return True
+
+
+# @beacon[
+#   id=broker@endpoint-dataclass,
+#   role=BrowserEndpoint: one logical Workflowy tab behind a browser connection,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+# ]
+class BrowserEndpoint:
+    """One logical Workflowy tab/page context behind a browser connection."""
+
+    __slots__ = (
+        "endpoint_id",
+        "connection",
+        "alias",
+        "title",
+        "url",
+        "tab_marker",
+        "registered_at",
+        "last_seen",
+    )
+
+    def __init__(
+        self,
+        endpoint_id: str,
+        connection: "BrowserConnection",
+        alias: str | None = None,
+        title: str | None = None,
+        url: str | None = None,
+    ) -> None:
+        self.endpoint_id = endpoint_id
+        self.connection = connection
+        self.alias = alias
+        self.title = title
+        self.url = url
+        # Browser's own unique tab identifier (e.g. chrome.tabs tab.id),
+        # used to detect the duplicated-tab / cloned-sessionStorage edge case.
+        self.tab_marker: str | None = None
+        self.registered_at = time.monotonic()
+        # Last time this endpoint was affirmed live by an AUTHORITATIVE SW
+        # roster (Option B) or by (re)registration. Observability + a future
+        # basis for conservative staleness reasoning; endpoints are reaped by
+        # roster-absence, NEVER by age (per the design audit).
+        self.last_seen = time.monotonic()
+
+    def describe(self) -> dict[str, Any]:
+        """Compact public description for error listings."""
+        return {
+            "endpoint_id": self.endpoint_id,
+            "alias": self.alias,
+            "title": self.title,
+            "url": self.url,
+            "connection_id": self.connection.connection_id,
+            "seconds_since_seen": round(max(0.0, time.monotonic() - self.last_seen), 1),
+        }
+
+
+# @beacon[
+#   id=broker@connection-dataclass,
+#   role=BrowserConnection: one physical per-extension socket owning many endpoints,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+# ]
+class BrowserConnection:
+    """One physical browser-extension socket (one per Chrome/Firefox profile)."""
+
+    __slots__ = ("connection_id", "ws", "endpoints", "is_legacy")
+
+    def __init__(self, connection_id: str, ws: Any, is_legacy: bool = False) -> None:
+        self.connection_id = connection_id
+        self.ws = ws
+        # endpoint_id -> BrowserEndpoint
+        self.endpoints: dict[str, BrowserEndpoint] = {}
+        # Legacy = an older extension that connected without endpoint registration.
+        # We synthesize a single implicit endpoint for it so routing still works.
+        self.is_legacy = is_legacy
+
+
+# @beacon[
+#   id=broker@class-state,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+#   comment=Broker registry: browser connections, endpoints, MCP clients, request->origin routing, and the designated PRIMARY WORKER for browser-initiated Direction-B work frames (primary_mcp_id + self-healing primary_mcp_ws()),
+# ]
+class Broker:
+    """Holds the live registries and the request->origin routing map."""
+
+    def __init__(self, required_token: str) -> None:
+        # Shared secret every client MUST present in its hello. Always set
+        # (the broker generates one if none is configured) — there is no open
+        # mode; authentication is always required.
+        self.required_token: str = required_token
+        # connection_id -> BrowserConnection
+        self.browser_connections: dict[str, BrowserConnection] = {}
+        # ws identity -> BrowserConnection (fast reverse lookup on disconnect)
+        self._conn_by_ws: dict[int, BrowserConnection] = {}
+
+        # MCP clients: client_id -> websocket
+        self.mcp_clients: dict[str, Any] = {}
+        # client_id of the designated PRIMARY WORKER, or None.
+        #
+        # Direction-B background-work routing (see route_browser_work_frame /
+        # the bottom of _handle_connection): browser-initiated frames that have
+        # NO request_id (F12+1/+2/+3 refreshes, CARTO job spawn/cancel/clear,
+        # nodes-cache refresh, windsurf-open, markdown generation, uuid-path,
+        # bulk-apply, etc.) are NOT GLIMPSE round-trips and are NOT tab-specific
+        # work: any MCP server can execute them (same code, same disk, same
+        # Workflowy API key). The hard requirement is that EXACTLY ONE server
+        # executes each — never N of them — or you get dueling disk writes and
+        # duplicate detached CARTO workers (N processes for one F12 keypress).
+        #
+        # So the broker designates ONE connected MCP client as the stable
+        # PRIMARY WORKER and routes every browser-initiated work frame to it
+        # alone. First MCP client to connect wins; on its disconnect the broker
+        # promotes another. The degenerate single-server case is automatically
+        # correct: that one server simply IS the primary.
+        #
+        # (CARTO job *status* is disk-backed and idempotent, so answering
+        # carto_list_jobs from the primary instead of broadcasting is harmless;
+        # routing everything browser-initiated through the primary keeps the
+        # rule simple and removes the duplicate-spawn hazard entirely.)
+        self.primary_mcp_id: str | None = None
+
+        # endpoint_id of the user-designated DEFAULT GLIMPSE tab, or None.
+        #
+        # This is a small, live ROUTING PREFERENCE (conceptually a sibling of
+        # primary_mcp_id above): when an MCP server issues a GLIMPSE with NO
+        # explicit target_tab and 2+ tabs are connected, instead of returning
+        # the 'ambiguous_browser_target' error the broker routes to this
+        # designated default tab. It lets the user press a button in ONE tab's
+        # UUID Explorer widget to say "untargeted GLIMPSEs come HERE" without
+        # having to give the agent an alias every time.
+        #
+        # Deliberately IN-MEMORY and TRANSIENT (not persisted to disk): the
+        # default is tied to a Workflowy-tab endpoint_id (per-tab
+        # sessionStorage id, gone when the tab closes) and evaporates on broker
+        # restart. IMPORTANT: browser-extension service-worker sockets can
+        # transiently disconnect/reconnect while the underlying tabs remain
+        # open, so a browser-connection drop MUST NOT clear this field. It is
+        # cleared only when the tab explicitly unregisters its endpoint (close /
+        # regenerate) or when target resolution proves the endpoint is still
+        # stale at use time.
+        self.default_endpoint_id: str | None = None
+
+        # request_id -> originating MCP websocket
+        self.pending: dict[str, Any] = {}
+        # request_id -> monotonic deadline (for opportunistic TTL sweep)
+        self._pending_deadline: dict[str, float] = {}
+        # ws identity -> set of pending request_ids (for purge on disconnect)
+        self._origin_requests: dict[int, set[str]] = {}
+
+        # AMENDMENT B (WSLIVE) rate-limit: endpoint_id -> monotonic time of the
+        # last on-demand re-register broadcast fired for that endpoint. Used by
+        # reregister_broadcast_allowed() so a burst of ghost-hits for the same
+        # endpoint cannot storm the fan-out (at most one broadcast per
+        # endpoint_id per _REREGISTER_BROADCAST_COOLDOWN_S).
+        self._last_reregister_broadcast: dict[str, float] = {}
+
+    # ---- endpoint enumeration ------------------------------------------------
+
+    # @beacon[
+    #   id=auto-beacon@Broker.all_endpoints-alh6,
+    #   role=Broker.all_endpoints,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def all_endpoints(self) -> list[BrowserEndpoint]:
+        out: list[BrowserEndpoint] = []
+        for conn in self.browser_connections.values():
+            out.extend(conn.endpoints.values())
+        return out
+
+    # @beacon[
+    #   id=auto-beacon@Broker.endpoint_by_id-ktci,
+    #   role=Broker.endpoint_by_id,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def endpoint_by_id(self, endpoint_id: str) -> BrowserEndpoint | None:
+        for conn in self.browser_connections.values():
+            ep = conn.endpoints.get(endpoint_id)
+            if ep is not None:
+                return ep
+        return None
+
+    # @beacon[
+    #   id=auto-beacon@Broker.endpoints_by_alias-fmpi,
+    #   role=Broker.endpoints_by_alias,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def endpoints_by_alias(self, alias: str) -> list[BrowserEndpoint]:
+        # Alias matching is CASE-INSENSITIVE and tolerant of surrounding
+        # whitespace, so an agent can target a tab by alias without having to
+        # reproduce the user's exact capitalization (e.g. target_tab="Spine"
+        # matches an alias stored as "spine", and "my big project" matches
+        # "My Big Project"). The match is still on the WHOLE string (internal
+        # spaces preserved) — only the outer whitespace is trimmed and case is
+        # folded. Endpoints whose alias is unset (None) never match.
+        if alias is None:
+            return []
+        want = str(alias).strip().casefold()
+        out: list[BrowserEndpoint] = []
+        for ep in self.all_endpoints():
+            if ep.alias is None:
+                continue
+            if str(ep.alias).strip().casefold() == want:
+                out.append(ep)
+        return out
+
+    # ---- default GLIMPSE tab (routing preference) ----------------------------
+
+    # @beacon[
+    #   id=broker@set-default-endpoint,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    #   comment=Designate (or clear) the user's DEFAULT GLIMPSE tab by endpoint_id (set via the 'Set default' button in a tab's UUID Explorer widget). A transient in-memory routing preference: when a GLIMPSE arrives with no target_tab and 2+ tabs are connected, resolve_target_endpoint routes to this default instead of erroring. Refuses to point at a non-live endpoint; _clear_default_if_stale drops it when its tab closes.,
+    # ]
+    def set_default_endpoint(
+        self, endpoint_id: str | None
+    ) -> tuple[str, BrowserEndpoint | None]:
+        """Designate (or clear) the default GLIMPSE tab by endpoint_id.
+
+        Returns a ``(status, endpoint)`` tuple distinguishing THREE outcomes
+        that were previously (destructively) conflated:
+
+          * ``("cleared", None)``  -- ``endpoint_id`` was None: the caller
+            explicitly cleared the default. State changed (unless already
+            None).
+          * ``("set", ep)``        -- ``endpoint_id`` names a LIVE endpoint:
+            it is now the default. State changed (unless it already was).
+          * ``("rejected", None)`` -- ``endpoint_id`` names NO currently-
+            connected endpoint (a GHOST/stale id, e.g. a pinned tab whose
+            endpoint was dropped during an MV3 service-worker flap and never
+            re-registered). The existing default is LEFT UNTOUCHED and NO
+            state change occurs.
+
+        BUGFIX ([ap:WSFLAP2], the ghost-endpoint 'Set default' clobber): the
+        prior implementation set ``self.default_endpoint_id = None`` in BOTH
+        the explicit-clear AND the unknown-id branches. That made a click on a
+        ghost tab a DESTRUCTIVE PARTIAL WRITE -- it wiped whatever tab WAS the
+        default (knocking, e.g., ``NOW`` off) while failing to install itself,
+        leaving nobody default. A stale set-request must NOT be allowed to
+        clear a perfectly-good existing default; it is now rejected without
+        mutating state, so the caller can reply with an error the client can
+        act on (re-register) instead of silently destroying the other tab's
+        designation.
+        """
+        if endpoint_id is None:
+            self.default_endpoint_id = None
+            return "cleared", None
+        ep = self.endpoint_by_id(str(endpoint_id))
+        if ep is None:
+            # Ghost/stale id: REJECT without touching the existing default.
+            # (Contrast the explicit-clear branch above, which is the ONLY
+            # path that may null the default.)
+            return "rejected", None
+        self.default_endpoint_id = ep.endpoint_id
+        return "set", ep
+
+    # @beacon[
+    #   id=broker@prune-dead-endpoints,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    #   comment=Registry hygiene: drop every endpoint whose owning browser socket is no longer OPEN (via _ws_is_live), remove any browser connection thereby emptied, and self-clear a now-stale default. Invoked at the TOP of resolve_target_endpoint so single-tab auto-select and multi-tab ambiguity both operate on LIVE endpoints only -- fixes the single-open-tab GLIMPSE 15s timeout where a dead-but-registered endpoint (autoping is disabled on the listener) was auto-selected and the send silently black-holed.,
+    # ]
+    def prune_dead_endpoints(self) -> int:
+        """Remove endpoints whose owning socket is no longer live.
+
+        The broker's browser-facing listener runs with protocol autoping
+        DISABLED (a slow-but-alive tab must not be reaped -- see
+        ``run_broker``). The cost is that a GENUINELY-dead browser socket
+        (MV3 idle-kill, network churn) can linger in the registry until its
+        close event finally arrives. A lingering dead endpoint is precisely
+        what makes an untargeted single-tab GLIMPSE auto-select a dead socket
+        (``resolve_target_endpoint`` step 3) and then time out, because the
+        forward ``_safe_send`` swallows the failed write and no reply ever
+        comes back.
+
+        This method walks all endpoints, drops those on a non-OPEN socket,
+        removes any browser connection left with zero endpoints, and clears a
+        default designation that just went stale. It is cheap, idempotent, and
+        safe to call on the hot resolution path. Returns the number of
+        endpoints pruned (0 in the overwhelmingly common all-live case).
+
+        NOTE: this is a best-effort, state-based prune. It never force-closes a
+        socket and never touches MCP clients; a genuine full teardown still
+        flows through ``unregister``. It only *accelerates* removal of an
+        endpoint the transport already considers dead so routing decisions are
+        made against live tabs.
+        """
+        dead_conn_ids: list[str] = []
+        pruned = 0
+        for conn in list(self.browser_connections.values()):
+            if _ws_is_live(conn.ws):
+                continue
+            # Whole connection's socket is dead -> all its endpoints are dead.
+            n = len(conn.endpoints)
+            if n:
+                pruned += n
+                _log(
+                    f"Pruning {n} endpoint(s) on dead browser connection "
+                    f"{conn.connection_id} (socket no longer OPEN)."
+                )
+            dead_conn_ids.append(conn.connection_id)
+        for cid in dead_conn_ids:
+            conn = self.browser_connections.pop(cid, None)
+            if conn is not None:
+                self._conn_by_ws.pop(id(conn.ws), None)
+        if pruned:
+            # A pruned endpoint may have been the default GLIMPSE tab.
+            self._clear_default_if_stale()
+        return pruned
+
+    # @beacon[
+    #   id=broker@reconcile-browser-roster,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    #   comment=Option B endpoint-liveness reconcile. The service worker (the only component that can observe which Workflowy tabs exist behind its one connection) reports its live endpoint roster on each keepalive ping. This refreshes last_seen for every rostered endpoint on the reporting connection, and -- ONLY when roster_complete is True (post-settling-window, authoritative) -- REAPS endpoints registered on that connection but absent from the roster (ghosts from a killed tab whose endpoint_unregister was lost). Reap is by roster-ABSENCE, never by age, so an idle-for-hours-but-live tab is never dropped. A non-authoritative roster refreshes last_seen but prunes nothing. Scoped to the reporting connection only -- never touches endpoints on OTHER browser connections.,
+    # ]
+    def reconcile_browser_roster(
+        self,
+        ws: Any,
+        roster: list[str] | None,
+        roster_complete: bool,
+    ) -> int:
+        """Reconcile a browser connection's endpoints against its SW roster.
+
+        WSLIVE2 ownership note: this is the PROACTIVE half of the single owned
+        endpoint-liveness invariant (see the module docstring). The REACTIVE
+        half is ``miss_is_liveness_ghost`` -> unified ``unknown_endpoint`` +
+        the rate-limited re-register broadcast; this SW-authoritative roster
+        reconcile (plus ``prune_dead_endpoints`` on the hot resolve path) is
+        what keeps the registry honest between ghost hits.
+
+        ``ws`` is the reporting browser connection's socket; ``roster`` is the
+        list of endpoint_ids the service worker currently considers live for
+        THIS connection; ``roster_complete`` is the SW's assertion that the
+        roster is authoritative (its tabs have finished (re)registering).
+
+        Behavior (mirrors the design audit's safe reconcile):
+          * Refresh ``last_seen`` for every endpoint on this connection that
+            appears in the roster (evidence of liveness).
+          * If ``roster_complete`` is True: drop every endpoint on this
+            connection that is ABSENT from the roster -- these are ghosts
+            (e.g. a killed tab whose ``endpoint_unregister`` never arrived).
+          * If ``roster_complete`` is False: refresh only; NEVER prune (the
+            roster may be mid-(re)registration and incomplete).
+          * A reaped endpoint that was the default GLIMPSE tab self-clears.
+
+        Scoped strictly to the reporting connection: endpoints on OTHER
+        browser connections (other profiles / browsers) are untouched, so a
+        roster from Chrome can never reap a Firefox tab. Unknown roster ids
+        (present in the roster but not yet registered here) are ignored -- we
+        wait for their ``endpoint_register`` rather than synthesizing a
+        metadata-less endpoint. Returns the number of endpoints reaped.
+        """
+        conn = self._conn_by_ws.get(id(ws))
+        if conn is None:
+            return 0
+        roster_ids = {str(e) for e in (roster or [])}
+        now = time.monotonic()
+        # Refresh liveness for endpoints the SW still sees.
+        for ep in conn.endpoints.values():
+            if ep.endpoint_id in roster_ids:
+                ep.last_seen = now
+        if not roster_complete:
+            # Non-authoritative: liveness refresh only, no reaping.
+            return 0
+        # Authoritative roster: reap endpoints on THIS connection that the SW
+        # no longer lists (ghosts). Absence-based, not age-based.
+        ghosts = [
+            eid for eid in list(conn.endpoints.keys()) if eid not in roster_ids
+        ]
+        for eid in ghosts:
+            conn.endpoints.pop(eid, None)
+        if ghosts:
+            _log(
+                f"Roster reconcile on {conn.connection_id}: reaped "
+                f"{len(ghosts)} ghost endpoint(s) absent from authoritative "
+                f"SW roster: {ghosts}."
+            )
+        # A reaped endpoint may have been the default GLIMPSE tab. Also handle
+        # the connection-drop/reconnect case: unregister(ws) deliberately does
+        # NOT clear the default (so transient MV3 service-worker reconnects do
+        # not erase a still-live tab), but if the post-settling authoritative
+        # roster has arrived and that default endpoint still has not
+        # re-registered anywhere, the pointer is genuinely stale even when
+        # there were no per-connection ghosts left to reap.
+        self._clear_default_if_stale()
+        return len(ghosts)
+
+    # @beacon[
+    #   id=auto-beacon@Broker._clear_default_if_stale-7kfn,
+    #   role=Broker._clear_default_if_stale,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def _clear_default_if_stale(self) -> None:
+        """Drop the default designation if its endpoint is no longer live.
+
+        Called from the endpoint/connection teardown paths so a closed (or
+        regenerated) default tab self-clears instead of stranding untargeted
+        GLIMPSEs against a dead endpoint_id.
+        """
+        if (
+            self.default_endpoint_id is not None
+            and self.endpoint_by_id(self.default_endpoint_id) is None
+        ):
+            _log(
+                f"Default GLIMPSE tab {self.default_endpoint_id!r} is no longer "
+                f"connected; clearing default designation."
+            )
+            self.default_endpoint_id = None
+
+    # ---- AMENDMENT B (WSLIVE): on-demand re-register broadcast rate-limit ----
+
+    # @beacon[
+    #   id=auto-beacon@Broker.reregister_broadcast_allowed-9mac,
+    #   role=Broker.reregister_broadcast_allowed,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def reregister_broadcast_allowed(self, endpoint_id: str | None) -> bool:
+        """Rate-limit gate for the on-demand re-register broadcast (AMENDMENT B).
+
+        Returns True at most once per ``endpoint_id`` per
+        ``_REREGISTER_BROADCAST_COOLDOWN_S`` and records the fire time. A burst
+        of ghost-hits for the SAME endpoint (e.g. an agent retrying the same
+        GLIMPSE in a tight loop) therefore fires the fan-out only once per
+        cooldown window; the intervening hits still get their loud actionable
+        reply (STEP 1 / STEP 3), they just don't re-storm the broadcast.
+
+        A None/blank endpoint_id (a non-targeted liveness signal, e.g. a
+        forward _safe_send failure with no resolved endpoint) is keyed under a
+        single sentinel so it, too, is bounded.
+        """
+        key = str(endpoint_id or "").strip() or "<unkeyed>"
+        now = time.monotonic()
+        last = self._last_reregister_broadcast.get(key)
+        if last is not None and (now - last) < _REREGISTER_BROADCAST_COOLDOWN_S:
+            return False
+        self._last_reregister_broadcast[key] = now
+        return True
+
+    # ---- browser connection registration ------------------------------------
+
+    # @beacon[
+    #   id=auto-beacon@Broker.register_browser_connection-6rt7,
+    #   role=Broker.register_browser_connection,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def register_browser_connection(
+        self, ws: Any, connection_id: str, is_legacy: bool = False
+    ) -> BrowserConnection:
+        existing = self._conn_by_ws.get(id(ws))
+        if existing is not None:
+            return existing
+        # Avoid connection_id collisions across distinct sockets.
+        effective = connection_id
+        suffix = 1
+        while (
+            effective in self.browser_connections
+            and self.browser_connections[effective].ws is not ws
+        ):
+            suffix += 1
+            effective = f"{connection_id}#{suffix}"
+        conn = BrowserConnection(effective, ws, is_legacy=is_legacy)
+        self.browser_connections[effective] = conn
+        self._conn_by_ws[id(ws)] = conn
+        return conn
+
+    # @beacon[
+    #   id=auto-beacon@Broker.register_endpoint-jg5w,
+    #   role=Broker.register_endpoint,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def register_endpoint(
+        self,
+        ws: Any,
+        endpoint_id: str,
+        alias: str | None,
+        title: str | None,
+        url: str | None,
+        tab_marker: str | None = None,
+    ) -> tuple[BrowserEndpoint | None, bool]:
+        """Register/update an endpoint. Returns (endpoint, collision).
+
+        ``collision`` is True when an endpoint with this id already exists on
+        this connection but is reported by a DIFFERENT tab (distinguished by
+        ``tab_marker``, the browser's own unique tab identifier). This is the
+        duplicated-tab edge case: Chrome can clone ``sessionStorage`` when a
+        tab is duplicated, so two distinct tabs end up claiming the same
+        endpoint_id. The caller surfaces the collision so the extension can
+        force one tab to regenerate its endpoint_id.
+        """
+        conn = self._conn_by_ws.get(id(ws))
+        if conn is None:
+            return None, False
+        ep = conn.endpoints.get(endpoint_id)
+        collision = False
+        if ep is None:
+            ep = BrowserEndpoint(endpoint_id, conn, alias, title, url)
+            ep.tab_marker = tab_marker
+            conn.endpoints[endpoint_id] = ep
+            # (registered_at + last_seen are set in the constructor.)
+        else:
+            # Re-register / update is itself fresh evidence of liveness.
+            ep.last_seen = time.monotonic()
+            # Collision: same endpoint_id, different physical tab.
+            if (
+                tab_marker is not None
+                and ep.tab_marker is not None
+                and tab_marker != ep.tab_marker
+            ):
+                collision = True
+            # Update mutable fields (alias edits, navigation, etc.).
+            ep.alias = alias
+            ep.title = title
+            ep.url = url
+            if tab_marker is not None:
+                ep.tab_marker = tab_marker
+        return ep, collision
+
+    # @beacon[
+    #   id=auto-beacon@Broker.unregister_endpoint-piwx,
+    #   role=Broker.unregister_endpoint,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def unregister_endpoint(self, ws: Any, endpoint_id: str) -> None:
+        conn = self._conn_by_ws.get(id(ws))
+        if conn is not None:
+            conn.endpoints.pop(endpoint_id, None)
+
+    # ---- MCP registration ----------------------------------------------------
+
+    # @beacon[
+    #   id=auto-beacon@Broker.register_mcp-kbm5,
+    #   role=Broker.register_mcp,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def register_mcp(self, ws: Any, client_id: str) -> str:
+        effective = client_id
+        suffix = 1
+        while effective in self.mcp_clients and self.mcp_clients[effective] is not ws:
+            suffix += 1
+            effective = f"{client_id}#{suffix}"
+        self.mcp_clients[effective] = ws
+        self._origin_requests.setdefault(id(ws), set())
+        # First MCP client to connect becomes the PRIMARY WORKER for
+        # browser-initiated Direction-B work frames. Stable thereafter (it is
+        # only changed by promote-on-disconnect in unregister()), so CARTO job
+        # ownership and the single nodes-cache writer stay coherent.
+        if self.primary_mcp_id is None:
+            self.primary_mcp_id = effective
+            _log(f"Primary worker designated: {effective} (first MCP client).")
+        return effective
+
+    # @beacon[
+    #   id=broker@primary-worker-select,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    #   comment=Direction-B PRIMARY WORKER selector. Returns the websocket of the single MCP client that should execute browser-initiated work frames (F12/CARTO/cache-refresh/windsurf/markdown-gen/uuid-path/bulk-apply). Self-healing: if the recorded primary_mcp_id is stale/disconnected it promotes any remaining MCP client; returns None only when NO MCP client is connected. Election happens in register_mcp (first client wins); promote-on-disconnect happens in unregister.,
+    # ]
+    def primary_mcp_ws(self) -> Any | None:
+        """Return the websocket of the current primary worker, self-healing.
+
+        If the recorded primary is missing/stale (e.g. it disconnected without
+        a clean teardown), transparently promote any remaining MCP client so a
+        browser-initiated work frame always has exactly one executor whenever
+        at least one MCP server is connected.
+        """
+        if self.primary_mcp_id is not None:
+            ws = self.mcp_clients.get(self.primary_mcp_id)
+            if ws is not None:
+                return ws
+            # Recorded primary is gone; fall through to promote a replacement.
+            self.primary_mcp_id = None
+        if self.mcp_clients:
+            new_id = next(iter(self.mcp_clients))
+            self.primary_mcp_id = new_id
+            _log(f"Primary worker promoted (self-heal): {new_id}.")
+            return self.mcp_clients[new_id]
+        return None
+
+    # ---- teardown ------------------------------------------------------------
+
+    # @beacon[
+    #   id=auto-beacon@Broker.unregister-y4fh,
+    #   role=Broker.unregister,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def unregister(self, ws: Any) -> None:
+        # Browser connection (drops all its endpoints).
+        conn = self._conn_by_ws.pop(id(ws), None)
+        if conn is not None:
+            self.browser_connections.pop(conn.connection_id, None)
+            n = len(conn.endpoints)
+            _log(
+                f"Browser connection disconnected: {conn.connection_id} "
+                f"(dropped {n} endpoint(s))."
+            )
+            # Do NOT clear default_endpoint_id here. A browser connection maps
+            # to a Chrome MV3 service-worker socket, not to the lifetime of the
+            # underlying Workflowy tabs. That socket can transiently drop and
+            # reconnect (idle SW suspension, broker keepalive, browser network
+            # churn) while the same endpoint_ids re-register milliseconds later.
+            # Clearing the default here caused the user's default GLIMPSE tab
+            # to evaporate on harmless reconnects. Explicit endpoint_unregister
+            # and resolution-time stale checks still clear truly-dead defaults.
+        # MCP client.
+        for cid, c in list(self.mcp_clients.items()):
+            if c is ws:
+                del self.mcp_clients[cid]
+                _log(f"MCP client disconnected: {cid}")
+                # Promote-on-disconnect: if the PRIMARY WORKER just left, clear
+                # the designation. The next primary_mcp_ws() call self-heals to
+                # any remaining MCP client; if none remain, primary stays None
+                # until a new MCP client connects and claims it in register_mcp.
+                if self.primary_mcp_id == cid:
+                    self.primary_mcp_id = None
+                    survivor = next(iter(self.mcp_clients), None)
+                    if survivor is not None:
+                        self.primary_mcp_id = survivor
+                        _log(
+                            f"Primary worker was {cid}; promoted {survivor} "
+                            f"on disconnect."
+                        )
+                    else:
+                        _log(
+                            f"Primary worker {cid} disconnected; no MCP clients "
+                            f"remain to promote (browser-initiated work frames "
+                            f"have no executor until one reconnects)."
+                        )
+        # Purge pending request_ids that originated from this socket.
+        for rid in self._origin_requests.pop(id(ws), set()):
+            self.pending.pop(rid, None)
+
+    # ---- request tracking ----------------------------------------------------
+
+    # @beacon[
+    #   id=auto-beacon@Broker.track_request-7tti,
+    #   role=Broker.track_request,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def track_request(self, request_id: str, origin_ws: Any) -> None:
+        self.pending[request_id] = origin_ws
+        self._pending_deadline[request_id] = time.monotonic() + _PENDING_TTL_SECONDS
+        self._origin_requests.setdefault(id(origin_ws), set()).add(request_id)
+
+    # @beacon[
+    #   id=auto-beacon@Broker.resolve_request-w9kn,
+    #   role=Broker.resolve_request,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def resolve_request(self, request_id: str) -> Any | None:
+        origin = self.pending.pop(request_id, None)
+        self._pending_deadline.pop(request_id, None)
+        if origin is not None:
+            self._origin_requests.get(id(origin), set()).discard(request_id)
+        return origin
+
+    # @beacon[
+    #   id=auto-beacon@Broker.sweep_pending-sjb9,
+    #   role=Broker.sweep_pending,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def sweep_pending(self) -> None:
+        """Opportunistic cleanup: drop tracked requests past their TTL.
+
+        Called inline on each new MCP request (no dedicated timer thread), so a
+        browser that never replies cannot leak routing entries indefinitely.
+        Cheap: only scans when there is something to scan.
+        """
+        if not self._pending_deadline:
+            return
+        now = time.monotonic()
+        expired = [rid for rid, dl in self._pending_deadline.items() if dl <= now]
+        for rid in expired:
+            origin = self.pending.pop(rid, None)
+            self._pending_deadline.pop(rid, None)
+            if origin is not None:
+                self._origin_requests.get(id(origin), set()).discard(rid)
+        if expired:
+            _log(f"Swept {len(expired)} stale pending request(s) past TTL.")
+
+    # ---- observability -------------------------------------------------------
+
+    # @beacon[
+    #   id=broker@describe-state,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    #   comment=Live, in-memory broker registry snapshot for the workflowy_broker_status observability tool: browser connections (id, legacy, ws_open, endpoint_count), every endpoint (id, alias, title, url, connection_id, seconds_since_seen, is_default), the default endpoint id, and MCP clients (id, ws_open, is_primary) + the primary id. Reads nothing from disk and mutates nothing (a pure read of the registries), so it is safe to answer inline in the broker's frame loop exactly like ping->pong. This is the surface that would have made the ghost-endpoint bug visible instantly.,
+    # ]
+    def describe_state(self) -> dict[str, Any]:
+        """Return a JSON-serializable snapshot of the broker's live registries.
+
+        Pure read: does not mutate state and touches no disk. Intended for the
+        ``workflowy_broker_status`` MCP tool so an agent/human can see, at a
+        glance, every browser connection, every endpoint (with liveness age +
+        whether it is the default GLIMPSE tab), and every MCP client (with the
+        primary-worker designation) -- the exact information whose absence made
+        the ghost-endpoint routing bug hard to diagnose.
+        """
+        connections: list[dict[str, Any]] = []
+        endpoints: list[dict[str, Any]] = []
+        for conn in self.browser_connections.values():
+            connections.append(
+                {
+                    "connection_id": conn.connection_id,
+                    "is_legacy": conn.is_legacy,
+                    "ws_open": _ws_is_live(conn.ws),
+                    "endpoint_count": len(conn.endpoints),
+                }
+            )
+            for ep in conn.endpoints.values():
+                d = ep.describe()
+                d["is_default"] = ep.endpoint_id == self.default_endpoint_id
+                endpoints.append(d)
+        mcp_clients: list[dict[str, Any]] = []
+        for cid, cws in self.mcp_clients.items():
+            mcp_clients.append(
+                {
+                    "client_id": cid,
+                    "ws_open": _ws_is_live(cws),
+                    "is_primary": cid == self.primary_mcp_id,
+                }
+            )
+        return {
+            "browser_connections": connections,
+            "endpoints": endpoints,
+            "default_endpoint_id": self.default_endpoint_id,
+            "mcp_clients": mcp_clients,
+            "primary_mcp_id": self.primary_mcp_id,
+            "pending_request_count": len(self.pending),
+        }
+
+    # ---- target endpoint resolution -----------------------------------------
+
+    # @beacon[
+    #   id=broker@resolve-target-tab,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    #   comment=Resolve the SINGLE public 'target_tab' token (the one the glimpse MCP tool exposes) to one browser endpoint, ALIAS-FIRST then endpoint_id fallback (no format-sniffing). None -> single-tab default / actionable multi-tab error via resolve_target_endpoint. Replaces the confusing two-field target_endpoint_id/target_alias surface for callers; the two-field resolver remains for internal/back-compat use.,
+    # ]
+    def resolve_target_tab(
+        self,
+        target_tab: str | None,
+        allow_arbitrary_when_ambiguous: bool = False,
+    ) -> tuple[BrowserEndpoint | None, dict[str, Any] | None]:
+        """Resolve a SINGLE public ``target_tab`` token to one endpoint.
+
+        This is the public-tool-facing entry point: the agent passes ONE
+        optional ``target_tab`` string (never two confusing fields). A tab is
+        always a browser ENDPOINT, so the token names exactly that. Resolution
+        is deterministic and ALIAS-FIRST:
+
+          1. if ``target_tab`` is None -> single-tab default / actionable
+             multi-tab error (delegated to ``resolve_target_endpoint``).
+          2. else try ``target_tab`` as an ALIAS (the human-chosen name the
+             agent will almost always use). Alias matching is
+             CASE-INSENSITIVE and trims surrounding whitespace, so
+             ``"Spine"`` matches an alias stored as ``"spine"``. Unique
+             match -> that endpoint.
+          3. else if it was not a (unique) alias, try it as an ENDPOINT_ID
+             (matched case-SENSITIVELY — endpoint_ids are opaque tokens).
+          4. else actionable error listing the available tabs.
+
+        Alias-first (not format-sniffing): aliases are human-chosen and
+        endpoint_ids are opaque generated tokens, so an alias collision with a
+        real endpoint_id is vanishingly unlikely, and the fallback 'just works'
+        without inspecting the token's shape.
+        """
+        # Prune dead endpoints before any alias/id match so a stale tab can
+        # neither win an alias lookup nor pad the ambiguity listing (mirrors
+        # the prune resolve_target_endpoint does for the no-target path).
+        self.prune_dead_endpoints()
+
+        if target_tab is None:
+            # No target: reuse the canonical single-tab-default / multi-tab
+            # error logic with both explicit fields unset. The tab-agnostic
+            # flag is forwarded so a no-target call from a tab-agnostic tool
+            # picks a tab deterministically instead of erroring under
+            # multi-tab (zero-tab still errors identically).
+            return self.resolve_target_endpoint(
+                None,
+                None,
+                allow_arbitrary_when_ambiguous=allow_arbitrary_when_ambiguous,
+            )
+
+        token = str(target_tab)
+        endpoints = self.all_endpoints()
+
+        # (2) alias first.
+        alias_matches = self.endpoints_by_alias(token)
+        if len(alias_matches) == 1:
+            return alias_matches[0], None
+        if len(alias_matches) > 1:
+            return None, {
+                "code": "ambiguous_browser_alias",
+                "error": (
+                    f"Multiple Workflowy tabs use alias {token!r}. "
+                    f"Rename one so the alias is unique."
+                ),
+                "available_endpoints": [e.describe() for e in alias_matches],
+            }
+
+        # (3) not an alias -> try as endpoint_id.
+        ep = self.endpoint_by_id(token)
+        if ep is not None:
+            return ep, None
+
+        # (4) neither alias nor endpoint_id matched.
+        return None, {
+            "code": "unknown_target_tab",
+            "error": (
+                f"No connected Workflowy tab matches target_tab {token!r} "
+                f"(tried as an alias, then as an endpoint_id)."
+            ),
+            "available_endpoints": [e.describe() for e in endpoints],
+        }
+
+    # @beacon[
+    #   id=auto-beacon@Broker.resolve_target_endpoint-rqth,
+    #   role=Broker.resolve_target_endpoint,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def resolve_target_endpoint(
+        self,
+        target_endpoint_id: str | None,
+        target_alias: str | None,
+        allow_arbitrary_when_ambiguous: bool = False,
+    ) -> tuple[BrowserEndpoint | None, dict[str, Any] | None]:
+        """Return (endpoint, error_dict). Exactly one is non-None.
+
+        Rules (deterministic):
+          1. explicit target_endpoint_id -> that endpoint, or error if absent.
+          2. else explicit target_alias  -> unique live endpoint, or error if
+             none / ambiguous.
+          3. else if exactly one endpoint connected -> use it.
+          4. else (2+ tabs, no explicit target):
+             - if a user-designated DEFAULT tab is set + live -> use it.
+             - else if ``allow_arbitrary_when_ambiguous`` -> pick the
+               first endpoint DETERMINISTICALLY (stable by endpoint_id).
+             - else error listing available endpoints.
+
+        ``allow_arbitrary_when_ambiguous`` is the TAB-AGNOSTIC capability flag.
+        It is False for tab-SPECIFIC operations (GLIMPSE / extract_dom, whose
+        result depends on a particular tab's live DOM expansion state), so
+        those still error under multi-tab and force the caller to choose. It
+        is True for tab-AGNOSTIC operations (anchor tools, list_canonical_tags,
+        ...) that only read SHARED cross-tab chrome.storage config via
+        get_extension_settings -- every connected tab returns identical data,
+        so being forced to disambiguate is pure friction. For those, when no
+        tab is starred we just pick one deterministically. The ZERO-tab case
+        is unaffected (always the same error) regardless of this flag.
+        """
+        # Hygiene FIRST: drop any endpoint whose browser socket is already
+        # dead (autoping is disabled on the listener, so a genuinely-dead tab
+        # can linger). Doing this before we read all_endpoints() is what makes
+        # single-tab auto-select (step 3 below) pick the LIVE tab instead of a
+        # stale one -- the fix for the single-open-tab GLIMPSE 15s timeout.
+        self.prune_dead_endpoints()
+        endpoints = self.all_endpoints()
+
+        if target_endpoint_id is not None:
+            ep = self.endpoint_by_id(str(target_endpoint_id))
+            if ep is not None:
+                return ep, None
+            return None, {
+                "code": "unknown_browser_endpoint",
+                "error": (
+                    f"No connected Workflowy tab with endpoint_id "
+                    f"{target_endpoint_id!r}."
+                ),
+                "available_endpoints": [e.describe() for e in endpoints],
+            }
+
+        if target_alias is not None:
+            matches = self.endpoints_by_alias(str(target_alias))
+            if len(matches) == 1:
+                return matches[0], None
+            if len(matches) == 0:
+                return None, {
+                    "code": "unknown_browser_alias",
+                    "error": (
+                        f"No connected Workflowy tab has alias {target_alias!r}."
+                    ),
+                    "available_endpoints": [e.describe() for e in endpoints],
+                }
+            return None, {
+                "code": "ambiguous_browser_alias",
+                "error": (
+                    f"Multiple Workflowy tabs use alias {target_alias!r}. "
+                    f"Rename one so the alias is unique, or pass target_tab "
+                    f"as a unique endpoint_id."
+                ),
+                "available_endpoints": [e.describe() for e in matches],
+            }
+
+        if len(endpoints) == 1:
+            return endpoints[0], None
+
+        if len(endpoints) == 0:
+            return None, {
+                "code": "no_browser_connected",
+                "error": (
+                    "No Workflowy browser tab is connected to the GLIMPSE broker. "
+                    "Open Workflowy in your browser."
+                ),
+                "available_endpoints": [],
+            }
+
+        # 2+ tabs and no explicit target: honor the user-designated DEFAULT
+        # GLIMPSE tab if one is set and still live (self-clear if stale). This
+        # is the routing preference set via the 'Set default' button in a tab's
+        # UUID Explorer widget — it lets untargeted GLIMPSEs land on the user's
+        # chosen tab instead of erroring out under multi-tab.
+        if self.default_endpoint_id is not None:
+            default_ep = self.endpoint_by_id(self.default_endpoint_id)
+            if default_ep is not None:
+                return default_ep, None
+            # Stale default (tab closed): drop it and fall through.
+            self._clear_default_if_stale()
+
+        # TAB-AGNOSTIC fast-path: the caller's operation does not depend on
+        # WHICH tab answers (it reads shared cross-tab config), so rather than
+        # erroring under multi-tab we pick the first endpoint DETERMINISTICALLY.
+        # Sorting by endpoint_id makes the choice stable run-to-run (the same
+        # tab is chosen given the same set of connected tabs), which is easier
+        # to reason about and debug than an arbitrary dict-iteration order.
+        if allow_arbitrary_when_ambiguous:
+            chosen = sorted(endpoints, key=lambda e: str(e.endpoint_id))[0]
+            return chosen, None
+
+        return None, {
+            "code": "ambiguous_browser_target",
+            "error": (
+                "Multiple Workflowy tabs are connected. Pass target_tab (a tab "
+                "alias, e.g. 'spine', or an endpoint_id) to choose one, or press "
+                "'Set default' in a tab's UUID Explorer widget to make untargeted "
+                "GLIMPSEs go there."
+            ),
+            "available_endpoints": [e.describe() for e in endpoints],
+        }
+
+    # @beacon[
+    #   id=broker@miss-is-liveness-ghost,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    #   comment=WSLIVE2 DoD-A: the SINGLE broker-owned endpoint-liveness ghost classifier. Returns True iff a resolve-miss error dict is the 'socket-alive-but-endpoint-ghost' class (code=='unknown_browser_endpoint' -- a TARGETED endpoint_id absent from the registry), False for every ordinary routing/config code (unknown_browser_alias / ambiguous_browser_alias / no_browser_connected / ambiguous_browser_target / unknown_target_tab). Every MCP->browser resolve-miss site consults THIS instead of re-deriving ghost-ness inline, so the heal-vs-ordinary-error decision can never drift across the 5+ sites. Behavior-IDENTICAL to the prior inline err_code=='unknown_browser_endpoint' check -- this is the architectural CONSOLIDATION; the behavioral symptom-3 heal is caller-intent routing (target_endpoint_id) putting stale-endpoint misses onto this exact code.,
+    # ]
+    def miss_is_liveness_ghost(self, err: dict[str, Any] | None) -> bool:
+        """Return True iff a resolve-miss ``err`` is an endpoint-liveness ghost.
+
+        The ONE owned classifier for the 'socket-alive-but-endpoint-ghost'
+        defect class. A ghost is exactly a TARGETED endpoint_id miss
+        (``code == 'unknown_browser_endpoint'``): the caller named a specific
+        endpoint that is no longer in the registry (reaped-but-live after an
+        MV3 service-worker flap). Every OTHER resolver code is an ORDINARY
+        routing/config error and is NOT a ghost:
+
+          * ``unknown_browser_alias`` / ``ambiguous_browser_alias`` -- fix the
+            alias.
+          * ``no_browser_connected`` -- open a tab.
+          * ``ambiguous_browser_target`` -- pick a tab / set a default.
+          * ``unknown_target_tab`` -- a human/agent ``target_tab`` TYPO (a bad
+            token), emphatically NOT a stale endpoint. Discriminated BY
+            CONSTRUCTION: a real endpoint_id routes here via
+            ``resolve_target_endpoint`` (-> unknown_browser_endpoint), a
+            typo'd token via ``resolve_target_tab`` (-> unknown_target_tab).
+
+        Consulted at every MCP->browser resolve-miss site so ghost-ness is
+        decided in ONE place and can never be re-derived divergently (DoD-A).
+        """
+        if not isinstance(err, dict):
+            return False
+        return str(err.get("code") or "") == "unknown_browser_endpoint"
+
+    # @beacon[
+    #   id=broker@frame-is-liveness-ghost,
+    #   role=ƒ frame_is_liveness_ghost(frame): wire-frame twin of miss_is_liveness_ghost -- classifies an INBOUND SW reverse-map ghost reply,
+    #   slice_labels=nexus--broker,
+    #   kind=ast,
+    # ]
+    def frame_is_liveness_ghost(self, frame: dict[str, Any] | None) -> bool:
+        """Return True iff an INBOUND browser FRAME is a reverse-map liveness ghost.
+
+        The WIRE-FRAME TWIN of ``miss_is_liveness_ghost``. Where that method
+        classifies an INTERNAL resolver-miss error dict (keyed on
+        ``code == 'unknown_browser_endpoint'``, the shape
+        ``resolve_target_endpoint`` emits on an MCP->browser resolve miss),
+        THIS predicate classifies the WIRE REPLY the service worker sends back
+        over the broker socket when a targeted frame cannot be delivered to its
+        tab (a REVERSE-MAP drop: ``endpointToTab`` map-miss, or a
+        purged-on-failed-send). That SW frame
+        (``emitUnknownEndpointToBroker``) has the specific shape
+        ``{success: False, code: 'unknown_endpoint', request_id: <id>,
+        target_endpoint_id: <eid>}``.
+
+        This is NOT a second OWNER of the endpoint-liveness invariant -- the
+        broker still owns the ONE heal decision. It is only the second INPUT
+        SHAPE that feeds the SAME owned heal (the rate-limited
+        ``_broadcast_request_endpoint_register`` fan-out). It is kept a
+        separate tiny predicate rather than overloading
+        ``miss_is_liveness_ghost`` precisely because the two inputs are
+        different shapes with different codes -- an internal resolver dict keyed
+        ``'unknown_browser_endpoint'`` vs. a wire reply keyed
+        ``'unknown_endpoint'`` -- and conflating them would make
+        ``miss_is_liveness_ghost``'s name and contract lie.
+
+        STRICT by design: a bare ``code == 'unknown_endpoint'`` check is too
+        loose (some future/other frame could reuse that code). We require ALL
+        THREE of the reverse-map ghost's wire fields -- the ghost code, a
+        non-null ``request_id`` (there IS a waiter to answer), and a non-blank
+        ``target_endpoint_id`` (the affected endpoint, used to key the
+        rate-limit) -- so only a genuine correlated reverse-map ghost triggers
+        the heal.
+        """
+        if not isinstance(frame, dict):
+            return False
+        if str(frame.get("code") or "") != "unknown_endpoint":
+            return False
+        if frame.get("request_id") is None:
+            return False
+        if not str(frame.get("target_endpoint_id") or "").strip():
+            return False
+        return True
+
+
+# @beacon[
+#   id=broker@safe-send,
+#   role=⚡ _safe_send(ws, obj): error-swallowing JSON send used by all broker routing,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+# ]
+async def _safe_send(ws: Any, obj: dict[str, Any]) -> bool:
+    """Send JSON to a socket, swallowing errors so one dead peer can't crash routing.
+
+    Returns True if the frame was sent, False if the send raised (a dead/closed
+    socket). STEP 1 (WSLIVE): the return value is consulted ONLY on the
+    ADDRESSED MCP->browser forward path in ``_handle_connection`` -- a False
+    there means the tagged target endpoint's socket is dead, which must be
+    converted into a correlated ``unknown_endpoint`` reply to the originator
+    rather than silently swallowed into a 12s client timeout. The BROADCAST
+    fan-out paths deliberately IGNORE the return (one dead peer must never
+    crash routing to the others), so their behavior is byte-for-byte unchanged.
+    The swallow-don't-raise contract itself is preserved -- only the signal is
+    added.
+    """
+    try:
+        await ws.send(json.dumps(obj))
+        return True
+    except Exception as e:  # noqa: BLE001
+        _log(f"send failed: {type(e).__name__}: {e}")
+        return False
+
+
+# @beacon[
+#   id=broker@broadcast-default-endpoint,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+#   comment=Fan a 'default_endpoint_changed' frame out to every browser connection so each tab's UUID Explorer widget can render the correct 'Default tab' / 'Set default' button label after the designated default GLIMPSE tab changes (set, cleared, or self-cleared on tab close).,
+# ]
+async def _broadcast_default_endpoint(broker: "Broker") -> None:
+    """Tell every browser connection which endpoint is now the default tab.
+
+    Sent to all browser connections (deduped by socket) so each tab can
+    compare ``default_endpoint_id`` against its own endpoint_id and show the
+    right button state. MCP clients don't need this (they learn the default
+    only implicitly, by routing), so it is not sent to them.
+    """
+    frame = {
+        "type": "default_endpoint_changed",
+        "default_endpoint_id": broker.default_endpoint_id,
+    }
+    seen: set[int] = set()
+    for conn in list(broker.browser_connections.values()):
+        if id(conn.ws) in seen:
+            continue
+        seen.add(id(conn.ws))
+        await _safe_send(conn.ws, frame)
+
+
+# @beacon[
+#   id=broker@broadcast-request-endpoint-register,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+#   comment=AMENDMENT B (WSLIVE): on a DETECTED endpoint-liveness ghost (a targeted MCP->browser miss / dead forward / SW map-miss), fan an untargeted 'broker_request_endpoint_register' frame out to every browser connection so every live tab re-announces its endpoint. Reuses the EXACT frame the SW already broadcasts to its tabs on its own reconnect: an untargeted broker->SW frame hits the SW's final else branch and is fanned to all tabs via broadcastToTabs, and each page client's existing broker_request_endpoint_register handler calls registerBrokerEndpoint(). ZERO new client mechanism; idempotent for already-live tabs (register_endpoint just refreshes last_seen). Rate-limited per endpoint_id by Broker.reregister_broadcast_allowed so a ghost-hit burst cannot storm it.,
+# ]
+async def _broadcast_request_endpoint_register(broker: "Broker") -> None:
+    """Ask every browser connection's tabs to (re)register their endpoints.
+
+    This is the AMENDMENT B on-demand heal fired AT the broker's ghost-
+    detection site (see the MCP->browser resolution block in
+    ``_handle_connection``). It sends an UNTARGETED
+    ``broker_request_endpoint_register`` frame to each browser connection
+    (deduped by socket). Because the frame carries NO ``target_endpoint_id``,
+    the service worker's ``ws.onmessage`` routes it through its final
+    fan-out branch (``broadcastToTabs``) to every tab, and each page client's
+    existing ``broker_request_endpoint_register`` handler calls
+    ``registerBrokerEndpoint()`` -- so the reaped-but-live tab re-registers and
+    the ghost clears in the background. It is the SAME frame the SW already
+    broadcasts to its own tabs on reconnect, so no new client handler is
+    needed. Idempotent for already-live tabs. Fire-and-forget: the caller does
+    NOT wait for the re-registration; the loud actionable reply the caller
+    already sent (STEP 1) tells the originator to retry, by which point the
+    re-register has typically landed.
+    """
+    frame = {
+        "type": "broker_request_endpoint_register",
+        # Correlation breadcrumb for STEP 4 instrumentation; harmless to the
+        # SW fan-out (it only keys on the absence of target_endpoint_id).
+        "reason": "wslive_ghost_heal",
+    }
+    seen: set[int] = set()
+    sent = 0
+    for conn in list(broker.browser_connections.values()):
+        if id(conn.ws) in seen:
+            continue
+        seen.add(id(conn.ws))
+        if await _safe_send(conn.ws, frame):
+            sent += 1
+    _wslive(
+        f"re-register broadcast fired to {sent} browser connection(s) "
+        f"(ghost-heal)."
+    )
+
+
+# @beacon[
+#   id=broker@handle-connection,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+#   comment=Per-connection handler: hello handshake then role-based routing. MCP->browser frames resolve a target endpoint (GLIMPSE: request_id + single public target_tab via resolve_target_tab, or legacy target_endpoint_id/target_alias) OR fan a no-target result/status frame out to all browser connections. browser->MCP frames either resolve a correlated reply by request_id OR (no request_id = Direction-B work: F12/CARTO/cache-refresh/etc.) route to the single designated PRIMARY WORKER via broker.primary_mcp_ws() instead of broadcasting — preventing duplicate detached workers / dueling disk writes under multi-server.,
+# ]
+async def _handle_connection(broker: Broker, ws: Any) -> None:
+    """Handle a single client connection (browser or MCP) for its lifetime."""
+    role: str | None = None
+
+    try:
+        async for raw in ws:
+            try:
+                msg = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                _log("Dropping non-JSON frame.")
+                continue
+            if not isinstance(msg, dict):
+                continue
+
+            action = msg.get("action")
+            mtype = msg.get("type")
+
+            # ---- handshake -------------------------------------------------
+            if action == "hello" or mtype == "hello":
+                # Shared-secret auth (localhost is not a security boundary).
+                # Authentication is ALWAYS required: the broker always holds a
+                # token (generated at startup if none was configured), so every
+                # client MUST present a matching token. There is no open mode.
+                expected_token = broker.required_token
+                if str(msg.get("token") or "") != expected_token:
+                    _log("Rejecting client: missing/invalid shared-secret token.")
+                    await _safe_send(
+                        ws,
+                        {
+                            "type": "hello_ack",
+                            "accepted": False,
+                            "code": "bad_token",
+                            "error": (
+                                "GLIMPSE broker rejected the connection: "
+                                "missing or invalid shared-secret token. Set "
+                                "WORKFLOWY_BROKER_TOKEN to match the broker."
+                            ),
+                        },
+                    )
+                    await ws.close()
+                    return
+                # Protocol-identity check: detect a version mismatch or an
+                # unrelated process. We warn but do not hard-fail on version
+                # skew yet (v1 is the only version); identity is informational.
+                peer_proto = msg.get("protocol")
+                peer_ver = msg.get("protocol_version")
+                if peer_proto is not None and peer_proto != PROTOCOL_NAME:
+                    _log(
+                        f"WARNING: peer protocol {peer_proto!r} != {PROTOCOL_NAME!r}."
+                    )
+                if peer_ver is not None and peer_ver != PROTOCOL_VERSION:
+                    _log(
+                        f"WARNING: peer protocol_version {peer_ver!r} != "
+                        f"{PROTOCOL_VERSION} (continuing)."
+                    )
+
+                declared = str(msg.get("role") or "").lower()
+                if declared in ("browser", "browser_connection"):
+                    conn_id = str(
+                        msg.get("connection_id")
+                        or msg.get("browser_connection_id")
+                        or f"browser-{id(ws):x}"
+                    )
+                    conn = broker.register_browser_connection(ws, conn_id)
+                    role = "browser"
+                    _log(f"Browser connection registered: {conn.connection_id}")
+                    # A hello MAY also carry an initial endpoints[] list.
+                    for ep in msg.get("endpoints") or []:
+                        if isinstance(ep, dict) and ep.get("endpoint_id"):
+                            broker.register_endpoint(
+                                ws,
+                                str(ep["endpoint_id"]),
+                                ep.get("alias"),
+                                ep.get("title"),
+                                ep.get("url"),
+                                ep.get("tab_marker"),
+                            )
+                    await _safe_send(
+                        ws,
+                        {
+                            "type": "hello_ack",
+                            "role": "browser",
+                            "accepted": True,
+                            "protocol": PROTOCOL_NAME,
+                            "protocol_version": PROTOCOL_VERSION,
+                            "connection_id": conn.connection_id,
+                        },
+                    )
+                else:
+                    client_id = str(msg.get("client_id") or f"mcp-{id(ws):x}")
+                    client_id = broker.register_mcp(ws, client_id)
+                    role = "mcp"
+                    _log(f"MCP client registered: {client_id}")
+                    await _safe_send(
+                        ws,
+                        {
+                            "type": "hello_ack",
+                            "role": "mcp",
+                            "accepted": True,
+                            "protocol": PROTOCOL_NAME,
+                            "protocol_version": PROTOCOL_VERSION,
+                            "client_id": client_id,
+                        },
+                    )
+                continue
+
+            # ---- browser endpoint lifecycle (register / update / unregister)
+            if role == "browser" and action in (
+                "endpoint_register",
+                "endpoint_update",
+                "browser_endpoint_register",
+            ):
+                if msg.get("endpoint_id"):
+                    ep, collision = broker.register_endpoint(
+                        ws,
+                        str(msg["endpoint_id"]),
+                        msg.get("alias"),
+                        msg.get("title"),
+                        msg.get("url"),
+                        msg.get("tab_marker"),
+                    )
+                    if collision:
+                        # Duplicated-tab / cloned-sessionStorage case: tell the
+                        # extension to regenerate this tab's endpoint_id.
+                        _log(
+                            f"Endpoint id collision on {msg['endpoint_id']!r} "
+                            f"(two tabs, same id); asking extension to regenerate."
+                        )
+                        await _safe_send(
+                            ws,
+                            {
+                                "type": "endpoint_collision",
+                                "endpoint_id": str(msg["endpoint_id"]),
+                                "error": (
+                                    "Two Workflowy tabs reported the same "
+                                    "endpoint_id (likely a duplicated tab). "
+                                    "Regenerate this tab's endpoint_id."
+                                ),
+                            },
+                        )
+                    elif ep is not None:
+                        _log(
+                            f"Endpoint registered: {ep.endpoint_id} "
+                            f"(alias={ep.alias!r}) on {ep.connection.connection_id}"
+                        )
+                    # Tell THIS connection the current default so a freshly
+                    # (re)connected tab can render its 'Default tab' / 'Set
+                    # default' button correctly without waiting for a change.
+                    await _safe_send(
+                        ws,
+                        {
+                            "type": "default_endpoint_changed",
+                            "default_endpoint_id": broker.default_endpoint_id,
+                        },
+                    )
+                continue
+            if role == "browser" and action in (
+                "endpoint_unregister",
+                "browser_endpoint_unregister",
+            ):
+                if msg.get("endpoint_id"):
+                    broker.unregister_endpoint(ws, str(msg["endpoint_id"]))
+                    _log(f"Endpoint unregistered: {msg['endpoint_id']}")
+                    # If the just-removed endpoint was the default GLIMPSE tab,
+                    # self-clear and tell every tab so their button labels sync.
+                    prev_default = broker.default_endpoint_id
+                    broker._clear_default_if_stale()
+                    if prev_default is not None and broker.default_endpoint_id is None:
+                        await _broadcast_default_endpoint(broker)
+                continue
+
+            # ---- default GLIMPSE tab designation (set / clear) --------------
+            # The user pressed 'Set default' (or 'Clear default') in a tab's
+            # UUID Explorer widget. This is a tiny ROUTING PREFERENCE frame, so
+            # the broker handles it directly (like endpoint_register) rather
+            # than routing it to the primary MCP worker. After updating, the
+            # broker broadcasts the new default to ALL tabs so every widget can
+            # render the correct 'Default tab ✓' / 'Set default' label.
+            if role == "browser" and action in (
+                "set_default_endpoint",
+                "clear_default_endpoint",
+            ):
+                if action == "clear_default_endpoint":
+                    status, _ep = broker.set_default_endpoint(None)
+                    _log("Default GLIMPSE tab cleared by user.")
+                    # An explicit clear always (re)asserts the null state to
+                    # every tab so button labels sync.
+                    await _broadcast_default_endpoint(broker)
+                else:
+                    eid = msg.get("endpoint_id")
+                    status, ep = broker.set_default_endpoint(
+                        str(eid) if eid else None
+                    )
+                    if status == "set" and ep is not None:
+                        _log(
+                            f"Default GLIMPSE tab set: {ep.endpoint_id} "
+                            f"(alias={ep.alias!r})."
+                        )
+                        await _broadcast_default_endpoint(broker)
+                    else:
+                        # status == "rejected": the endpoint_id names no live
+                        # tab (a GHOST/stale id from a tab whose endpoint was
+                        # dropped in an MV3 flap and never re-registered).
+                        # CRITICAL ([ap:WSFLAP2]): do NOT broadcast here -- the
+                        # existing default was intentionally left UNTOUCHED, so
+                        # a broadcast would be a no-op at best and, before the
+                        # set_default_endpoint fix, was the vehicle that told
+                        # every tab the default had been (destructively)
+                        # nulled. Instead answer the ORIGINATING tab with a
+                        # loud, actionable error so the client can detect its
+                        # ghost state and re-register, rather than silently
+                        # 'doing nothing' (and, previously, clobbering the
+                        # other tab's default).
+                        _log(
+                            f"Rejected set_default_endpoint for unknown "
+                            f"endpoint_id {eid!r}: no live tab with that id. "
+                            f"Existing default left untouched "
+                            f"({broker.default_endpoint_id!r}); told the tab to "
+                            f"re-register."
+                        )
+                        await _safe_send(
+                            ws,
+                            {
+                                "type": "set_default_endpoint_rejected",
+                                "action": "set_default_endpoint_rejected",
+                                "code": "unknown_endpoint",
+                                "endpoint_id": eid,
+                                # Echo the current (unchanged) default so the
+                                # tab can reconcile its button state.
+                                "default_endpoint_id": broker.default_endpoint_id,
+                                "error": (
+                                    "This tab's endpoint is not registered with "
+                                    "the broker (it was likely dropped during a "
+                                    "service-worker reconnect). Re-register and "
+                                    "try 'Set default' again."
+                                ),
+                            },
+                        )
+                continue
+
+            # ---- legacy inference (un-updated extension, no hello) ----------
+            if role is None:
+                # An older extension connected straight to 8765 and started
+                # sending real frames (e.g. ping / extract_dom responses) with
+                # no hello. Treat it as a legacy browser connection carrying a
+                # single implicit endpoint so routing still works.
+                conn = broker.register_browser_connection(
+                    ws, f"legacy-{id(ws):x}", is_legacy=True
+                )
+                broker.register_endpoint(
+                    ws, f"{conn.connection_id}:default", None, None, None
+                )
+                role = "browser"
+                _log(
+                    f"Legacy browser connection inferred: {conn.connection_id} "
+                    f"(implicit single endpoint)."
+                )
+
+            # ---- application-level keepalive -------------------------------
+            # Browser SW keepalive alarms send {action: "ping"} every ~30s.
+            # This is NOT Direction-B work and should not be routed to the MCP
+            # primary worker (which previously produced noisy "no MCP client"
+            # logs and made the ping useless when no agent session was open).
+            # Answer directly so the sender can prove broker liveness without
+            # involving any MCP server.
+            if action == "ping":
+                # Option B: a browser keepalive ping MAY carry the service
+                # worker's authoritative endpoint roster. Reconcile the
+                # reporting connection's endpoints against it (refresh
+                # last_seen; reap ghosts only when roster_complete). This is
+                # what heals a killed tab whose endpoint_unregister was lost,
+                # so single-tab auto-select stops seeing a phantom second tab.
+                # MCP-client pings carry no roster and are unaffected.
+                if role == "browser" and "endpoint_roster" in msg:
+                    broker.reconcile_browser_roster(
+                        ws,
+                        msg.get("endpoint_roster"),
+                        bool(msg.get("roster_complete")),
+                    )
+                await _safe_send(
+                    ws,
+                    {
+                        "action": "pong",
+                        "type": "pong",
+                        "source": "glimpse-broker",
+                        "ts": time.time(),
+                    },
+                )
+                continue
+
+            # ---- routing ---------------------------------------------------
+            request_id = msg.get("request_id")
+
+            if role == "mcp":
+                # MCP -> browser. Two sub-cases:
+                #
+                #  (a) A correlated REQUEST (GLIMPSE): carries a request_id
+                #      and/or an explicit target (target_endpoint_id/_alias).
+                #      Resolve to exactly one tab and forward (existing path).
+                #
+                #  (b) A browser-bound RESULT / STATUS broadcast: the reply a
+                #      primary worker emits for a browser-initiated work frame
+                #      (carto_*_result, *_refresh_*_result/_status, uuid_path_
+                #      result, bulk_apply_*_result, ...). These carry NO
+                #      request_id and NO target. They are NOT tab-specific
+                #      requests — they are the symmetric return/broadcast of the
+                #      historical no-request_id fan-out, and the browser side
+                #      dispatches them by action name and reconciles by polling.
+                #      Fan them out to ALL browser connections rather than
+                #      running target resolution (which would otherwise return
+                #      an 'ambiguous_browser_target' error under multi-tab and
+                #      strand the result). This keeps F12/CARTO status flowing
+                #      to every tab's widget, exactly as before the broker.
+                #
+                #  (c) A correlated REPLY to a browser-INITIATED request: the
+                #      primary worker's answer to a frame a tab originated with
+                #      its OWN request_id (e.g. render_markdown_modal_result).
+                #      It carries that request_id and NO target. We must route
+                #      it back to the ORIGINATING BROWSER socket (tracked when
+                #      the browser-> branch forwarded the request to the
+                #      primary), NOT run tab target-resolution (which would
+                #      mis-handle a no-target frame under multi-tab). Checked
+                #      FIRST, below, before (a)/(b). Safe vs GLIMPSE: a GLIMPSE
+                #      REQUEST's request_id is not yet tracked when the MCP
+                #      sends it (it is track_request'd at forward-time further
+                #      down THIS pass), so resolve_request misses and it falls
+                #      through to target resolution as before.
+                broker.sweep_pending()
+                # (0) broker_status: an MCP-initiated OBSERVABILITY request the
+                # BROKER answers itself (it owns the registries) -- exactly like
+                # ping->pong, but carrying a live registry snapshot. Answered
+                # BEFORE correlated-reply resolution and target routing so it is
+                # never mistaken for a browser-bound frame. Echoes request_id so
+                # the MCP-side demux resolves the waiter. Pure read; no routing.
+                if action == "broker_status":
+                    snapshot = broker.describe_state()
+                    await _safe_send(
+                        ws,
+                        {
+                            "action": "broker_status_result",
+                            "success": True,
+                            "request_id": request_id,
+                            **snapshot,
+                        },
+                    )
+                    continue
+                # (c) Correlated reply to a browser-initiated request: deliver
+                # to the recorded origin (a browser socket) and stop.
+                if request_id is not None:
+                    _origin = broker.resolve_request(str(request_id))
+                    if _origin is not None:
+                        await _safe_send(_origin, msg)
+                        continue
+                # Public-tool surface sends a SINGLE optional ``target_tab``
+                # (alias-or-endpoint_id). The legacy two-field form
+                # (target_endpoint_id / target_alias) is still accepted for
+                # backward compatibility / internal callers.
+                target_tab = msg.get("target_tab")
+                target_endpoint_id = msg.get("target_endpoint_id")
+                target_alias = msg.get("target_alias")
+                # TAB-AGNOSTIC capability flag (internal; never on a public MCP
+                # tool surface). The MCP server stamps tab_optional=true on
+                # frames for operations that read SHARED cross-tab config and
+                # therefore do not care WHICH tab answers (anchor tools,
+                # list_canonical_tags, ...). When set, target resolution picks
+                # a tab deterministically under multi-tab instead of erroring.
+                # GLIMPSE/extract_dom never sets it, so it stays tab-specific.
+                tab_optional = bool(msg.get("tab_optional"))
+                if (
+                    request_id is None
+                    and target_tab is None
+                    and target_endpoint_id is None
+                    and target_alias is None
+                ):
+                    seen: set[int] = set()
+                    for conn in list(broker.browser_connections.values()):
+                        if id(conn.ws) in seen:
+                            continue
+                        seen.add(id(conn.ws))
+                        await _safe_send(conn.ws, msg)
+                    continue
+                # Prefer the single-token public path when present; otherwise
+                # fall back to the explicit two-field resolver.
+                if target_tab is not None:
+                    ep, err = broker.resolve_target_tab(
+                        target_tab,
+                        allow_arbitrary_when_ambiguous=tab_optional,
+                    )
+                else:
+                    ep, err = broker.resolve_target_endpoint(
+                        target_endpoint_id,
+                        target_alias,
+                        allow_arbitrary_when_ambiguous=tab_optional,
+                    )
+                if err is not None:
+                    # STEP 1 + REV3.1 CODE-FILTER: distinguish an endpoint-
+                    # LIVENESS ghost from an ordinary routing/config error.
+                    # resolve_target_endpoint emits FIVE codes; ONLY
+                    # 'unknown_browser_endpoint' (a TARGETED endpoint_id miss)
+                    # is the ghost class. The other four
+                    # (unknown_browser_alias / ambiguous_browser_alias /
+                    # no_browser_connected / ambiguous_browser_target) are
+                    # normal 'pick a tab / set a default / fix the alias / open
+                    # a tab' errors -- they are PRESERVED EXACTLY (their own
+                    # loud actionable message), are NOT collapsed into
+                    # unknown_endpoint, and do NOT trigger a re-register
+                    # broadcast (that would spam re-registers on ordinary
+                    # multi-tab ambiguity and mis-tell the agent to retry).
+                    # WSLIVE2 DoD-A: consult the ONE owned classifier instead
+                    # of re-deriving ghost-ness inline. Behavior-identical to
+                    # the prior err_code=='unknown_browser_endpoint' check --
+                    # only a TARGETED endpoint miss is a ghost; the five other
+                    # codes stay ordinary routing/config errors below.
+                    if broker.miss_is_liveness_ghost(err):
+                        # A ghost: the tab said 'endpoint X' but it is not in
+                        # the registry (reaped-but-live). Normalize to the ONE
+                        # unified liveness code the client/MCP react to, and
+                        # fire the AMENDMENT-B on-demand re-register broadcast
+                        # (rate-limited per endpoint_id) so the live tab
+                        # re-announces in the background while the originator
+                        # retries against the loud reply below.
+                        reply = {
+                            "success": False,
+                            "request_id": request_id,
+                            **err,
+                            "code": "unknown_endpoint",
+                        }
+                        await _safe_send(ws, reply)
+                        _wslive(
+                            f"MCP->browser resolve-miss ghost: "
+                            f"target_endpoint_id={target_endpoint_id!r} "
+                            f"target_tab={target_tab!r} request_id={request_id!r}"
+                        )
+                        _ghost_eid = target_endpoint_id or None
+                        if broker.reregister_broadcast_allowed(_ghost_eid):
+                            await _broadcast_request_endpoint_register(broker)
+                        else:
+                            _wslive(
+                                f"re-register broadcast SUPPRESSED (rate-limit) "
+                                f"for endpoint_id={_ghost_eid!r}"
+                            )
+                        continue
+                    # Ordinary routing/config error: answer the originator
+                    # directly so it fails fast/cleanly (unchanged behavior).
+                    await _safe_send(
+                        ws,
+                        {
+                            "success": False,
+                            "request_id": request_id,
+                            **err,
+                        },
+                    )
+                    continue
+                # Track origin for the eventual correlated reply.
+                if request_id is not None:
+                    broker.track_request(str(request_id), ws)
+                # Tag the frame with the resolved endpoint so the service worker
+                # can route it to the correct tab/page context.
+                forwarded = dict(msg)
+                forwarded["target_endpoint_id"] = ep.endpoint_id
+                # STEP 1: the forward-then-swallow black hole. If the resolved
+                # endpoint's browser socket is DEAD, _safe_send returns False
+                # and, previously, NOTHING went back to the originator -> a 12s
+                # client timeout -> opaque 'server unavailable'. Convert that
+                # dead forward into the SAME unified 'unknown_endpoint' reply
+                # and fire the rate-limited re-register broadcast (a dead SW
+                # socket is itself a liveness event worth healing).
+                if not await _safe_send(ep.connection.ws, forwarded):
+                    # Untrack the request we just tracked above (the forward
+                    # died, so no correlated reply will ever arrive for it);
+                    # resolve_request pops it from the pending/origin maps.
+                    if request_id is not None:
+                        broker.resolve_request(str(request_id))
+                    await _safe_send(
+                        ws,
+                        {
+                            "success": False,
+                            "request_id": request_id,
+                            "code": "unknown_endpoint",
+                            "target_endpoint_id": ep.endpoint_id,
+                            "error": (
+                                "The target Workflowy tab's endpoint is not "
+                                "reachable (its browser socket is not live); it "
+                                "has been asked to re-register -- retry."
+                            ),
+                            "available_endpoints": [
+                                e.describe() for e in broker.all_endpoints()
+                            ],
+                        },
+                    )
+                    _wslive(
+                        f"MCP->browser forward failed (dead socket) for "
+                        f"endpoint_id={ep.endpoint_id!r} request_id={request_id!r}"
+                    )
+                    if broker.reregister_broadcast_allowed(ep.endpoint_id):
+                        await _broadcast_request_endpoint_register(broker)
+                    else:
+                        _wslive(
+                            f"re-register broadcast SUPPRESSED (rate-limit) "
+                            f"for endpoint_id={ep.endpoint_id!r}"
+                        )
+
+            elif role == "browser":
+                # browser -> MCP: correlated reply, browser-INITIATED correlated
+                # request, or broadcast work frame.
+                if request_id is not None:
+                    origin = broker.resolve_request(str(request_id))
+                    if origin is not None:
+                        # This request_id was tracked as an OUTSTANDING request
+                        # awaiting a reply (either an MCP-initiated GLIMPSE, or a
+                        # browser-initiated correlated request whose origin we
+                        # recorded below). Deliver the frame to that origin
+                        # socket and we're done.
+                        #
+                        # WSREVMP2 (reverse-map ghost heal): the SW sends a
+                        # CORRELATED code:'unknown_endpoint' reply here
+                        # (emitUnknownEndpointToBroker) when it could NOT deliver
+                        # a targeted frame to its tab -- a REVERSE-MAP drop
+                        # (endpointToTab map-miss, or purged-on-failed-send).
+                        # That reply already routes to the waiter, which fails
+                        # LOUD via _raise_if_unknown_endpoint (good). But the
+                        # broker previously did NOT recognize this SW-originated
+                        # ghost as a liveness signal, so it never healed --
+                        # 'loud but inert'. Route it into the broker's ONE owned
+                        # heal path (candidate B): if this is a reverse-map ghost
+                        # frame, fire the SAME rate-limited re-register broadcast
+                        # the broker's own two ghost-detection sites use, keyed
+                        # on the frame's target_endpoint_id so a ghost-burst for
+                        # one endpoint fires at most one broadcast per cooldown.
+                        # ADDITIVE ONLY: fire the heal FIRST (so the background
+                        # re-register is in flight before the caller retries),
+                        # then forward the loud reply to the waiter UNCHANGED.
+                        if broker.frame_is_liveness_ghost(msg):
+                            _ghost_eid = (
+                                str(msg.get("target_endpoint_id") or "").strip()
+                                or None
+                            )
+                            if broker.reregister_broadcast_allowed(_ghost_eid):
+                                await _broadcast_request_endpoint_register(broker)
+                            else:
+                                _wslive(
+                                    f"re-register broadcast SUPPRESSED "
+                                    f"(rate-limit) for reverse-map ghost "
+                                    f"endpoint_id={_ghost_eid!r}"
+                                )
+                            _wslive(
+                                f"SW reverse-map ghost heal fired: "
+                                f"endpoint_id={_ghost_eid!r} "
+                                f"request_id={request_id!r}"
+                            )
+                        await _safe_send(origin, msg)
+                        continue
+                    # request_id present but NOT a known outstanding request =>
+                    # a browser-INITIATED correlated request (e.g. the docked
+                    # Markdown modal's render_markdown_modal, which mints its
+                    # OWN client-side request_id and needs an MCP server to do
+                    # the work and reply). This is Direction-B work that ALSO
+                    # wants a correlated reply routed back to THIS originating
+                    # tab. So: record THIS browser socket as the origin for
+                    # request_id (symmetric to track_request on the MCP path),
+                    # then route to the single PRIMARY WORKER. When the primary
+                    # replies (echoing request_id, no target), the mcp-> branch
+                    # above resolves request_id back to this browser socket.
+                    #
+                    # NOTE (the bug this fixes): previously such a frame was
+                    # DROPPED with 'unknown request_id', because the broker
+                    # assumed any request_id-bearing browser frame was a reply
+                    # to a prior MCP request. The modal frame therefore never
+                    # reached any MCP server, no reply came back, and the
+                    # browser's 12s timeout surfaced 'GLIMPSE server
+                    # unavailable' even though the transport + handler were
+                    # both healthy.
+                    primary = broker.primary_mcp_ws()
+                    if primary is not None:
+                        broker.track_request(str(request_id), ws)
+                        await _safe_send(primary, msg)
+                    else:
+                        # No MCP server to do the work: answer the tab directly
+                        # so it fails fast/cleanly rather than waiting out the
+                        # client-side timeout.
+                        await _safe_send(
+                            ws,
+                            {
+                                "success": False,
+                                "request_id": request_id,
+                                "action": f"{action}_result" if action else None,
+                                "error": (
+                                    "No MCP client connected to act as primary "
+                                    "worker; cannot service browser-initiated "
+                                    "request."
+                                ),
+                            },
+                        )
+                        _log(
+                            "No primary worker for browser-initiated "
+                            f"correlated request (action={action!r}, "
+                            f"request_id={request_id!r}); answered tab with "
+                            "failure."
+                        )
+                    continue
+                # No request_id: browser-initiated Direction-B WORK frame
+                # (F12+1/+2/+3, CARTO spawn/cancel/clear, nodes-cache refresh,
+                # windsurf-open, markdown generation, uuid-path, bulk-apply,
+                # ping, ...). Historically this was BROADCAST to all MCP
+                # clients, which was safe only with exactly one MCP server.
+                # With 2+ servers a broadcast causes dueling disk writes and
+                # duplicate detached CARTO workers (N processes for one F12
+                # keypress). So route to the single designated PRIMARY WORKER
+                # instead — never fan out.
+                #
+                # The reply (if any) travels straight back to THIS browser
+                # connection from the primary over its own socket; these work
+                # frames carry no request_id, so no correlation is needed for
+                # the return trip. Disk-backed status (carto_list_jobs) polled
+                # once/sec is idempotent, so having only the primary answer is
+                # harmless. In the degenerate single-server case the primary
+                # IS that one server, so behavior is unchanged.
+                primary = broker.primary_mcp_ws()
+                if primary is not None:
+                    await _safe_send(primary, msg)
+                else:
+                    _log(
+                        "Dropping browser-initiated work frame "
+                        f"(action={action!r}): no MCP client connected to act "
+                        "as primary worker."
+                    )
+
+    except Exception as e:  # noqa: BLE001 - keep broker alive across client errors
+        _log(f"Connection error ({role}): {type(e).__name__}: {e}")
+    finally:
+        broker.unregister(ws)
+
+
+# @beacon[
+#   id=broker@serve,
+#   role=⚡ run_broker(): bind the singleton port and serve forever,
+#   slice_labels=nexus--broker,
+#   kind=ast,
+# ]
+async def run_broker() -> None:
+    """Bind 127.0.0.1:8765 and route between browser endpoints and MCP clients."""
+    if websockets is None:
+        _log("FATAL: 'websockets' library not installed. pip install websockets")
+        raise SystemExit(2)
+
+    # Always require a shared secret: resolve from env / token file, or
+    # generate-and-persist one. There is NO open mode — this forces every
+    # client (MCP server now; browser extension once Stage B lands) to present
+    # the token, exactly as the open-source end state will behave.
+    token, source = get_or_create_token()
+    if source == "generated":
+        _log(
+            f"\U0001f511 Generated a new broker shared-secret token at "
+            f"{token_file_path()} (co-located clients reading this file with no "
+            f"WORKFLOWY_BROKER_TOKEN env override will auto-agree)."
+        )
+    else:
+        _log(f"\U0001f511 Using broker shared-secret token (source={source}).")
+
+    # Announce where file logs are going (or that they're disabled), so the
+    # user can find the broker's log even though the auto-launched process is
+    # detached with no visible console.
+    if ensure_log_dir() is not None:
+        _log(f"\U0001f4dd Broker log file: {broker_log_file()}")
+        # Best-effort log hygiene at startup: prune aged-out per-PID server
+        # logs and size-cap this broker log (the per-PID scheme leaks a file
+        # per MCP-server start; neither log had any GC before). Never raises.
+        try:
+            from workflowy_mcp.broker_protocol import gc_logs as _gc_logs
+            _gc_logs()
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        _log(
+            "\U0001f4dd Broker file logging is DISABLED "
+            "(WORKFLOWY_FILE_LOGGING is off, or the log dir is unwritable)."
+        )
+
+    broker = Broker(required_token=token)
+
+    # Quiet the websockets server logger: raw TCP port-probes (used by the MCP
+    # server's _ensure_broker_running to detect whether a broker is already up)
+    # connect-and-close without an HTTP/WS handshake, which otherwise spams a
+    # noisy "did not receive a valid HTTP request" traceback at ERROR level.
+    # These are expected and harmless, so suppress sub-CRITICAL noise here.
+    logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
+
+    async def handler(ws: Any) -> None:
+        await _handle_connection(broker, ws)
+
+    # WebSocket protocol-level autoping is DISABLED on the broker's listener
+    # (ping_interval=None). This is deliberate and load-bearing.
+    #
+    # Why: the broker accepts Chrome MV3 extension service-worker connections.
+    # The websockets library's built-in autoping sends a control-frame PING
+    # every ping_interval and FORCE-CLOSES the connection if no PONG arrives
+    # within ping_timeout. That turns a browser connection that is merely
+    # BUSY or briefly THROTTLED (not dead) into a hard disconnect — which then
+    # drops EVERY tab endpoint multiplexed behind that one service-worker
+    # socket. Observed symptom: with the live (unfrozen) docked Markdown modal
+    # open, heavy main-world DOM re-render delays the browser's PONGs, the
+    # broker reaps the connection, and the next F12 / set-default-tab / GLIMPSE
+    # reports "WebSocket unavailable" until the modal is closed. Raising
+    # ping_timeout (a prior attempt: 120s) only widens the window; a long live
+    # render still blows past it.
+    #
+    # Liveness is instead owned by the APPLICATION-LEVEL keepalive we already
+    # built and which is correct for this topology: the extension's
+    # chrome.alarms 30s keepalive wakes the suspendable MV3 service worker,
+    # reconnects a genuinely-dead socket, and otherwise sends {action:"ping"}
+    # which the broker answers directly with {action:"pong"} (see
+    # _handle_connection). That mechanism is wake-driven and does NOT punish a
+    # slow-but-alive tab. Genuinely-dead sockets still surface via send/recv
+    # errors and the SW's reconnect, so nothing relies on protocol autoping to
+    # reap browser peers.
+    #
+    # NOTE: PING_INTERVAL_SECONDS / PING_TIMEOUT_SECONDS are still used by the
+    # MCP-client leg in server.connect_to_broker() (plain Python clients, not
+    # subject to MV3 throttling, with their own bounded-backoff reconnect), so
+    # the shared constants remain meaningful there; we simply do not apply
+    # protocol autoping to the browser-facing listener here.
+    _log(
+        f"Starting GLIMPSE broker on ws://{BROKER_HOST}:{BROKER_PORT} "
+        f"(max_size={_MAX_SIZE_BYTES} bytes, "
+        f"protocol autoping DISABLED on listener — app-level SW keepalive owns "
+        f"browser liveness)"
+    )
+    try:
+        async with websockets.serve(
+            handler,
+            BROKER_HOST,
+            BROKER_PORT,
+            max_size=_MAX_SIZE_BYTES,
+            ping_interval=None,
+            ping_timeout=None,
+        ):
+            _log(f"✅ GLIMPSE broker listening on {BROKER_HOST}:{BROKER_PORT}")
+            await asyncio.Event().wait()
+    except OSError as e:
+        # Almost always: port already in use (another broker already running).
+        # EXPECTED race when multiple MCP servers try to auto-launch the broker:
+        # the loser should simply connect to the winner instead.
+        _log(
+            f"Could not bind {BROKER_HOST}:{BROKER_PORT}: {e}. "
+            f"A broker is likely already running; clients should just connect to it."
+        )
+        raise SystemExit(3) from e
+
+
+# @beacon[
+#   id=broker@main,
+#   role=main(): console-script entry point for workflowy-glimpse-broker,
+#   slice_labels=nexus--broker,nexus-loading-flow,
+#   kind=ast,
+# ]
+def main() -> None:
+    """Console-script entry point: ``workflowy-glimpse-broker``."""
+    try:
+        asyncio.run(run_broker())
+    except KeyboardInterrupt:
+        _log("Broker stopped (KeyboardInterrupt).")
+
+
+if __name__ == "__main__":
+    main()

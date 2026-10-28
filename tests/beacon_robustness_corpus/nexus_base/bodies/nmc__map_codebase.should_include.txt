@@ -1,0 +1,15 @@
+    def should_include(name: str) -> bool:
+        if exclude_patterns:
+            for pat in exclude_patterns:
+                if pat in name:
+                    return False
+
+        if _is_ignored_name(name):
+            return False
+
+        # If include list is provided, must match extension (files only)
+        if include_exts:
+            _, ext = os.path.splitext(name)
+            if ext.lower() not in include_exts:
+                return False
+        return True

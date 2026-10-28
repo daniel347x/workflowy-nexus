@@ -1,0 +1,1372 @@
+"""S03 §11 permanent bypass/alias fences (the S03-B2 gate-(c) scanner suite).
+
+Permanent AST-style fences (the proven mutating-HTTP-fence pattern), never
+one-time audit scripts.  Data source: ``tests/coherence_s03b_registry.json``
+(H1 dispositions + H2 closed allowlist — ONE set in ONE place).  Scanner:
+``tests/coherence_s03_fence_scanner.py``.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from coherence_s03_fence_scanner import (
+    REPO,
+    load_registry,
+    production_files,
+    scan_production,
+    scan_source,
+)
+
+REGISTRY = load_registry()
+
+
+def _kinds(violations):
+    return {v.kind for v in violations}
+
+
+# ---------------------------------------------------------------------------
+# Production scan: zero bypasses
+# ---------------------------------------------------------------------------
+
+
+def test_production_scan_has_zero_violations() -> None:
+    violations = scan_production(REGISTRY)
+    assert violations == [], (
+        "S03 §11 fence violations in production source:\n"
+        + "\n".join(
+            f"  {v.kind} {v.file}:{v.line} {v.function} — {v.detail}"
+            for v in violations
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Injected fixtures: every violation class is detected
+# ---------------------------------------------------------------------------
+
+_CLEAN_FUNCTION = """
+def helper(client):
+    nodes = client._get_nodes_export_cache_nodes()
+    return nodes
+"""
+
+
+def test_injected_attr_access_detected() -> None:
+    src = """
+def f(self):
+    return self._nodes_export_cache
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "attr_access" in _kinds(violations)
+
+
+def test_injected_publisher_access_detected() -> None:
+    src = """
+def f(self):
+    return self._cache_view_publisher.capture()
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "attr_access" in _kinds(violations)
+
+
+def test_injected_timestamp_property_access_detected() -> None:
+    src = """
+def f(self):
+    return self._nodes_export_cache_timestamp
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "attr_access" in _kinds(violations)
+
+
+def test_injected_accessor_bypass_detected() -> None:
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", _CLEAN_FUNCTION, REGISTRY)
+    assert "accessor_bypass" in _kinds(violations)
+
+
+def test_injected_loader_bypass_detected() -> None:
+    src = """
+from somewhere import load_nodes_by_id_from_cache
+
+def helper(client):
+    return load_nodes_by_id_from_cache(client)
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "loader_bypass" in _kinds(violations)
+
+
+def test_injected_loader_map_form_is_clean() -> None:
+    src = """
+from somewhere import load_nodes_by_id_from_cache
+
+def helper(nodes_by_id):
+    return load_nodes_by_id_from_cache(nodes_by_id)
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "loader_bypass" not in _kinds(violations)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "nodes[0] = {}",
+        "nodes[0] += 1",
+        "del nodes[0]",
+        "nodes.append({})",
+        "nodes.extend([])",
+        "nodes.insert(0, {})",
+        "nodes.update({})",
+        "nodes.setdefault('k', {})",
+        "nodes.pop()",
+        "nodes.remove(0)",
+        "nodes.clear()",
+        "nodes.sort()",
+        "nodes.reverse()",
+    ],
+)
+def test_injected_mutable_alias_detected(mutation: str) -> None:
+    src = f"""
+def helper(client):
+    nodes = client._get_nodes_export_cache_nodes()
+    {mutation}
+    return nodes
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations), f"undetected: {mutation}"
+
+
+def test_mutation_of_copied_containers_is_clean() -> None:
+    src = """
+def helper(view):
+    working = dict(view.nodes_export)
+    working["nodes"] = []
+    working["nodes"].append({})
+    return working
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_injected_view_attr_alias_mutation_detected() -> None:
+    src = """
+def helper(snapshot):
+    mapping = snapshot.nodes_by_id
+    mapping["x"] = {}
+    return mapping
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_injected_export_alias_mutation_detected() -> None:
+    src = """
+async def helper(client):
+    data = await client.export_nodes(use_cache=True)
+    data["nodes"] = []
+    return data
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_injected_timestamp_selector_detected() -> None:
+    src = """
+def f():
+    return _find_latest_nodes_export_snapshot_path("/tmp")
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "timestamp_selector" in _kinds(violations)
+
+
+def test_injected_direct_snapshot_writer_detected() -> None:
+    src = """
+def f(payload):
+    return _save_nodes_export_cache_to_disk(payload)
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "timestamp_selector" in _kinds(violations)
+
+
+def test_injected_unclassified_spawn_detected() -> None:
+    src = """
+import asyncio
+
+def f(coro):
+    return asyncio.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+# ---------------------------------------------------------------------------
+# A4.1 — cache-alias taint propagation (aliases, subscripts, .get, awaits)
+# ---------------------------------------------------------------------------
+
+
+def test_a4_alias_chain_subscript_extraction_detected() -> None:
+    """The audit's demonstrated miss: taint must flow through a subscript
+    extraction from an already-tainted container."""
+    src = """
+async def helper(client):
+    data = await client.export_nodes(use_cache=True)
+    nodes = data["nodes"]
+    nodes.append({})
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_a4_simple_name_alias_detected() -> None:
+    src = """
+def helper(client):
+    nodes = client._get_nodes_export_cache_nodes()
+    rows = nodes
+    rows.sort()
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_a4_get_extraction_detected() -> None:
+    src = """
+async def helper(client):
+    data = await client.export_nodes(use_cache=True)
+    nodes = data.get("nodes")
+    nodes.clear()
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_a4_mapping_subscript_extraction_detected() -> None:
+    src = """
+def helper(snapshot):
+    mapping = snapshot.nodes_by_id
+    rows = mapping["some-key"]
+    rows.append({})
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_a4_reassignment_untaints() -> None:
+    src = """
+def helper(client):
+    nodes = client._get_nodes_export_cache_nodes()
+    nodes = [dict(n) for n in nodes]
+    nodes.append({})
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_a4_copy_constructor_mutation_is_clean() -> None:
+    src = """
+def helper(snapshot):
+    rows = list(snapshot.nodes_export["nodes"])
+    rows.append({})
+    rows.sort()
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+# ---------------------------------------------------------------------------
+# R1 — recursive mutation sinks (published vs owned-shallow vs owned-deep)
+# ---------------------------------------------------------------------------
+
+
+def test_r1_direct_nested_method_detected() -> None:
+    """R1.1: mutating the published view's own nodes list through a direct
+    nested expression — the receiver is not a bare name."""
+    src = """
+def f(snapshot):
+    snapshot.nodes_export["nodes"].append({})
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r1_direct_nested_subscript_detected() -> None:
+    """R1.2: mutating a published node dict through a nested subscript."""
+    src = """
+def f(snapshot):
+    snapshot.nodes_by_id["x"]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r1_alias_nested_subscript_detected() -> None:
+    """R1.3: the alias is tainted; the mutated object's immediate base is a
+    subscript of it, not the name itself."""
+    src = """
+def f(snapshot):
+    mapping = snapshot.nodes_by_id
+    mapping["x"]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r1_shallow_list_copy_node_mutation_detected() -> None:
+    """R1.4: a shallow copy owns the outer list but NOT the retained node
+    dicts — descendant mutation is a published-state write."""
+    src = """
+def f(snapshot):
+    rows = list(snapshot.nodes_export["nodes"])
+    rows[0]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r1_shallow_mapping_copy_node_mutation_detected() -> None:
+    """R1 (dict twin of R1.4): the outer mapping is owned; its node values
+    are still published."""
+    src = """
+def f(snapshot):
+    mapping = dict(snapshot.nodes_by_id)
+    mapping["x"]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r1_safe_outer_list_append_sort_clean() -> None:
+    """Structural mutation of an OWNED shallow outer container is the
+    sanctioned pattern and must stay clean."""
+    src = """
+def f(snapshot, new_node):
+    rows = list(snapshot.nodes_export["nodes"])
+    rows.append(new_node)
+    rows.sort(key=lambda n: n.get("priority", 0))
+    return rows
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_r1_cloned_node_installation_clean() -> None:
+    """Clone a retained node, mutate the CLONE, install it into the owned
+    outer container — never a published-state write."""
+    src = """
+def f(snapshot):
+    rows = list(snapshot.nodes_export["nodes"])
+    patched = dict(rows[0])
+    patched["name"] = "safe"
+    rows[0] = patched
+    return rows
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_r1_h4_cow_shape_clean() -> None:
+    """The production H4/COW shape: copy the payload, override the nodes
+    key with a fresh owned list, clone-install patched nodes."""
+    src = """
+def f(current, index):
+    working = dict(current.nodes_export)
+    working["nodes"] = list(current.nodes_export["nodes"])
+    patched = dict(working["nodes"][index])
+    patched["name"] = "safe"
+    working["nodes"][index] = patched
+    return working
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_r1_deepcopy_descendant_mutation_clean() -> None:
+    """A deep copy owns the whole graph — descendant mutation is safe."""
+    src = """
+from copy import deepcopy
+
+def f(snapshot):
+    working = deepcopy(snapshot.nodes_export)
+    working["nodes"][0]["name"] = "safe"
+    return working
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+# ---------------------------------------------------------------------------
+# A4.2/A4.3/A4.6 — spawn-form detection completeness
+# ---------------------------------------------------------------------------
+
+
+def test_a4_imported_create_task_detected() -> None:
+    src = """
+from asyncio import create_task
+
+def f(coro):
+    return create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_a4_aliased_asyncio_module_spawn_detected() -> None:
+    src = """
+import asyncio as aio
+
+def f(coro):
+    return aio.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_a4_aliased_from_import_spawn_detected() -> None:
+    src = """
+from asyncio import create_task as ct
+
+def f(coro):
+    return ct(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_a4_loop_expression_spawn_detected() -> None:
+    src = """
+import asyncio
+
+def f(coro):
+    return asyncio.get_running_loop().create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_a4_unknown_call_expression_spawn_detected() -> None:
+    """Fail-closed: ANY <call>.create_task() is an unknown spawn form."""
+    src = """
+def f(coro, factory):
+    return factory().create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_a4_unregistered_isolated_spawn_detected() -> None:
+    """A4.6: create_isolated_context_task is ContextVar-safe, but a NEW
+    unregistered site must still fail the ledger fence."""
+    src = """
+def f(coro):
+    return create_isolated_context_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_a4_registered_isolated_spawn_is_clean() -> None:
+    registry = json.loads(json.dumps(REGISTRY))
+    registry["task_spawns"]["src/workflowy_mcp/fake_mod.py::f"] = (
+        "new_operation_fresh_context (test fixture)"
+    )
+    src = """
+def f(coro):
+    return create_isolated_context_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    assert "unclassified_spawn" not in _kinds(violations)
+
+
+def test_a4_non_asyncio_create_task_name_is_clean() -> None:
+    """A bare create_task with NO asyncio import binding is not an asyncio
+    spawn form (a project-local same-named helper would not be misflagged)."""
+    src = """
+def f(coro, create_task):
+    return create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" not in _kinds(violations)
+
+
+# ---------------------------------------------------------------------------
+# R4 — attribute-owned / TaskGroup spawn receivers fail closed
+# ---------------------------------------------------------------------------
+
+
+def test_r4_attribute_owned_spawn_detected() -> None:
+    """R4: self._loop.create_task(...) is a spawn form requiring a registry
+    disposition — an attribute receiver never bypasses H5."""
+    src = """
+class Runner:
+    def go(self, coro):
+        return self._loop.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_r4_taskgroup_spawn_detected() -> None:
+    """R4: asyncio.TaskGroup.create_task() also spawns (and copies context)
+    — a local TaskGroup variable is never a free pass."""
+    src = """
+import asyncio
+
+async def f(coro):
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_r4_registered_attribute_spawn_clean() -> None:
+    """A registered same_operation_inherit attribute spawn is clean."""
+    registry = json.loads(json.dumps(REGISTRY))
+    registry["task_spawns"]["src/workflowy_mcp/fake_mod.py::Runner.go"] = (
+        "same_operation_inherit (test fixture)"
+    )
+    src = """
+class Runner:
+    def go(self, coro):
+        return self._loop.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    assert "unclassified_spawn" not in _kinds(violations)
+
+
+def test_r4_registered_taskgroup_spawn_clean() -> None:
+    """A registered new_operation_fresh_context TaskGroup spawn is clean."""
+    registry = json.loads(json.dumps(REGISTRY))
+    registry["task_spawns"]["src/workflowy_mcp/fake_mod.py::f"] = (
+        "new_operation_fresh_context (test fixture)"
+    )
+    src = """
+import asyncio
+
+async def f(coro):
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    assert "unclassified_spawn" not in _kinds(violations)
+
+
+# ---------------------------------------------------------------------------
+# Round 2 (W1) — mutable_alias taint escapes: method .copy(), unpacking
+# displays, augmented assignment
+# ---------------------------------------------------------------------------
+
+
+def test_r2_method_copy_descendant_mutation_detected() -> None:
+    """W1a: X.copy() with zero args is a SHALLOW copy — the outer container
+    is owned, but retained descendants remain published (dict(x)/list(x)
+    parity)."""
+    src = """
+def f(snapshot):
+    rows = snapshot.nodes_export["nodes"].copy()
+    rows[0]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r2_method_copy_outer_mutation_clean() -> None:
+    """W1a companion: structural mutation of the OWNED outer .copy()
+    container is the sanctioned pattern and stays clean."""
+    src = """
+def f(snapshot, new_node):
+    rows = snapshot.nodes_export["nodes"].copy()
+    rows.append(new_node)
+    rows.sort()
+    return rows
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_r2_dict_unpack_descendant_mutation_detected() -> None:
+    """W1b(i): {**published} is a SHALLOW copy — descendant writes are
+    published-state mutations."""
+    src = """
+def f(snapshot):
+    working = {**snapshot.nodes_export}
+    working["nodes"][0]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r2_list_starred_unpack_descendant_mutation_detected() -> None:
+    """W1b(ii): [*published] is a SHALLOW copy."""
+    src = """
+def f(snapshot):
+    rows = [*snapshot.nodes_export["nodes"]]
+    rows[0]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r2_unpack_of_owned_clean_is_clean() -> None:
+    """{**owned} where the source is fully owned: the whole graph is
+    caller-owned, so descendant mutation is safe."""
+    src = """
+def f():
+    owned = {"nodes": [{"name": "a"}]}
+    working = {**owned}
+    working["nodes"][0]["name"] = "safe"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_r2_display_with_cache_derived_scalar_elements_is_clean() -> None:
+    """W1b boundary: container displays are NOT tainted merely for holding
+    cache-derived scalar elements — only identity-retaining unpack forms
+    taint."""
+    src = """
+def f(snapshot):
+    names = [snapshot.nodes_by_id["x"]["name"]]
+    names.append("more")
+    names[0] = "replaced"
+    return names
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_r2_augassign_tainted_name_detected() -> None:
+    """W1c: X += ... on a TAINTED bare name mutates the published structure
+    in place (__iadd__)."""
+    src = """
+def f(snapshot):
+    nodes = snapshot.nodes_export["nodes"]
+    nodes += [{}]
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r2_augassign_clean_name_is_clean() -> None:
+    src = """
+def f():
+    items = [1]
+    items += [2]
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+def test_r2_augassign_shallow_name_is_clean() -> None:
+    """A SHALLOW name's outer container is owned — X += ... on it is the
+    sanctioned pattern."""
+    src = """
+def f(snapshot, new_node):
+    rows = list(snapshot.nodes_export["nodes"])
+    rows += [new_node]
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" not in _kinds(violations)
+
+
+# ---------------------------------------------------------------------------
+# Round 2 (W2) — dynamic getattr/setattr forbidden-attribute coverage
+# ---------------------------------------------------------------------------
+
+
+def test_r2_getattr_string_cache_read_detected() -> None:
+    """W2a: getattr(x, \"_nodes_export_cache\") is governed by the same
+    exact-function allowlist + access_kind rules as attribute access."""
+    src = """
+def f(self):
+    return getattr(self, "_nodes_export_cache")
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "attr_access" in _kinds(violations)
+
+
+def test_r2_getattr_string_timestamp_read_detected() -> None:
+    src = """
+def f(self):
+    return getattr(self, "_nodes_export_cache_timestamp")
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "attr_access" in _kinds(violations)
+
+
+def test_r2_getattr_string_publisher_read_detected() -> None:
+    src = """
+def f(self):
+    return getattr(self, "_cache_view_publisher", None)
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "attr_access" in _kinds(violations)
+
+
+def test_r2_setattr_string_store_detected() -> None:
+    """setattr maps to the attribute's STORE permission."""
+    src = """
+def f(self, payload):
+    setattr(self, "_nodes_export_cache", payload)
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "attr_access" in _kinds(violations)
+
+
+def test_r2_mutate_through_getattr_alias_detected() -> None:
+    """W2b: getattr(x, \"_nodes_export_cache\") is a cache-data origin —
+    taint flows through the alias to the mutation sink."""
+    src = """
+def f(self):
+    nodes = getattr(self, "_nodes_export_cache")
+    nodes[0]["name"] = "bad"
+"""
+    violations = scan_source("src/workflowy_mcp/fake_mod.py", src, REGISTRY)
+    assert "mutable_alias" in _kinds(violations)
+
+
+def test_r2_getattr_cleared_by_publisher_permission_is_clean() -> None:
+    registry = _a4_registry_with(
+        {
+            "file": "src/workflowy_mcp/fake_mod.py",
+            "function": "f",
+            "access_kind": "publisher_read",
+            "reason": "fixture",
+            "retirement_session": "never",
+        }
+    )
+    src = """
+def f(self):
+    return getattr(self, "_cache_view_publisher", None)
+"""
+    assert "attr_access" not in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    )
+
+
+def test_r2_getattr_attribute_read_covers_load_not_store() -> None:
+    registry = _a4_registry_with(
+        {
+            "file": "src/workflowy_mcp/fake_mod.py",
+            "function": "f",
+            "access_kind": "attribute_read",
+            "reason": "fixture",
+            "retirement_session": "never",
+        }
+    )
+    src_load = """
+def f(self):
+    return getattr(self, "_nodes_export_cache")
+"""
+    assert "attr_access" not in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src_load, registry)
+    )
+    src_store = """
+def f(self, payload):
+    setattr(self, "_nodes_export_cache", payload)
+"""
+    assert "attr_access" in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src_store, registry)
+    )
+
+
+def test_r2_attribute_read_plus_publisher_read_kind() -> None:
+    """The W2c vocabulary addition: ONE kind granting BOTH attribute_load
+    and publisher_load (never a silent inflation of attribute_read)."""
+    registry = _a4_registry_with(
+        {
+            "file": "src/workflowy_mcp/fake_mod.py",
+            "function": "f",
+            "access_kind": "attribute_read+publisher_read",
+            "reason": "fixture",
+            "retirement_session": "never",
+        }
+    )
+    src = """
+def f(self):
+    publisher = getattr(self, "_cache_view_publisher", None)
+    return getattr(self, "_nodes_export_cache")
+"""
+    assert "attr_access" not in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round 2 (W3/W4) — exact-identity disposition/spawn clearing
+# ---------------------------------------------------------------------------
+
+
+def test_r2_class_method_borrowing_dispositioned_name_detected() -> None:
+    """W3: exact-identity disposition clearing — class Evil: def
+    _merge_slice_groups must NOT borrow server._merge_slice_groups'
+    consumer disposition via the bare final name."""
+    src = """
+class Evil:
+    def _merge_slice_groups(self, client):
+        return self._get_nodes_export_cache_nodes()
+"""
+    violations = scan_source("src/workflowy_mcp/server.py", src, REGISTRY)
+    assert "accessor_bypass" in _kinds(violations)
+
+
+def test_r2_nested_closure_under_dispositioned_function_is_clean() -> None:
+    """W3: genuine nested scope beneath the registered function still
+    clears (fn == registered or fn.startswith(registered + '.'))."""
+    src = """
+def _merge_slice_groups(client):
+    def inner(client):
+        return client._get_nodes_export_cache_nodes()
+    return inner(client)
+"""
+    violations = scan_source("src/workflowy_mcp/server.py", src, REGISTRY)
+    assert "accessor_bypass" not in _kinds(violations)
+
+
+def test_r2_spawn_substring_borrowing_detected() -> None:
+    """W4: websocket_handler_evil must NOT borrow websocket_handler's spawn
+    disposition via substring containment."""
+    src = """
+import asyncio
+
+async def websocket_handler_evil(coro):
+    asyncio.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/server.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_r2_spawn_final_name_borrowing_detected() -> None:
+    """W4: class Evil: def websocket_handler must NOT borrow the spawn
+    disposition via the bare final name."""
+    src = """
+import asyncio
+
+class Evil:
+    async def websocket_handler(self, coro):
+        asyncio.create_task(coro())
+"""
+    violations = scan_source("src/workflowy_mcp/server.py", src, REGISTRY)
+    assert "unclassified_spawn" in _kinds(violations)
+
+
+def test_r2_spawn_nested_under_registered_function_is_clean() -> None:
+    """W4: a spawn inside a nested runner/closure beneath the registered
+    function still clears."""
+    src = """
+import asyncio
+
+async def websocket_handler(coro):
+    async def runner(inner_coro):
+        asyncio.create_task(inner_coro)
+    return runner(coro)
+"""
+    violations = scan_source("src/workflowy_mcp/server.py", src, REGISTRY)
+    assert "unclassified_spawn" not in _kinds(violations)
+
+
+# ---------------------------------------------------------------------------
+# A4.4/A4.5 — allowlist access_kind enforcement + exact function identity
+# ---------------------------------------------------------------------------
+
+
+def _a4_registry_with(entry: dict) -> dict:
+    registry = json.loads(json.dumps(REGISTRY))
+    registry["allowlist"].append(entry)
+    return registry
+
+
+def test_a4_access_kind_escape_detected() -> None:
+    """The audit's demonstrated escape: an entry allowlisted only for a
+    narrow publisher READ must not clear a cache-attribute ASSIGNMENT."""
+    registry = _a4_registry_with(
+        {
+            "file": "src/workflowy_mcp/fake_mod.py",
+            "function": "WorkFlowyClientCore._cache_populated",
+            "access_kind": "publisher_read",
+            "reason": "fixture",
+            "retirement_session": "S16",
+        }
+    )
+    src = """
+class WorkFlowyClientCore:
+    def _cache_populated(self):
+        return self._cache_view_publisher is not None
+"""
+    assert "attr_access" not in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    )
+    src_escape = """
+class WorkFlowyClientCore:
+    def _cache_populated(self):
+        self._nodes_export_cache = {}
+"""
+    assert "attr_access" in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src_escape, registry)
+    )
+
+
+def test_a4_publisher_write_permission_covers_store() -> None:
+    registry = _a4_registry_with(
+        {
+            "file": "src/workflowy_mcp/fake_mod.py",
+            "function": "WorkFlowyClientCore.__init__",
+            "access_kind": "publisher_write",
+            "reason": "fixture",
+            "retirement_session": "never",
+        }
+    )
+    src = """
+class WorkFlowyClientCore:
+    def __init__(self):
+        self._cache_view_publisher = object()
+"""
+    assert "attr_access" not in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    )
+
+
+def test_a4_unknown_access_kind_fails_closed() -> None:
+    registry = _a4_registry_with(
+        {
+            "file": "src/workflowy_mcp/fake_mod.py",
+            "function": "f",
+            "access_kind": "totally_made_up_kind",
+            "reason": "fixture",
+            "retirement_session": "never",
+        }
+    )
+    src = """
+def f(self):
+    return self._cache_view_publisher
+"""
+    assert "attr_access" in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    )
+
+
+def test_a4_same_named_method_in_other_class_not_cleared() -> None:
+    """A4.5: exact dotted identity — an entry for ClassA.method clears
+    neither ClassB.method nor a nested closure of the same final name."""
+    registry = _a4_registry_with(
+        {
+            "file": "src/workflowy_mcp/fake_mod.py",
+            "function": "ClassA.method",
+            "access_kind": "publisher_read",
+            "reason": "fixture",
+            "retirement_session": "never",
+        }
+    )
+    src = """
+class ClassB:
+    def method(self):
+        return self._cache_view_publisher
+"""
+    assert "attr_access" in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src, registry)
+    )
+    src_closure = """
+def outer(self):
+    def method():
+        return self._cache_view_publisher
+    return method
+"""
+    assert "attr_access" in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src_closure, registry)
+    )
+    # ...and the genuinely allowlisted function stays clean.
+    src_allowed = """
+class ClassA:
+    def method(self):
+        return self._cache_view_publisher
+"""
+    assert "attr_access" not in _kinds(
+        scan_source("src/workflowy_mcp/fake_mod.py", src_allowed, registry)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Registry hygiene: H2 closed function-scoped allowlist
+# ---------------------------------------------------------------------------
+
+_S06_DELETED = {
+    "_collect_notes_salvage_context_for_file",
+    "_restore_notes_for_file",
+    "_stash_notes_node",
+    "_is_notes_name",
+    "NotesSalvageContext",
+    "nexus_weave_enchanted",
+    "bulk_import_from_file",
+    "update_jewel_with_uuid",
+    "_is_salvageable_notes_delete_guard",
+}
+
+
+def test_allowlist_is_function_scoped_and_closed() -> None:
+    entries = REGISTRY.get("allowlist", [])
+    assert entries, "the H2 allowlist must exist and be explicit"
+    required = {"file", "function", "access_kind", "reason", "retirement_session"}
+    for entry in entries:
+        assert required.issubset(set(entry)), f"allowlist entry missing keys: {entry}"
+        fname = str(entry["function"]).strip()
+        # Function-scoped: a bare filename or a bare dotted module (no symbol)
+        # is a broad-file bypass (S06 carry-forward item 2).
+        assert not fname.endswith(".py"), f"broad file-level exemption: {entry}"
+        assert ":" not in str(entry["file"]), "allowlist file must be a plain path"
+        assert all(
+            deleted not in fname and deleted not in str(entry.get("reason", ""))
+            for deleted in _S06_DELETED
+        ), f"allowlist references an S06-deleted symbol: {entry}"
+        assert str(entry["reason"]).strip(), f"allowlist entry needs a reason: {entry}"
+        assert str(entry["retirement_session"]).strip(), (
+            f"allowlist entry needs a retirement session: {entry}"
+        )
+
+
+def test_allowlist_entries_reference_real_files_and_functions() -> None:
+    import ast as _ast
+
+    for entry in REGISTRY["allowlist"]:
+        path = REPO / entry["file"]
+        assert path.is_file(), f"allowlist file missing: {entry}"
+        base = str(entry["function"]).split("(")[0].strip().split(".")[-1]
+        tree = _ast.parse(path.read_text(encoding="utf-8"))
+        names = {
+            getattr(node, "name", None)
+            for node in _ast.walk(tree)
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+        }
+        assert base in names, f"allowlist function not found: {entry}"
+
+
+def test_allowlist_access_kinds_are_in_the_machine_vocabulary() -> None:
+    """A4.4: every declared access_kind must map to a machine-checkable
+    permission set — an unknown kind yields an EMPTY set (fail-closed), and
+    this fence makes the vocabulary drift a loud CI failure."""
+    from coherence_s03_fence_scanner import ACCESS_KIND_PERMISSIONS
+
+    unknown = {
+        str(entry.get("access_kind") or "")
+        for entry in REGISTRY["allowlist"]
+    } - set(ACCESS_KIND_PERMISSIONS)
+    assert not unknown, f"allowlist access_kind(s) outside the machine vocabulary: {unknown}"
+
+
+# ---------------------------------------------------------------------------
+# Round 2 (R2-2 – R2-4) — permanent exact-identity registry hygiene +
+# complete-W3 closure fixtures
+# ---------------------------------------------------------------------------
+
+
+def _dotted_function_identities(path: Path) -> set[str]:
+    """Every exact dotted function/method identity defined in one source
+    file (module-level, class-nested, and genuinely nested), using the same
+    stack grammar as the scanner's FunctionMapper."""
+
+    import ast as _ast
+
+    tree = _ast.parse(path.read_text(encoding="utf-8"))
+    identities: set[str] = set()
+    stack: list[str] = []
+
+    class _V(_ast.NodeVisitor):
+        def _fn(self, node):
+            stack.append(getattr(node, "name", "<fn>"))
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                identities.add(".".join(stack))
+            for child in _ast.iter_child_nodes(node):
+                self.visit(child)
+            stack.pop()
+
+        visit_FunctionDef = _fn
+        visit_AsyncFunctionDef = _fn
+        visit_ClassDef = _fn
+
+    _V().visit(tree)
+    return identities
+
+
+def _registry_identity_failures(registry: dict) -> list[str]:
+    """R2-3: every identity-bearing registry entry must resolve to an
+    ACTUAL exact dotted AST function/method identity in its named file —
+    an unqualified class method (a bare leaf name) fails, module-level
+    functions remain valid as module-level names, and a
+    leaf-name-somewhere check is NOT sufficient."""
+
+    from coherence_s03_fence_scanner import (
+        _allowlist_entries,
+        _disposition_functions,
+        _spawn_dispositions,
+    )
+
+    sections = {
+        "consumer_dispositions": sorted(_disposition_functions(registry)),
+        "task_spawns": sorted(_spawn_dispositions(registry)),
+        "allowlist": sorted(_allowlist_entries(registry)),
+    }
+    identities_by_file: dict[str, set[str]] = {}
+    failures: list[str] = []
+    for section, pairs in sections.items():
+        for rel, fn in pairs:
+            path = REPO / rel
+            if not path.is_file():
+                failures.append(
+                    f"{section}: file missing on disk: {rel} (identity {fn!r})"
+                )
+                continue
+            if rel not in identities_by_file:
+                identities_by_file[rel] = _dotted_function_identities(path)
+            if fn not in identities_by_file[rel]:
+                failures.append(
+                    f"{section}: {rel}::{fn} is not an exact dotted "
+                    "function/method identity (bare or mismatched key)"
+                )
+    return failures
+
+
+def test_registry_identities_exist_exactly() -> None:
+    """R2-3 permanent hygiene: all three identity-bearing registry sections
+    (consumer_dispositions, task_spawns, H2 allowlist) hold only exact
+    dotted identities — preventing recurrence of the Round-1 mistake where
+    only callsite-bearing registry keys were inspected."""
+
+    failures = _registry_identity_failures(REGISTRY)
+    assert failures == [], "registry identity hygiene failures:\n" + "\n".join(failures)
+
+
+def test_r2_exact_normalized_method_disposition_clears() -> None:
+    """R2-4.1: a synthetic accessor call inside the REAL
+    WorkFlowyClientNexus.workflowy_scry clears under its exact normalized
+    disposition."""
+    src = """
+class WorkFlowyClientNexus:
+    def workflowy_scry(self, client):
+        return self._get_nodes_export_cache_nodes()
+"""
+    violations = scan_source(
+        "src/workflowy_mcp/client/api_client_nexus.py", src, REGISTRY
+    )
+    assert "accessor_bypass" not in _kinds(violations)
+
+
+def test_r2_same_final_name_borrower_detected() -> None:
+    """R2-4.2: Evil.workflowy_scry does NOT borrow the real method's
+    disposition — the same-final-name fallback is gone everywhere."""
+    src = """
+class Evil:
+    def workflowy_scry(self, client):
+        return self._get_nodes_export_cache_nodes()
+"""
+    violations = scan_source(
+        "src/workflowy_mcp/client/api_client_nexus.py", src, REGISTRY
+    )
+    assert "accessor_bypass" in _kinds(violations)
+
+
+def test_r2_nested_scope_under_normalized_method_is_clean() -> None:
+    """R2-4.3: a genuine closure beneath the registered method stays clean
+    under the exact-or-genuine-nested rule."""
+    src = """
+class WorkFlowyClientNexus:
+    def workflowy_scry(self, client):
+        def inner(client):
+            return client._get_nodes_export_cache_nodes()
+        return inner(client)
+"""
+    violations = scan_source(
+        "src/workflowy_mcp/client/api_client_nexus.py", src, REGISTRY
+    )
+    assert "accessor_bypass" not in _kinds(violations)
+
+
+def test_r2_registry_hygiene_mutation_detected() -> None:
+    """R2-4.4: reverting ONE corrected key to its bare final name in a
+    scratch registry makes the exact-identity hygiene check fail — the
+    Round-1 key-completeness miss can never silently recur."""
+    scratch = json.loads(json.dumps(REGISTRY))
+    exact_key = "client.api_client_nexus.WorkFlowyClientNexus.workflowy_scry"
+    bare_key = "client.api_client_nexus.workflowy_scry"
+    scratch["consumer_dispositions"][bare_key] = scratch[
+        "consumer_dispositions"
+    ].pop(exact_key)
+    failures = _registry_identity_failures(scratch)
+    assert any(
+        failure.startswith("consumer_dispositions") and "workflowy_scry" in failure
+        for failure in failures
+    ), f"hygiene check missed the reverted key: {failures}"
+
+
+# ---------------------------------------------------------------------------
+# Registry completeness: every production consumer site is registered
+# ---------------------------------------------------------------------------
+
+
+def _enclosing_map(path: Path) -> dict[int, str]:
+    import ast as _ast
+
+    tree = _ast.parse(path.read_text(encoding="utf-8"))
+    mapper: dict[int, str] = {}
+
+    class V(_ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.stack: list[str] = []
+
+        def _fn(self, node):
+            self.stack.append(getattr(node, "name", "<fn>"))
+            for child in _ast.iter_child_nodes(node):
+                self.visit(child)
+            self.stack.pop()
+
+        visit_FunctionDef = _fn
+        visit_AsyncFunctionDef = _fn
+        visit_ClassDef = _fn
+
+        def generic_visit(self, node):
+            lineno = getattr(node, "lineno", None)
+            if lineno is not None and self.stack:
+                mapper[lineno] = ".".join(self.stack)
+            super().generic_visit(node)
+
+    V().visit(tree)
+    return mapper
+
+
+def test_every_accessor_callsite_is_registered() -> None:
+    """A NEW direct accessor consumer without a registry disposition fails CI."""
+
+    import ast as _ast
+
+    from coherence_s03_fence_scanner import (
+        _allowlist_functions,
+        _disposition_functions,
+        _identity_cleared,
+    )
+
+    allow = _allowlist_functions(REGISTRY)
+    dispo = _disposition_functions(REGISTRY)
+    unregistered: list[str] = []
+    for path in production_files():
+        rel = str(path.relative_to(REPO)).replace("\\", "/")
+        tree = _ast.parse(path.read_text(encoding="utf-8"))
+        fn_map = _enclosing_map(path)
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, _ast.Name) else (
+                func.attr if isinstance(func, _ast.Attribute) else ""
+            )
+            if name != "_get_nodes_export_cache_nodes":
+                continue
+            fn = fn_map.get(node.lineno, "<module>")
+            # A4.5: the allowlist matches by EXACT dotted function identity
+            # only (NO nested-scope inheritance); consumer dispositions
+            # clear via the ONE shared exact-or-genuine-nested rule (R2-2:
+            # no bare-final-name grammar anywhere).
+            if (rel, fn) in allow or _identity_cleared(rel, fn, dispo):
+                continue
+            unregistered.append(f"{rel}:{node.lineno} in {fn}")
+    assert unregistered == [], (
+        "accessor call sites without a registry disposition:\n" + "\n".join(unregistered)
+    )
+
+
+def test_every_production_task_spawn_is_registered() -> None:
+    """R3.3: uses the ONE shared spawn collector (the same predicate the
+    production fence enforces) — no second, weaker spawn grammar."""
+
+    from coherence_s03_fence_scanner import (
+        _spawn_dispositions,
+        _spawn_site_cleared,
+        collect_spawn_sites,
+    )
+
+    spawns = _spawn_dispositions(REGISTRY)
+    unregistered: list[str] = []
+    for path in production_files():
+        rel = str(path.relative_to(REPO)).replace("\\", "/")
+        for line, fn, form in collect_spawn_sites(rel, path.read_text(encoding="utf-8")):
+            if not _spawn_site_cleared(rel, fn, spawns):
+                unregistered.append(f"{rel}:{line} in {fn} [{form}]")
+    assert unregistered == [], (
+        "task-spawn sites without a registry disposition (H5):\n" + "\n".join(unregistered)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Machine inventory artifact (regenerated and currency-locked)
+# ---------------------------------------------------------------------------
+
+
+def test_machine_inventory_artifact_is_current() -> None:
+    """The machine-readable inventory exists and matches a fresh rebuild."""
+
+    artifact = REPO / "tests" / "coherence_s03b_machine_inventory.json"
+    assert artifact.is_file(), (
+        "machine inventory missing — regenerate tests/coherence_s03b_machine_inventory.json"
+    )
+    checked_in = json.loads(artifact.read_text(encoding="utf-8"))
+    assert checked_in == _build_machine_inventory(), (
+        "machine inventory is stale — regenerate tests/coherence_s03b_machine_inventory.json"
+    )
+
+
+def _build_machine_inventory() -> dict:
+    """The §11 machine inventory: allowlist + dispositions + scan summary.
+
+    R3.3: the spawn census uses the ONE shared collector
+    (``collect_spawn_sites`` — the same predicate the production fence
+    enforces), never a second, weaker grammar copy.
+    """
+
+    import ast as _ast
+
+    from coherence_s03_fence_scanner import (
+        _allowlist_functions,
+        collect_spawn_sites,
+    )
+
+    registry = REGISTRY
+    accessor_sites: list[str] = []
+    spawn_sites: list[str] = []
+    for path in production_files():
+        rel = str(path.relative_to(REPO)).replace("\\", "/")
+        text = path.read_text(encoding="utf-8")
+        tree = _ast.parse(text)
+        fn_map = _enclosing_map(path)
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, _ast.Name) else (
+                func.attr if isinstance(func, _ast.Attribute) else ""
+            )
+            if name == "_get_nodes_export_cache_nodes":
+                # LINE-NUMBER-FREE key (was f"{rel}:{node.lineno}::{fn}").
+                # This artifact is a CURRENCY lock: its question is "has the
+                # SET of callsites changed?", not "where are they?".  Keying on
+                # line numbers made it churn on ANY unrelated edit that shifted
+                # the file -- a 39-line insertion in server.py tripped it exactly
+                # like a real bypass would, which trains alarm fatigue and hides
+                # the signal.  The entry stays a LIST (not a set) so a second
+                # callsite inside the same function still appears as a repeated
+                # element: count sensitivity is preserved, position is not.
+                accessor_sites.append(f"{rel}::{fn_map.get(node.lineno, '<module>')}")
+        for line, fn, form in collect_spawn_sites(rel, text):
+            # LINE-NUMBER-FREE key (was f"{rel}:{line}::{fn} [{form}]"); same
+            # reasoning as accessor_sites above.  `line` is still consumed by
+            # collect_spawn_sites internally -- only the emitted key drops it.
+            spawn_sites.append(f"{rel}::{fn} [{form}]")
+    return {
+        "manifest": "S03-B machine inventory (§11) — boundary owners, H2 allowlist, consumer dispositions, accessor/spawn sites",
+        "baseline_commit": "06cd024",
+        "registry_file": "tests/coherence_s03b_registry.json",
+        "allowlist_size": len(registry["allowlist"]),
+        "allowlist": sorted(f"{f}::{fn}" for f, fn in _allowlist_functions(registry)),
+        "consumer_dispositions": registry["consumer_dispositions"],
+        "task_spawns": registry["task_spawns"],
+        "ws_actions": registry["ws_actions"],
+        "cache_free_operations": registry["mcp_dispatch"]["cache_free_operations"],
+        "accessor_callsites": sorted(accessor_sites),
+        "task_spawn_sites": sorted(spawn_sites),
+    }

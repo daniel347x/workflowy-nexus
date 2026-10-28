@@ -1,0 +1,536 @@
+/* glimpse-ui.css — "The Rail": the one stylesheet for every surface the GLIMPSE
+   extension draws (rail, deck, Reader, drawers, popovers, menus, toasts).
+   Design note: [ap:VX7YBY]. Themed by CSS variables on .nx-deck[data-theme].
+   The shared renderer (glimpse-md-render.css) keeps its class names; this file
+   only re-colours them inside the deck so the document follows the theme. */
+
+/* ───────────────────────── theme tokens ───────────────────────── */
+.nx-deck, .nx-float {
+  --nx-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --nx-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --nx-radius: 8px;
+  --nx-rail-w: 36px;
+  --nx-accent: #6d5dfc;
+  --nx-accent-fg: #ffffff;
+  --nx-ok: #1f9d55;
+  --nx-warn-bg: #fbf0c4;
+  --nx-warn-fg: #4a3a00;
+  --nx-danger: #d64545;
+  --nx-star: #e0a800;
+  font-family: var(--nx-font);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--nx-fg);
+}
+.nx-deck[data-theme="light"], .nx-float[data-theme="light"] {
+  --nx-bg: #fbfbfc;
+  --nx-bg-2: #f1f2f5;
+  --nx-bg-3: #e6e8ee;
+  --nx-row-hover: #e9ebf1;
+  --nx-fg: #1f2328;
+  --nx-fg-2: #5b6370;
+  --nx-fg-3: #8a93a0;
+  --nx-line: #dfe2e8;
+  --nx-accent-bg: rgba(109,93,252,0.12);
+  --nx-shadow: 0 8px 28px rgba(20,24,40,0.14);
+  --nx-doc-code-bg: #f1f2f5;
+  --nx-doc-code-fg: #8b3f00;
+  --nx-doc-quote: #4b5563;
+  --nx-doc-link: #3b5bdb;
+}
+.nx-deck[data-theme="dark"], .nx-float[data-theme="dark"] {
+  --nx-bg: #15171b;
+  --nx-bg-2: #1c1f25;
+  --nx-bg-3: #262a32;
+  --nx-row-hover: #2d333d;
+  --nx-fg: #e6e8eb;
+  --nx-fg-2: #9aa3b0;
+  --nx-fg-3: #6b7482;
+  --nx-line: #2b3038;
+  --nx-accent: #8f82ff;
+  --nx-accent-bg: rgba(143,130,255,0.18);
+  --nx-warn-bg: #3a3214;
+  --nx-warn-fg: #f1dd8e;
+  --nx-ok: #4ec27a;
+  --nx-danger: #ff7272;
+  --nx-shadow: 0 10px 32px rgba(0,0,0,0.55);
+  --nx-doc-code-bg: #0f1114;
+  --nx-doc-code-fg: #f0c48c;
+  --nx-doc-quote: #c0c6cf;
+  --nx-doc-link: #9ecbff;
+}
+.nx-deck *, .nx-float * { box-sizing: border-box; }
+
+/* ───────────────────────── the deck (rail + body) ───────────────────────── */
+.nx-deck {
+  position: fixed;
+  z-index: 9997;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  pointer-events: none;            /* children re-enable; the deck's own box never blocks the page */
+}
+.nx-deck > * { pointer-events: auto; }
+.nx-deck[data-side="right"] { right: 0; bottom: 0; }
+.nx-deck[data-side="left"]  { left: 0; bottom: 0; }
+.nx-deck[data-side="top"]   { left: 0; right: 0; }
+.nx-deck[data-side="bottom"]{ left: 0; right: 0; bottom: 0; }
+.nx-deck[data-side="right"] .nx-rail { order: 2; border-left: 1px solid var(--nx-line); }
+.nx-deck[data-side="right"] .nx-body { order: 1; }
+.nx-deck:not([data-side="right"]) .nx-rail { order: 1; border-right: 1px solid var(--nx-line); }
+.nx-deck:not([data-side="right"]) .nx-body { order: 2; }
+/* The deck's panes scroll on their own: reaching a pane's end never hands the wheel on to
+   Workflowy's page, which keeps scrolling the document beside the deck (applyPush). */
+.nx-deck .nx-drawer-body, .nx-deck .nx-outline, .nx-deck .nx-render,
+.nx-palette-list, .nx-dialog-list { overscroll-behavior: contain; }
+
+/* rail */
+.nx-rail {
+  width: var(--nx-rail-w); flex: 0 0 var(--nx-rail-w);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 6px 0; gap: 2px;
+  background: var(--nx-bg-2); color: var(--nx-fg-2);
+  box-shadow: var(--nx-shadow);
+}
+.nx-rail-top, .nx-rail-mid, .nx-rail-bottom { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.nx-rail-mid { flex: 1 1 auto; padding-top: 4px; }
+.nx-rail-btn {
+  position: relative; width: 28px; height: 28px; border-radius: 7px;
+  border: 0; background: transparent; color: var(--nx-fg-2); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+.nx-rail-btn:hover { background: var(--nx-bg-3); color: var(--nx-fg); }
+.nx-rail-btn.is-active { background: var(--nx-accent-bg); color: var(--nx-accent); }
+.nx-rail-btn svg { width: 17px; height: 17px; }
+.nx-rail-badge {
+  position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px; padding: 0 4px;
+  border-radius: 7px; background: var(--nx-accent); color: var(--nx-accent-fg);
+  font-size: 9.5px; font-weight: 700; line-height: 14px; text-align: center; display: none;
+}
+.nx-rail-badge.is-on { display: block; }
+.nx-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--nx-fg-3); margin: 4px 0 6px;
+  box-shadow: 0 0 0 2px var(--nx-bg-2);
+}
+.nx-dot.is-on { background: var(--nx-ok); }
+
+/* body = drawer + reader */
+.nx-body {
+  position: relative; display: none; flex-direction: row; align-items: stretch;
+  background: var(--nx-bg); color: var(--nx-fg);
+  box-shadow: var(--nx-shadow);
+  min-width: 0;
+}
+.nx-body[data-visible="1"] { display: flex; }
+.nx-deck[data-side="top"] .nx-body, .nx-deck[data-side="bottom"] .nx-body { flex: 1 1 auto; }
+
+/* resize handle on the body's inner edge */
+.nx-resize {
+  position: absolute; z-index: 5; background: transparent;
+}
+.nx-deck[data-side="right"] .nx-resize { left: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; }
+.nx-deck[data-side="left"]  .nx-resize { right: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; }
+.nx-deck[data-side="top"]   .nx-resize { left: 0; right: 0; bottom: -3px; height: 7px; cursor: row-resize; }
+.nx-deck[data-side="bottom"].nx-deck .nx-resize { left: 0; right: 0; top: -3px; height: 7px; cursor: row-resize; }
+.nx-resize:hover, .nx-resize.is-dragging { background: var(--nx-accent-bg); }
+
+/* ───────────────────────── drawer ───────────────────────── */
+.nx-drawer {
+  width: 300px; flex: 0 0 300px; display: none; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--nx-line); background: var(--nx-bg-2);
+}
+.nx-deck[data-side="right"] .nx-drawer { border-right: 1px solid var(--nx-line); }
+.nx-drawer[data-open="1"] { display: flex; }
+/* ── "The Rail, side by side": direction, the divider, the transient sheet ──
+   A panel sits on the Reader's INNER side: left of a right dock, right of a left dock
+   (data-flip="1" swaps a persistent panel to the outer side; a transient sheet always takes
+   the inner side, the only side with room). Top/bottom docks keep the panel at the left. */
+.nx-drawer { order: 1; } .nx-divider { order: 2; } .nx-reader { order: 3; }
+.nx-deck[data-side="left"][data-flip="0"] .nx-reader, .nx-deck[data-side="right"][data-flip="1"] .nx-reader { order: 1; }
+.nx-deck[data-side="left"][data-flip="0"] .nx-drawer, .nx-deck[data-side="right"][data-flip="1"] .nx-drawer { order: 3; border-right: 0; border-left: 1px solid var(--nx-line); }
+/* the divider between a persistent panel and the Reader */
+.nx-divider { flex: 0 0 6px; cursor: col-resize; background: var(--nx-bg-2); border-left: 1px solid var(--nx-line); border-right: 1px solid var(--nx-line); position: relative; }
+.nx-divider::after { content: ''; position: absolute; left: 1px; top: 50%; width: 2px; height: 28px; margin-top: -14px; border-radius: 1px; background: var(--nx-fg-3); opacity: 0.5; }
+.nx-divider:hover, .nx-divider.is-dragging { background: var(--nx-accent-bg); }
+/* a transient picker: a content-fitted sheet outside the body box, over Workflowy, never over the Reader */
+.nx-drawer[data-transient="1"][data-open="1"] { position: absolute; top: 0; bottom: 0; z-index: 7; box-shadow: var(--nx-shadow); border: 1px solid var(--nx-line); }
+.nx-deck[data-side="right"] .nx-drawer[data-transient="1"] { right: 100%; left: auto; }
+.nx-deck[data-side="left"] .nx-drawer[data-transient="1"] { left: 100%; right: auto; }
+.nx-deck[data-side="bottom"] .nx-drawer[data-transient="1"] { bottom: 100%; top: auto; left: 0; }
+.nx-deck[data-side="top"] .nx-drawer[data-transient="1"] { top: 100%; bottom: auto; left: 0; }
+.nx-drawer-head {
+  display: flex; align-items: center; gap: 6px; padding: 8px 10px 6px 12px;
+  border-bottom: 1px solid var(--nx-line);
+}
+.nx-drawer-title { font-weight: 600; font-size: 12.5px; flex: 1 1 auto; letter-spacing: 0.01em; }
+.nx-drawer-body { flex: 1 1 auto; overflow: auto; min-height: 0; padding: 6px 0; }
+.nx-drawer-tools { display: flex; align-items: center; gap: 6px; padding: 6px 10px; flex-wrap: wrap; }
+.nx-drawer-section { padding: 6px 12px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--nx-fg-3); }
+.nx-empty { padding: 10px 12px; color: var(--nx-fg-3); font-style: italic; }
+.nx-note { padding: 4px 12px 8px; color: var(--nx-fg-2); font-size: 11.5px; }
+.nx-status { padding: 4px 12px; font-size: 11.5px; color: var(--nx-fg-2); display: none; white-space: normal; }
+.nx-status.is-ok { color: var(--nx-ok); display: block; }
+.nx-status.is-err { color: var(--nx-danger); display: block; }
+
+/* generic controls */
+.nx-btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px;
+  border-radius: 6px; border: 1px solid var(--nx-line); background: var(--nx-bg);
+  color: var(--nx-fg); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.nx-btn:hover { background: var(--nx-bg-3); }
+.nx-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.nx-btn.is-on { background: var(--nx-accent-bg); border-color: var(--nx-accent); color: var(--nx-accent); }
+.nx-btn.is-primary { background: var(--nx-accent); border-color: var(--nx-accent); color: var(--nx-accent-fg); }
+.nx-btn.is-danger { color: var(--nx-danger); }
+.nx-btn.is-ghost { border-color: transparent; background: transparent; }
+.nx-btn svg { width: 15px; height: 15px; }
+.nx-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  border-radius: 6px; border: 0; background: transparent; color: var(--nx-fg-2); cursor: pointer; padding: 0;
+}
+.nx-iconbtn:hover { background: var(--nx-bg-3); color: var(--nx-fg); }
+.nx-iconbtn.is-on { background: var(--nx-accent-bg); color: var(--nx-accent); }
+.nx-iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.nx-iconbtn svg { width: 16px; height: 16px; }
+.nx-input, .nx-select, .nx-textarea {
+  font: inherit; font-size: 12px; color: var(--nx-fg); background: var(--nx-bg);
+  border: 1px solid var(--nx-line); border-radius: 6px; padding: 3px 7px; height: 24px; min-width: 0;
+}
+.nx-textarea { height: auto; min-height: 48px; resize: vertical; width: 100%; }
+.nx-input:focus, .nx-select:focus, .nx-textarea:focus { outline: 2px solid var(--nx-accent-bg); border-color: var(--nx-accent); }
+.nx-input.is-grow { flex: 1 1 auto; }
+.nx-seg { display: inline-flex; border: 1px solid var(--nx-line); border-radius: 6px; overflow: hidden; }
+.nx-seg button {
+  border: 0; background: var(--nx-bg); color: var(--nx-fg-2); font: inherit; font-size: 11.5px;
+  padding: 3px 8px; cursor: pointer; border-right: 1px solid var(--nx-line);
+}
+.nx-seg button:last-child { border-right: 0; }
+.nx-seg button.is-on { background: var(--nx-accent-bg); color: var(--nx-accent); font-weight: 600; }
+.nx-seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+.nx-chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 9px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; background: var(--nx-bg-3); color: var(--nx-fg-2);
+  white-space: nowrap;
+}
+.nx-chip.is-live { background: rgba(31,157,85,0.14); color: var(--nx-ok); }
+.nx-chip.is-frozen { background: rgba(59,130,246,0.14); color: #3b82f6; }
+.nx-chip.is-slice { background: var(--nx-accent-bg); color: var(--nx-accent); }
+.nx-chip.is-quiet { font-weight: 500; }
+.nx-kbd {
+  display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 4px; font-family: var(--nx-mono);
+  font-size: 10.5px; line-height: 17px; text-align: center; color: var(--nx-fg-2);
+  border: 1px solid var(--nx-line); background: var(--nx-bg); box-shadow: inset 0 -1px 0 var(--nx-line);
+}
+.nx-mono { font-family: var(--nx-mono); font-size: 11px; }
+.nx-check { display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; padding: 3px 0; }
+.nx-check input { margin: 0; accent-color: var(--nx-accent); }
+.nx-row-actions { display: inline-flex; gap: 2px; align-items: center; opacity: 0; transition: opacity 80ms; }
+.nx-tree-row:hover .nx-row-actions, .nx-tree-row.is-focus .nx-row-actions, .nx-tree-row.is-open .nx-row-actions { opacity: 1; }
+
+/* tree rows (Anchors, Slices) */
+.nx-tree { padding: 2px 6px; }
+.nx-tree-row {
+  display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 6px 2px 4px; border-radius: 6px;
+  cursor: pointer; color: var(--nx-fg);
+}
+.nx-tree-row:hover { background: var(--nx-row-hover); }
+.nx-tree-row.is-focus { outline: 1px solid var(--nx-accent); outline-offset: -1px; }
+.nx-tree-row.is-open { background: var(--nx-accent-bg); }
+.nx-caret {
+  width: 18px; height: 18px; flex: 0 0 18px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--nx-fg-3); border-radius: 4px; border: 0; background: transparent; cursor: pointer; padding: 0;
+}
+.nx-caret:hover { background: var(--nx-bg); color: var(--nx-fg); }
+.nx-caret svg { width: 12px; height: 12px; transition: transform 90ms; }
+.nx-caret.is-open svg { transform: rotate(90deg); }
+.nx-caret.is-leaf { visibility: hidden; }
+.nx-tree-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-tree-label.is-category { color: var(--nx-fg-2); font-weight: 600; font-size: 11.5px; }
+.nx-tree-label.is-local { color: var(--nx-fg-2); }
+.nx-tree-sub { display: block; font-size: 10.5px; color: var(--nx-fg-3); font-family: var(--nx-mono); }
+.nx-star { color: var(--nx-fg-3); }
+.nx-star.is-on { color: var(--nx-star); }
+.nx-tree-tags { display: inline-flex; gap: 3px; flex-wrap: nowrap; overflow: hidden; }
+.nx-tag { font-family: var(--nx-mono); font-size: 10px; padding: 0 5px; border-radius: 4px;
+  background: var(--nx-bg-3); color: var(--nx-fg-2); white-space: nowrap; }
+.nx-glow { animation: nx-glow 1.6s ease-out 1; }
+@keyframes nx-glow { 0% { background: var(--nx-accent-bg); } 100% { background: transparent; } }
+
+/* inline edit panel (Slices) */
+.nx-edit { margin: 2px 8px 6px 28px; padding: 8px 10px; border: 1px solid var(--nx-line); border-radius: 8px;
+  background: var(--nx-bg); display: grid; grid-template-columns: 70px 1fr; gap: 6px 8px; align-items: center; }
+.nx-edit label { font-size: 11px; color: var(--nx-fg-2); }
+.nx-edit .nx-input, .nx-edit .nx-select { width: 100%; }
+.nx-edit-actions { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
+
+/* ───────────────────────── Reader ───────────────────────── */
+.nx-reader { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.nx-reader-head {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 10px;
+  border-bottom: 1px solid var(--nx-line); flex: 0 0 auto; user-select: none; min-height: 38px;
+}
+.nx-crumb { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.nx-crumb-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-crumb-meta { display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; overflow: hidden; }
+.nx-actions { display: inline-flex; gap: 2px; align-items: center; flex: 0 0 auto; }
+.nx-notice { flex: 0 0 auto; padding: 5px 10px; font-size: 11.5px; line-height: 1.35; border-bottom: 1px solid var(--nx-line); }
+.nx-notice-warn { background: var(--nx-warn-bg); color: var(--nx-warn-fg); }
+.nx-notice-sync { background: var(--nx-warn-bg); color: var(--nx-warn-fg); display: flex; gap: 8px; align-items: center; }
+.nx-notice-freeze { background: rgba(59,130,246,0.10); color: var(--nx-fg-2); font-size: 11px; }
+.nx-split { flex: 1 1 auto; display: flex; min-height: 0; min-width: 0; }
+.nx-split[data-outline="top"] { flex-direction: column; }
+.nx-split[data-outline="side"] { flex-direction: row; }
+.nx-outline { overflow: auto; outline: none; padding: 4px 0; background: var(--nx-bg); min-height: 28px; min-width: 120px; }
+.nx-split[data-outline="side"] .nx-outline { border-right: 1px solid var(--nx-line); }
+.nx-splitter { flex: 0 0 6px; background: var(--nx-bg-2); position: relative; }
+.nx-split[data-outline="top"] .nx-splitter { cursor: row-resize; border-top: 1px solid var(--nx-line); border-bottom: 1px solid var(--nx-line); }
+.nx-split[data-outline="side"] .nx-splitter { cursor: col-resize; border-left: 1px solid var(--nx-line); border-right: 1px solid var(--nx-line); }
+.nx-splitter:hover, .nx-splitter.is-dragging { background: var(--nx-accent-bg); }
+.nx-doc { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.nx-doc-tools { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--nx-line); flex: 0 0 auto; }
+.nx-doc-tools .nx-find { flex: 1 1 auto; }
+.nx-find-count { font-size: 11px; color: var(--nx-fg-3); min-width: 44px; text-align: right; white-space: nowrap; }
+.nx-find-count.is-hit { color: var(--nx-accent); }
+.nx-find-count.is-err { color: var(--nx-danger); }
+.nx-render { flex: 1 1 auto; overflow: auto; padding: 12px 16px 24px; min-height: 60px; cursor: text; }
+.nx-reader-foot {
+  flex: 0 0 auto; padding: 3px 10px; border-top: 1px solid var(--nx-line); font-size: 10.5px;
+  color: var(--nx-fg-3); white-space: normal; overflow-wrap: anywhere; user-select: text; font-style: italic;
+}
+.nx-reader-empty { color: var(--nx-fg-3); }
+
+/* the shared renderer, themed inside the deck */
+.nx-deck .glimpse-md-render { color: var(--nx-fg); font-size: 13px; line-height: 1.55; }
+.nx-deck .glimpse-md-render h1, .nx-deck .glimpse-md-render h2, .nx-deck .glimpse-md-render h3,
+.nx-deck .glimpse-md-render h4, .nx-deck .glimpse-md-render h5, .nx-deck .glimpse-md-render h6 { color: var(--nx-fg); }
+.nx-deck .glimpse-md-render h1 { font-size: 1.45em; padding-bottom: 0.25em; border-bottom: 1px solid var(--nx-line); }
+.nx-deck .glimpse-md-render h2 { font-size: 1.25em; }
+.nx-deck .glimpse-md-render pre { background: var(--nx-doc-code-bg); border: 1px solid var(--nx-line); border-radius: 6px; }
+.nx-deck .glimpse-md-render :not(pre) > code { background: var(--nx-doc-code-bg); color: var(--nx-doc-code-fg); }
+.nx-deck .glimpse-md-render blockquote { border-left: 3px solid var(--nx-accent); color: var(--nx-doc-quote); background: var(--nx-bg-2); }
+.nx-deck .glimpse-md-render th, .nx-deck .glimpse-md-render td { border-color: var(--nx-line); }
+.nx-deck .glimpse-md-render th { background: var(--nx-bg-2); }
+.nx-deck .glimpse-md-render a { color: var(--nx-doc-link); }
+.nx-deck .glimpse-md-render hr { border-top-color: var(--nx-line); }
+.nx-deck .glimpse-md-render pre.glimpse-md-preview-plain { white-space: pre-wrap; overflow-wrap: anywhere; }
+.nx-deck .glimpse-md-row-list .glimpse-md-dock-row { color: var(--nx-fg-2); font-size: 12px; padding: 2px 8px 2px 0; border-left: 3px solid transparent; }
+.nx-deck .glimpse-md-row-list .glimpse-md-dock-row:hover { background: var(--nx-row-hover); color: var(--nx-fg); }
+.nx-deck .glimpse-md-row-list .glimpse-md-dock-row.selected { background: var(--nx-accent-bg); color: var(--nx-fg); border-left-color: var(--nx-accent); }
+.nx-deck .glimpse-md-row-list .glimpse-md-dock-marker { color: var(--nx-accent); }
+.nx-deck .glimpse-md-row-list .glimpse-md-dock-bullet { color: var(--nx-fg-3); }
+.nx-deck .glimpse-md-row-list .glimpse-md-dock-daysep { border-top: 1px dashed var(--nx-line); margin: 4px 8px 2px 10px; }
+.nx-deck .glimpse-md-row-list .glimpse-md-dock-daysep-label { color: var(--nx-fg-3); font-size: 10px; padding-left: 10px; font-family: var(--nx-font); }
+
+/* ───────────────────────── popovers, menus, palette, toasts ───────────────────────── */
+.nx-pop {
+  position: fixed; z-index: 10010; min-width: 220px; max-width: 360px; padding: 8px;
+  background: var(--nx-bg); color: var(--nx-fg); border: 1px solid var(--nx-line); border-radius: var(--nx-radius);
+  box-shadow: var(--nx-shadow); font-family: var(--nx-font); font-size: 12px;
+}
+.nx-pop-title { font-weight: 600; font-size: 12px; margin: 2px 4px 8px; }
+.nx-pop-row { display: flex; align-items: center; gap: 8px; padding: 4px 4px; }
+.nx-pop-row > label { flex: 0 0 86px; color: var(--nx-fg-2); font-size: 11.5px; }
+.nx-pop-hint { font-size: 10.5px; color: var(--nx-fg-3); padding: 0 4px 4px 94px; }
+.nx-pop-hint.is-inline { padding: 0; }
+.nx-pop-hint.is-ok { color: var(--nx-accent); }
+.nx-pop-hint.is-warn { color: var(--nx-warn-fg); }
+.nx-menu-item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; width: 100%;
+  border: 0; background: transparent; color: var(--nx-fg); font: inherit; text-align: left;
+}
+.nx-menu-item:hover, .nx-menu-item.is-focus { background: var(--nx-bg-3); }
+.nx-menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.nx-menu-item .nx-kbd { margin-left: auto; }
+.nx-menu-item .nx-menu-detail { color: var(--nx-fg-3); font-size: 10.5px; display: block; }
+.nx-menu-item.is-armed { background: rgba(214,69,69,0.12); color: var(--nx-danger); }
+.nx-menu-sep { height: 1px; background: var(--nx-line); margin: 4px 0; }
+.nx-menu-title { font-weight: 600; margin: 2px 8px 0; }
+.nx-menu-sub { color: var(--nx-fg-2); font-size: 11px; margin: 0 8px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
+.nx-menu-foot { color: var(--nx-fg-3); font-size: 10.5px; margin: 6px 8px 2px; }
+.nx-menu-pending { color: var(--nx-fg-2); font-size: 11px; margin: 2px 8px 6px; }
+/* the cursor menu (Ctrl+F12) reuses the popover language */
+#glimpse-f12-popup.nx-float {
+  position: absolute; z-index: 10000; min-width: 300px; max-width: 440px; padding: 8px;
+  background: var(--nx-bg); color: var(--nx-fg); border: 1px solid var(--nx-line); border-radius: var(--nx-radius);
+  box-shadow: var(--nx-shadow); font-size: 12px; line-height: 1.4;
+}
+#glimpse-uuid-tooltip.nx-float {
+  position: absolute; z-index: 9999; padding: 6px 9px; max-width: 800px; max-height: 80vh; overflow: hidden;
+  background: var(--nx-bg); color: var(--nx-fg); border: 1px solid var(--nx-line); border-radius: 7px;
+  box-shadow: var(--nx-shadow); font-family: var(--nx-mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.nx-palette-wrap {
+  position: fixed; inset: 0; z-index: 10020; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 12vh; background: rgba(10,12,16,0.25);
+}
+.nx-palette {
+  width: 520px; max-width: 92vw; background: var(--nx-bg); color: var(--nx-fg); border: 1px solid var(--nx-line);
+  border-radius: 10px; box-shadow: var(--nx-shadow); overflow: hidden; font-family: var(--nx-font);
+}
+.nx-palette input { width: 100%; height: 40px; border: 0; border-bottom: 1px solid var(--nx-line); background: transparent;
+  color: var(--nx-fg); font: inherit; font-size: 14px; padding: 0 14px; outline: none; }
+.nx-palette-list { max-height: 50vh; overflow: auto; padding: 6px; }
+.nx-palette-list .nx-menu-item { padding: 7px 10px; }
+.nx-palette-group { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--nx-fg-3); padding: 6px 10px 2px; }
+.nx-toasts { position: absolute; left: 10px; right: 10px; bottom: 34px; z-index: 6; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+.nx-toast {
+  pointer-events: auto; align-self: center; max-width: 100%; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  background: var(--nx-fg); color: var(--nx-bg); font-size: 12px; box-shadow: var(--nx-shadow); overflow-wrap: anywhere;
+}
+.nx-toast.is-warn { background: var(--nx-warn-bg); color: var(--nx-warn-fg); border: 1px solid rgba(0,0,0,0.08); }
+
+/* Apply popover */
+.nx-apply-actions .nx-menu-item { padding: 6px 8px; }
+.nx-apply-shortcut { width: 40px; text-align: center; font-family: var(--nx-mono); font-weight: 600; letter-spacing: 0.08em; }
+
+/* Activity log + jobs (the legacy job painter is re-coloured here) */
+.nx-activity { padding: 0 6px; }
+.nx-activity-item { padding: 4px 6px; border-radius: 6px; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--nx-fg); cursor: pointer; }
+.nx-activity-item:hover { background: var(--nx-bg-3); }
+.nx-activity-time { color: var(--nx-fg-3); font-size: 10px; font-family: var(--nx-mono); margin-right: 6px; }
+.nx-jobs { padding: 2px 10px 6px; font-size: 11.5px; color: var(--nx-fg-2); }
+.nx-jobs * { color: var(--nx-fg) !important; font-size: 11.5px !important; font-family: var(--nx-font) !important; }
+.nx-jobs button { border: 1px solid var(--nx-line) !important; border-radius: 5px !important; background: var(--nx-bg) !important;
+  color: var(--nx-fg) !important; padding: 0 6px !important; cursor: pointer; }
+.nx-jobs #glimpse-carto-launch-feedback { color: var(--nx-warn-fg) !important; }
+/* The status sink: legacy writers still set display:block on it; it is never shown. */
+.nx-sink { display: none !important; }
+
+/* ───────────────────────── dialogs (Saved Tabs, Dyn slice, Tags…, UUID path) ───────────────────────── */
+.nx-backdrop { position: fixed; inset: 0; z-index: 100000; background: rgba(10,12,16,0.28); }
+.nx-dialog {
+  position: fixed; z-index: 100001; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  max-width: 94vw; max-height: 84vh; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  background: var(--nx-bg); color: var(--nx-fg); border: 1px solid var(--nx-line); border-radius: 10px;
+  box-shadow: var(--nx-shadow); padding: 12px 14px 14px; font-family: var(--nx-font); font-size: 12.5px; line-height: 1.45;
+}
+.nx-dialog-head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.nx-dialog-title { flex: 1 1 auto; font-weight: 600; font-size: 13px; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-dialog-close { flex: 0 0 auto; font-size: 13px; }
+.nx-dialog-stepper { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--nx-fg-2); flex: 0 0 auto; }
+.nx-dialog-stepper .nx-btn { height: 20px; padding: 0 6px; }
+.nx-dialog-hint { color: var(--nx-fg-2); font-size: 11.5px; flex: 0 0 auto; }
+.nx-dialog-status { font-size: 11.5px; min-height: 1.2em; flex: 0 0 auto; color: var(--nx-fg-2); overflow-wrap: anywhere; }
+.nx-dialog-list { flex: 1 1 auto; overflow-y: auto; max-height: 56vh; border: 1px solid var(--nx-line); border-radius: 8px; padding: 4px; background: var(--nx-bg-2); min-height: 0; }
+.nx-dialog-list .nx-empty { padding: 6px 8px; }
+.nx-dialog-row { display: flex; align-items: flex-start; gap: 8px; padding: 5px 6px; border-radius: 6px; }
+.nx-dialog-row.is-center { align-items: center; }
+.nx-dialog-row + .nx-dialog-row { border-top: 1px solid var(--nx-line); }
+.nx-dialog-row.is-clickable { cursor: pointer; }
+.nx-dialog-row.is-clickable:hover { background: var(--nx-bg-3); }
+.nx-dialog-row input[type="checkbox"] { margin: 3px 0 0; accent-color: var(--nx-accent); flex: 0 0 auto; }
+.nx-dialog-text { flex: 1 1 auto; min-width: 0; }
+.nx-dialog-label { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-dialog-label.is-local { color: var(--nx-fg-2); }
+.nx-dialog-label.is-warn { color: var(--nx-warn-fg); }
+.nx-dialog-label.is-bad { color: var(--nx-danger); }
+.nx-dialog-sub { color: var(--nx-fg-3); font-size: 11px; flex: 0 0 auto; margin-left: 8px; }
+.nx-dialog-detail { font-size: 10.5px; color: var(--nx-fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-dialog-detail.is-ok { color: var(--nx-ok); }
+.nx-dialog-detail.is-warn { color: var(--nx-warn-fg); }
+.nx-dialog-detail.is-bad { color: var(--nx-danger); }
+.nx-dialog-state { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-dialog-info { font-size: 11.5px; color: var(--nx-warn-fg); background: var(--nx-warn-bg); border-radius: 6px; padding: 4px 8px; margin-bottom: 4px; flex: 0 0 auto; }
+.nx-dialog-foot { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; flex-wrap: wrap; }
+.nx-spacer { flex: 1 1 auto; }
+.nx-dialog .nx-textarea { font-family: var(--nx-mono); font-size: 11px; flex: 0 0 auto; }
+.nx-dialog-fields { display: grid; grid-template-columns: 90px 1fr; gap: 8px 10px; align-items: center; flex: 0 0 auto; }
+.nx-dialog-fields > label { font-size: 11.5px; color: var(--nx-fg-2); }
+.nx-dialog-fields .nx-input, .nx-dialog-fields .nx-select { width: 100%; }
+.nx-dialog-err { color: var(--nx-danger); font-size: 11.5px; flex: 0 0 auto; }
+.nx-dialog-rootbox { flex: 0 0 auto; padding: 6px 10px; border: 1px solid var(--nx-line); border-radius: 8px; background: var(--nx-bg-2); }
+.nx-dialog-rootbox .nx-drawer-section { padding: 0 0 2px; }
+.nx-dialog-root { font-family: var(--nx-mono); font-size: 11px; color: var(--nx-fg-3); overflow-wrap: anywhere; user-select: text; }
+/* the two cursor pickers (Ctrl+F10 markers, F9 duplicate headings) share the Ctrl+F12 menu's surface */
+#glimpse-marker-picker-popup.nx-float, #glimpse-ambiguous-md-picker-popup.nx-float {
+  position: absolute; z-index: 10000; min-width: 260px; max-width: 560px; padding: 8px;
+  background: var(--nx-bg); color: var(--nx-fg); border: 1px solid var(--nx-line); border-radius: var(--nx-radius);
+  box-shadow: var(--nx-shadow); font-size: 12px; line-height: 1.4;
+}
+
+/* ───────────────────────── "The Rail, side by side": picker rows, summary, bylines, the float layer ───────────────────────── */
+/* picker rows: fit or split, never an ellipsis, no 8-hex sub line; the actions overlay the row's end on hover */
+.nx-drawer[data-picker="1"] .nx-tree-label { overflow: visible; text-overflow: clip; white-space: normal; }
+.nx-drawer[data-picker="1"] .nx-tree-sub { display: none; }
+.nx-drawer[data-picker="1"] .nx-tree-row { position: relative; min-height: 24px; }
+.nx-drawer[data-picker="1"] .nx-row-actions { position: absolute; right: 4px; top: 2px; background: var(--nx-row-hover); border-radius: 6px; padding: 0 2px; }
+.nx-drawer[data-picker="1"] .nx-tree-tags { margin-left: 8px; flex: 0 0 auto; }
+.nx-name { display: block; min-width: 0; white-space: nowrap; }
+.nx-name-sep { color: var(--nx-fg-3); }
+.nx-name-tail { color: var(--nx-fg-2); }
+.nx-tree-row.is-split { align-items: flex-start; padding-top: 3px; padding-bottom: 4px; }
+.nx-tree-row.is-split .nx-caret { margin-top: 1px; }
+.nx-tree-row.is-split .nx-name { white-space: normal; }
+.nx-tree-row.is-split .nx-name-head { display: block; white-space: nowrap; }
+.nx-tree-row.is-split .nx-name-sep { display: none; }
+.nx-tree-row.is-split .nx-name-tail { display: block; font-size: 11px; line-height: 1.35; color: var(--nx-fg-3); }
+/* summary (pinned, narrow): one line per row, heads always whole; the second line only where two heads collide */
+.nx-drawer[data-mode="summary"] .nx-tree-row.is-split .nx-name-tail { display: none; }
+.nx-drawer[data-mode="summary"] .nx-tree-row.is-split .nx-name-head::after { content: ' …'; color: var(--nx-fg-3); }
+.nx-drawer[data-mode="summary"] .nx-tree-row.is-split.is-dup .nx-name-tail { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nx-drawer[data-mode="summary"] .nx-tree-row.is-split.is-dup .nx-name-head::after { content: ''; }
+/* the byline under a drawer title */
+.nx-drawer-head { align-items: flex-start; }
+.nx-drawer-byline { font-size: 10.5px; font-weight: 400; color: var(--nx-fg-3); letter-spacing: 0; margin-top: 1px; }
+/* the shared float layer under <html>: it has no box of its own */
+.nx-layer { position: static; width: 0; height: 0; margin: 0; padding: 0; }
+/* the palette's type-to-go lists: full Dock and slice group names, wrapping */
+.nx-palette-list .nx-menu-item > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+/* the slice-group row's definition line: name; then tags · sort · root (secondary) */
+.nx-tree-row.has-meta { align-items: flex-start; padding-top: 4px; padding-bottom: 5px; }
+.nx-tree-row.has-meta .nx-caret { margin-top: 1px; }
+.nx-slice-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px; margin-top: 2px;
+  font-size: 10.5px; line-height: 1.35; color: var(--nx-fg-3); font-weight: 400; min-width: 0; }
+.nx-slice-meta-a { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px 4px; flex: 0 1 auto; min-width: 0; }
+.nx-slice-meta-b { display: inline-flex; align-items: baseline; gap: 4px; flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; }
+.nx-slice-meta.is-wrapped .nx-slice-meta-b { flex-basis: 100%; }
+.nx-slice-meta.is-wrapped .nx-slice-meta-b > .nx-meta-dot { display: none; }
+.nx-slice-meta .nx-tree-tags { margin-left: 0; display: inline-flex; flex-wrap: wrap; gap: 3px; overflow: visible; }
+.nx-drawer[data-picker="1"] .nx-slice-meta .nx-tree-tags { margin-left: 0; }
+.nx-slice-meta .nx-tag { font-size: 10px; padding: 0 5px; line-height: 15px; }
+.nx-meta-dot { color: var(--nx-fg-3); padding: 0 1px; }
+.nx-tree-sort { font-style: italic; color: var(--nx-fg-3); white-space: nowrap; }
+.nx-tree-root-id { font-family: var(--nx-mono); color: var(--nx-fg-2); font-size: 10px; }
+.nx-tree-root-name { color: var(--nx-fg-3); white-space: nowrap; min-width: 0; }
+.nx-slice-meta-b.is-root { cursor: pointer; }
+.nx-slice-meta-b.is-root:hover .nx-tree-root-id { color: var(--nx-accent); }
+.nx-tree-meta-dim { font-style: italic; }
+.nx-slice-meta.is-measure { flex-wrap: nowrap; width: max-content; }
+.nx-slice-meta.is-measure .nx-slice-meta-a { flex-wrap: nowrap; }
+.nx-slice-meta-a > .nx-tree-sort, .nx-slice-meta-a > .nx-meta-dot { flex: 0 0 auto; }
+
+/* ───────────────────────── "The Rail, side by side" leg 2: the words and the help layer ───────────────────────── */
+/* a drawer's one sentence, ending in More… */
+.nx-oneliner { padding: 6px 12px 4px; color: var(--nx-fg-2); font-size: 11.5px; line-height: 1.45; }
+.nx-link { color: var(--nx-accent); text-decoration: none; cursor: pointer; white-space: nowrap; }
+.nx-link:hover { text-decoration: underline; }
+/* the Help drawer as the in-app README: the system line, the intro, one section per rail item */
+.nx-help-system { padding: 6px 12px 2px; font-weight: 700; font-size: 12.5px; color: var(--nx-fg); }
+.nx-help-intro { padding-bottom: 10px; border-bottom: 1px solid var(--nx-line); margin-bottom: 2px; line-height: 1.5; }
+.nx-help-sec { padding: 8px 12px 10px; border-bottom: 1px solid var(--nx-line); }
+.nx-help-back { display: inline-block; font-size: 11px; margin: 0 0 6px; }
+.nx-help-h { font-weight: 600; font-size: 13px; color: var(--nx-fg); }
+.nx-help-sec > .nx-drawer-byline { margin: 0 0 6px; }
+.nx-help-p { margin: 0 0 7px; font-size: 11.5px; line-height: 1.5; color: var(--nx-fg-2); overflow-wrap: anywhere; }
+.nx-help-p:last-child { margin-bottom: 0; }
+.nx-help-p b { color: var(--nx-fg); font-weight: 600; }
+.nx-help-code { font-family: var(--nx-mono); font-size: 10.5px; background: var(--nx-bg-2); border: 1px solid var(--nx-line); border-radius: 4px; padding: 0 3px; white-space: nowrap; }
+.nx-help-note { font-style: italic; color: var(--nx-fg-3); }
+.nx-pop .nx-help-text { padding: 0 4px 6px; }
+/* the Apply popover's hint under its title; the inline editor's head line */
+.nx-pop-hint.is-apply { padding: 0 4px 8px; font-size: 11px; line-height: 1.4; color: var(--nx-fg-2); }
+.nx-edit-head { grid-column: 1 / -1; font-size: 11px; color: var(--nx-fg-3); line-height: 1.4; }
+/* the first-run tips ("1 of 3"): a small card at the deck body's bottom-right, above the toasts */
+.nx-tip { position: absolute; right: 12px; bottom: 40px; z-index: 8; width: 300px; max-width: calc(100% - 24px);
+  background: var(--nx-bg); color: var(--nx-fg); border: 1px solid var(--nx-line); border-radius: var(--nx-radius);
+  box-shadow: var(--nx-shadow); padding: 8px 12px 10px; font-size: 12px; line-height: 1.45; }
+.nx-tip-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.nx-tip-title { font-weight: 600; font-size: 12px; }
+.nx-tip-img { color: var(--nx-fg-3); background: var(--nx-bg-2); border-radius: 6px; padding: 4px; display: flex; justify-content: center; margin-bottom: 8px; }
+.nx-tip-img svg { display: block; max-width: 100%; height: auto; }
+.nx-tip-body { color: var(--nx-fg-2); margin-bottom: 8px; }
+.nx-tip-closing { color: var(--nx-fg-3); font-size: 11px; margin-bottom: 10px; }
+.nx-tip-actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }

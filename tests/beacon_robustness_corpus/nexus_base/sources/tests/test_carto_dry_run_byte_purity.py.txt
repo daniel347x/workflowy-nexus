@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import nexus_map_codebase
+from workflowy_mcp.client import api_client_nexus, workflowy_move_reconcile
+from workflowy_mcp.client.api_client_nexus import WorkFlowyClientNexus
+
+_HYGIENE_FIXTURE = b"""# @beacon[
+#   id=first,
+#   slice_labels=alpha,
+#   kind=ast,
+#   comments=legacy alias,
+# ]
+# @beacon[
+#   id=second,
+#   slice_labels=beta,
+#   kind=ast,
+#   comment=canonical second,
+# ]
+def target():
+    return 1
+"""
+
+
+def _run_file_refresh(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    dry_run: bool,
+    carto_claim_id: str | None,
+) -> tuple[Path, bytes, dict, dict]:
+    source_path = tmp_path / "fixture.py"
+    source_path.write_bytes(_HYGIENE_FIXTURE)
+    before = source_path.read_bytes()
+    file_node = {
+        "id": "FILE",
+        "name": "fixture.py",
+        "note": f"Path: {source_path}",
+    }
+    observed: dict = {"updates": []}
+
+    async def fake_export_nodes_impl(_client, node_id=None, **_kwargs):
+        assert node_id in (None, "FILE")
+        return {"nodes": [dict(file_node)]}
+
+    async def fake_update_node(_self, node_id, req):
+        # Record the request and patch the in-memory note so a second run can
+        # prove the header update is a no-op. FILE-NOTE HEADER FRESHNESS
+        # (Dan 2026) routes its one note-only write through update_node.
+        observed["updates"].append(
+            {
+                "node_id": str(node_id),
+                "name": req.name,
+                "note": req.note,
+                "layoutMode": req.layoutMode,
+            }
+        )
+        if str(node_id) == "FILE" and req.note is not None:
+            file_node["note"] = req.note
+
+    async def fake_reconcile_tree(**kwargs):
+        observed["source_json"] = kwargs["source_json"]
+        observed["dry_run"] = kwargs["dry_run"]
+        return {"success": True, "planned": True, "dry_run": kwargs["dry_run"]}
+
+    monkeypatch.setattr(api_client_nexus, "export_nodes_impl", fake_export_nodes_impl)
+    monkeypatch.setattr(WorkFlowyClientNexus, "update_node", fake_update_node)
+    monkeypatch.setattr(
+        WorkFlowyClientNexus,
+        "_mark_nodes_export_dirty",
+        lambda _self, _node_ids: None,
+    )
+    monkeypatch.setattr(workflowy_move_reconcile, "reconcile_tree", fake_reconcile_tree)
+    monkeypatch.setenv("CARTO_JOB_DIR", str(tmp_path))
+    monkeypatch.delenv("CARTO_JOB_FILE", raising=False)
+
+    client = object.__new__(WorkFlowyClientNexus)
+    result = asyncio.run(
+        client.refresh_file_node_beacons(
+            "FILE",
+            dry_run=dry_run,
+            carto_claim_id=carto_claim_id,
+        )
+    )
+    return source_path, before, result, observed
+
+
+def test_windsurf_dry_run_keeps_both_hygiene_triggers_byte_pure(monkeypatch, tmp_path):
+    def forbidden_normalizer(_source_path):  # pragma: no cover - failure sentinel
+        raise AssertionError("dry-run source hygiene attempted a persistent write")
+
+    monkeypatch.setattr(
+        nexus_map_codebase,
+        "normalize_beacon_comment_field_aliases_in_file",
+        forbidden_normalizer,
+    )
+    monkeypatch.setattr(
+        nexus_map_codebase,
+        "normalize_duplicate_ast_beacons_in_file",
+        forbidden_normalizer,
+    )
+
+    source_path, before, result, observed = _run_file_refresh(
+        monkeypatch,
+        tmp_path,
+        dry_run=True,
+        carto_claim_id=None,
+    )
+
+    assert source_path.read_bytes() == before == _HYGIENE_FIXTURE
+    assert result["success"] is True
+    assert result["dry_run"] is True
+    assert observed["dry_run"] is True
+    mapped_nodes = observed["source_json"]["nodes"]
+    assert len(mapped_nodes) == 1
+    assert mapped_nodes[0]["name"].startswith("ƒ target()")
+    assert "#alpha" in mapped_nodes[0]["name"]
+    assert "#beta" in mapped_nodes[0]["name"]
+    assert "comment: legacy alias" in mapped_nodes[0]["note"]
+    assert "comment: canonical second" in mapped_nodes[0]["note"]
+
+
+def test_source_hygiene_requires_both_real_run_and_owning_claim(monkeypatch, tmp_path):
+    def forbidden_normalizer(_source_path):  # pragma: no cover - failure sentinel
+        raise AssertionError("unclaimed or dry-run source hygiene attempted a persistent write")
+
+    monkeypatch.setattr(
+        nexus_map_codebase,
+        "normalize_beacon_comment_field_aliases_in_file",
+        forbidden_normalizer,
+    )
+    monkeypatch.setattr(
+        nexus_map_codebase,
+        "normalize_duplicate_ast_beacons_in_file",
+        forbidden_normalizer,
+    )
+
+    for case_name, dry_run, carto_claim_id in (
+        ("claimed-dry", True, "owned-carto-claim"),
+        ("unclaimed-real", False, None),
+    ):
+        case_path = tmp_path / case_name
+        case_path.mkdir()
+        source_path, before, result, _observed = _run_file_refresh(
+            monkeypatch,
+            case_path,
+            dry_run=dry_run,
+            carto_claim_id=carto_claim_id,
+        )
+        assert source_path.read_bytes() == before == _HYGIENE_FIXTURE
+        assert result["success"] is True
+
+
+def test_claimed_real_refresh_still_normalizes_both_hygiene_triggers(monkeypatch, tmp_path):
+    calls: list[tuple[str, bool]] = []
+    normalize_alias = nexus_map_codebase.normalize_beacon_comment_field_aliases_in_file
+    normalize_duplicates = nexus_map_codebase.normalize_duplicate_ast_beacons_in_file
+
+    def tracked_alias(source_path):
+        result = normalize_alias(source_path)
+        calls.append(("comment_alias", bool(result.get("changed"))))
+        return result
+
+    def tracked_duplicates(source_path):
+        result = normalize_duplicates(source_path)
+        calls.append(("duplicate_ast", bool(result.get("changed"))))
+        return result
+
+    monkeypatch.setattr(
+        nexus_map_codebase,
+        "normalize_beacon_comment_field_aliases_in_file",
+        tracked_alias,
+    )
+    monkeypatch.setattr(
+        nexus_map_codebase,
+        "normalize_duplicate_ast_beacons_in_file",
+        tracked_duplicates,
+    )
+
+    source_path, before, result, observed = _run_file_refresh(
+        monkeypatch,
+        tmp_path,
+        dry_run=False,
+        carto_claim_id="owned-carto-claim",
+    )
+
+    after = source_path.read_bytes()
+    normalized = after.decode("utf-8")
+    assert calls == [("comment_alias", True), ("duplicate_ast", True)]
+    assert after != before
+    assert "comments=" not in normalized
+    assert normalized.count("# @beacon[") == 1
+    assert "slice_labels=alpha,beta," in normalized
+    assert "comment=legacy alias | canonical second," in normalized
+    assert result["success"] is True
+    assert result["dry_run"] is False
+    assert observed["dry_run"] is False

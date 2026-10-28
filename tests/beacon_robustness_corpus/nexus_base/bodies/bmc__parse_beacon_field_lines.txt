@@ -1,0 +1,53 @@
+def parse_beacon_field_lines(texts: Any) -> dict[str, str]:
+    """Parse a beacon block's inner lines into ``{key: value}``.
+
+    ``texts`` are the block's inner lines with the language's comment prefix
+    ALREADY stripped by the caller, and the caller's structural lines (the
+    ``@beacon[`` opener, ``<!--`` / ``-->`` wrappers, the closing ``]``)
+    already excluded. Each caller keeps its own prefix stripping and block
+    collection; only this key/value logic is shared.
+
+    Rules:
+      * a line whose text begins with a key in ``BEACON_FIELD_KEYS`` followed
+        by ``=`` starts a new field (value = the text after the first ``=``);
+      * any other non-empty line continues the current field (a wrapped
+        value); text before the first field is ignored;
+      * parts are joined with ONE space;
+      * the trailing run of ``,`` / ``]`` is stripped from the joined value
+        (i.e. from its LAST line only -- a wrapped inner line may end in a
+        comma), then one pair of surrounding quotes;
+      * a repeated key: the last occurrence wins.
+
+    For a block whose fields are all single-line this returns exactly what
+    the historical per-site loops returned.
+    """
+    fields: dict[str, str] = {}
+    cur_key: Optional[str] = None
+    parts: list[str] = []
+
+    def _flush() -> None:
+        if cur_key is None:
+            return
+        val = " ".join(p for p in parts if p).strip()
+        while val and val[-1] in ",]":
+            val = val[:-1].rstrip()
+        # Same quote rule as the historical loops (byte-identical results).
+        if (val.startswith('"') and val.endswith('"')) or (
+            val.startswith("'") and val.endswith("'")
+        ):
+            val = val[1:-1]
+        fields[cur_key] = val
+
+    for raw in texts or ():
+        text = (raw or "").strip()
+        if not text:
+            continue
+        m = _BEACON_FIELD_START_RE.match(text)
+        if m and m.group(1) in BEACON_FIELD_KEYS:
+            _flush()
+            cur_key = m.group(1)
+            parts = [text[m.end():].strip()]
+        elif cur_key is not None:
+            parts.append(text)
+    _flush()
+    return fields

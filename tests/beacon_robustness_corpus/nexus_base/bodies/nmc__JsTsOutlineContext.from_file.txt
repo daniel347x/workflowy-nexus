@@ -1,0 +1,30 @@
+    def from_file(cls, file_path: str, language_name: str) -> "JsTsOutlineContext":
+        """Build a context for whole-file JS/TS parsing.
+
+        Reads ``file_path`` from disk, parses with Tree-sitter, and
+        precomputes the comment mask. ``line_offset0=0`` and
+        ``qual_prefix=None`` (defaults) so abs/local and ast/inner are
+        identical -- the whole-file case is the no-op Vue configuration.
+        """
+        with open(file_path, "r", encoding="utf-8") as f:
+            source_text = f.read()
+        source_bytes = source_text.encode("utf-8")
+        parser = Parser()
+        language = get_language(language_name)  # type: ignore[operator]
+        parser.language = language
+        tree = parser.parse(source_bytes)
+        root = tree.root_node
+        lines = source_text.splitlines()
+        n = len(lines)
+        comment_mask, cleaned_comments = _build_js_comment_mask(lines)
+        return cls(
+            file_path=file_path,
+            source_text=source_text,
+            source_bytes=source_bytes,
+            language_name=language_name,
+            root=root,
+            lines=lines,
+            n=n,
+            comment_mask=comment_mask,
+            cleaned_comments=cleaned_comments,
+        )

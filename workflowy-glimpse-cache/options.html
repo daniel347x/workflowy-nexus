@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NEXUS for Workflowy — Options</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="nx-options">
+      <aside class="nx-options-nav">
+        <div class="nx-options-brand">GLIMPSE <span>Options</span></div>
+        <div class="nx-options-subline">Workflowy context management, with your agents</div>
+        <a href="#hotkeys">Hotkeys</a>
+        <a href="#broker">Broker</a>
+        <a href="#appearance">Appearance</a>
+        <a href="#tab-alias">Tab alias</a>
+        <a href="#limits">Limits</a>
+        <a href="#saved-tabs">Saved tabs</a>
+        <a href="#tags-folders">Tags &amp; folders</a>
+        <a href="#f8-postfixes">F8 postfixes</a>
+        <a href="#note-sessions">Note sessions</a>
+        <div class="nx-options-foot">
+          <button class="reset" id="reset-btn">Reset all to defaults</button>
+          <span class="saved-toast" id="saved-toast">✓ Saved</span>
+        </div>
+      </aside>
+
+      <main class="nx-options-main">
+        <header class="nx-options-head">
+          <h1>NEXUS for Workflowy</h1>
+          <p class="subtitle">
+            Settings for the extension: hotkeys, the broker pairing, the deck's appearance and the
+            tag vocabularies. Changes save as you make them. Hotkeys and settings sync across every
+            Chrome browser signed in to this Google account; the broker token stays on this machine.
+          </p>
+        </header>
+
+        <section class="settings-card" id="hotkeys">
+          <h2>Hotkeys</h2>
+          <p class="setting-help lead">
+            Click a binding's <strong>Rebind</strong> button, then press the key combination you
+            want to use. Every gesture acts on the Workflowy node under the mouse; the deck's own
+            keys (the command palette, toggling the deck) are listed here too.
+          </p>
+          <table class="hotkeys">
+            <thead>
+              <tr>
+                <th class="action-label">Action</th>
+                <th class="binding-cell">Binding</th>
+                <th class="button-cell"></th>
+              </tr>
+            </thead>
+            <tbody id="hotkeys-tbody">
+              <!-- populated by options.js -->
+            </tbody>
+          </table>
+          <div class="help-block">
+            <strong>Tips</strong>
+            <ul>
+              <li>
+                Chrome reserves bare <code>F1</code>, <code>F5</code>,
+                <code>F6</code>, <code>F11</code>, and <code>F12</code> for browser
+                shortcuts — those will not reach this extension. Use a modifier
+                (e.g.&nbsp;<code>Ctrl+F12</code>) if you want to use one of those
+                keys.
+              </li>
+              <li>
+                Use modifier prefixes: <code>Ctrl</code>, <code>Alt</code>,
+                <code>Shift</code>, <code>Meta</code> (Cmd on Mac, Win on Windows).
+              </li>
+              <li>
+                To restore the original default for one action, click its
+                <strong>Rebind</strong> button and then press <code>Escape</code>
+                to cancel without changing.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="settings-card" id="broker">
+          <h2>Local broker connection</h2>
+          <div class="setting-help lead">
+            This extension talks to a small <strong>broker</strong> program that runs
+            automatically on your computer. The first time the broker runs, it creates
+            a private <strong>token</strong> and saves it to a file on this machine.
+            Paste that token here <strong>once</strong> to pair this browser with your
+            local broker. After that, GLIMPSE just works on this computer.
+          </div>
+          <div class="setting-row">
+            <label for="broker-token">Broker token</label>
+            <input id="broker-token" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="paste your local broker token" />
+            <button type="button" class="small-toggle" id="broker-token-toggle">Show</button>
+          </div>
+          <div class="setting-help">
+            <strong>Where do I find the token?</strong> When the broker starts up, it
+            prints a line beginning with <code>🔑</code> that shows the path to the
+            token file. Open that file and copy its entire contents into the box above.
+            <br /><br />
+            <strong>Advanced:</strong> if you set the <code>WORKFLOWY_BROKER_TOKEN</code>
+            environment variable for the MCP server yourself, paste that exact value
+            instead. The token is stored only on <em>this</em> computer (it is never
+            synced to other machines), because each machine's broker has its own token.
+          </div>
+        </section>
+
+        <section class="settings-card" id="appearance">
+          <h2>Appearance (the deck)</h2>
+          <div class="setting-help lead">
+            The deck is the rail at the edge of the Workflowy page with its drawers and the Reader.
+            Its width and height are set by dragging the deck's inner edge, the outline's share by
+            dragging the splitter, and the dock side from the Reader's View popover; these two
+            choices are also in the deck's Settings drawer.
+          </div>
+          <div class="setting-row">
+            <label for="glimpse-ui-theme">Theme</label>
+            <select id="glimpse-ui-theme">
+              <option value="auto">Follow Workflowy</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+          <div class="setting-help">
+            Default: <strong>Follow Workflowy</strong>. The deck reads the page's background and
+            switches between its light and dark surfaces; pick one to pin it.
+          </div>
+          <div class="setting-row">
+            <label for="glimpse-ui-outline">Outline position</label>
+            <select id="glimpse-ui-outline">
+              <option value="auto">Auto (beside on a wide deck)</option>
+              <option value="side">Beside the document</option>
+              <option value="top">Above the document</option>
+            </select>
+          </div>
+          <div class="setting-help">
+            Default: <strong>Auto</strong>. The Reader's outline (the table-of-contents rows) sits
+            beside the document when the Reader is at least 720 px wide, above it otherwise.
+          </div>
+          <div class="setting-row">
+            <label for="glimpse-ui-push">Push Workflowy aside</label>
+            <input type="checkbox" id="glimpse-ui-push" />
+          </div>
+          <div class="setting-help">
+            Default: <strong>on</strong>. On a left or right dock the Reader and a pinned panel take
+            real space: Workflowy narrows to the room beside them instead of being covered. If
+            Workflowy’s header or outline would not fit, the deck falls back to covering the page and
+            says so once in the Jobs drawer’s Activity log. Top and bottom docks always cover.
+          </div>
+          <div class="setting-row">
+            <label for="glimpse-ui-flip">Panels open on the outer side</label>
+            <input type="checkbox" id="glimpse-ui-flip" />
+          </div>
+          <div class="setting-help">
+            Default: <strong>off</strong>. A panel (Anchor Docks, Slice groups, Jobs …) opens on the
+            Reader’s inner side, towards the page; on, it opens on the outer side, towards the screen
+            edge.
+          </div>
+          <div class="setting-row">
+            <label for="glimpse-help-tips-reset">First-run tips</label>
+            <button type="button" class="small-toggle" id="glimpse-help-tips-reset">Show the first-run tips again</button>
+          </div>
+          <div class="setting-help">
+            Three short cards shown the first time the rail appears: the rail, Anchor Docks, slice
+            groups.
+          </div>
+        </section>
+
+        <section class="settings-card" id="tab-alias">
+          <h2>Tab alias</h2>
+          <div class="setting-row">
+            <label for="rename-tab-with-alias">Rename browser tab on alias</label>
+            <input id="rename-tab-with-alias" type="checkbox" />
+          </div>
+          <div class="setting-help">
+            Default: <strong>on</strong>. When enabled, committing an alias in the deck's
+            <strong>Tabs</strong> drawer also renames this browser tab using the label and
+            position below, so you can tell several open Workflowy tabs apart at a glance.
+            Clearing the alias hands the tab title back to Workflowy. The rename re-asserts
+            itself as you navigate (Workflowy rewrites its own title on every zoom), and
+            works the same in Chrome and Firefox. Turn this off to keep Workflowy's native
+            tab titles even when an alias is set.
+          </div>
+          <div class="setting-row">
+            <label for="tab-title-affix">Tab title label</label>
+            <input id="tab-title-affix" type="text" placeholder="Workflowy" />
+          </div>
+          <div class="setting-row">
+            <label for="tab-title-affix-position">Label position</label>
+            <select id="tab-title-affix-position">
+              <option value="prefix">Before alias</option>
+              <option value="suffix">After alias</option>
+            </select>
+          </div>
+          <div class="setting-help">
+            Default label: <code>Workflowy</code>, positioned <strong>before</strong>
+            the alias. The label is the fixed word combined with this tab's alias to
+            form the tab title. With the current settings the tab will read:
+            <br /><br />
+            <code id="tab-title-example">Workflowy - spine</code>
+            <br /><br />
+            Choose <strong>Before alias</strong> for
+            <code>&lt;label&gt; - &lt;alias&gt;</code> or <strong>After alias</strong>
+            for <code>&lt;alias&gt; - &lt;label&gt;</code>. The label may be any word
+            (e.g. <code>WFY</code>); surrounding spaces are trimmed, and an empty
+            label falls back to <code>Workflowy</code>.
+          </div>
+        </section>
+
+        <section class="settings-card" id="limits">
+          <h2>GLIMPSE limits and the Reader</h2>
+          <div class="setting-row">
+            <label for="payload-limit-kb">Max GLIMPSE payload</label>
+            <input id="payload-limit-kb" type="number" min="64" max="10240" step="50" />
+            <span class="unit">KB</span>
+          </div>
+          <div class="setting-help">
+            Default: 500 KB. If an expanded Workflowy view serializes above this
+            limit, GLIMPSE returns a clear <code>glimpse_payload_too_large</code>
+            error instead of timing out. Raise only if you know your browser and MCP
+            host can comfortably handle larger payloads.
+          </div>
+          <div class="setting-row">
+            <label for="md-preview-max-chars">Reader max chars</label>
+            <input id="md-preview-max-chars" type="number" min="1000" step="50000" />
+            <span class="unit">chars</span>
+          </div>
+          <div class="setting-help">
+            Default: 2000000. Maximum number of characters rendered into the Reader's
+            document before the view is truncated with a footer note. Raise this to read
+            very large documents in full; there is no hard upper limit (a huge value just
+            builds a larger DOM and may render a touch slower). Minimum 1000.
+          </div>
+          <div class="setting-row">
+            <label for="md-modal-prerender-max-chars">Reader pre-render threshold</label>
+            <input id="md-modal-prerender-max-chars" type="number" min="0" step="50000" />
+            <span class="unit">chars</span>
+          </div>
+          <div class="setting-help">
+            Default: 100000 (~100 KB). For a live view, the Reader pre-renders EVERY
+            visible row on the server (instant row clicks) when the total visible text
+            size is at or below this threshold; above it, it renders only the selected
+            row on demand (one quick server round trip per click) so very large
+            pseudo-documents stay responsive without an O(N²) pre-render. Set to 0 to
+            always render on demand; raise it to pre-render larger trees.
+          </div>
+          <div class="setting-row">
+            <label for="md-preview-dock-top-offset-px">Deck top offset</label>
+            <input id="md-preview-dock-top-offset-px" type="number" min="0" max="1000" step="10" />
+            <span class="unit">px</span>
+          </div>
+          <div class="setting-help">
+            Default: 100 px. Pushes the deck's TOP edge down from the top of the screen
+            (when it is docked left or right, or at the top) so it clears Workflowy's own
+            search box — handy when you paste boolean tag queries into search and don't
+            want the deck covering them. Set to 0 to dock flush with the top. Clamped to
+            the visible window height so the deck never collapses to nothing.
+          </div>
+          <div class="setting-row">
+            <label for="md-preview-width-px">Legacy preview width</label>
+            <input id="md-preview-width-px" type="number" min="280" max="2000" step="20" />
+            <span class="unit">px</span>
+          </div>
+          <div class="setting-help">
+            Default: 720 px. The width of the retired floating note-preview popup. Nothing
+            reads it any more (the deck's width is set by dragging its edge); the value is
+            kept so older settings import unchanged.
+          </div>
+        </section>
+
+        <section class="settings-card" id="saved-tabs">
+          <h2>Saved tabs import</h2>
+          <div class="setting-row">
+            <label for="saved-tabs-drive-delay-seconds">Delay between tab opens</label>
+            <input id="saved-tabs-drive-delay-seconds" type="number" min="0" max="60" step="1" />
+            <span class="unit">s</span>
+          </div>
+          <div class="setting-help">
+            Default: 5 s. When the Saved Tabs import opens several tabs (tick entries,
+            then Go), it waits this long between one tab and the next — opening
+            Workflowy tabs too quickly may trigger its desktop-style re-login. 0 = no
+            delay; maximum 60. Also adjustable with the − / + stepper at the top of
+            the import dialog (Tabs drawer → Import); a running import picks up a change
+            at its next tab.
+          </div>
+        </section>
+
+        <section class="settings-card" id="tags-folders">
+          <h2>Tags and folders</h2>
+          <!--
+            REMOVED (Dan, July 2026): the "Expand-tag prefixes (F8)" field.
+            F8 no longer reads the flat expand_tag_prefixes list; it acts on the
+            ACTIVE slice group's prefixes. Slice groups (create/rename/delete,
+            edit prefixes, pick the active one) are managed in the deck's Slices
+            drawer. The underlying expand_tag_prefixes key is retained in storage
+            for parse-compat but is no longer surfaced or consulted for expansion.
+          -->
+          <div class="setting-row">
+            <label for="marker-tags">Marker tags (F10)</label>
+            <input id="marker-tags" type="text" placeholder="wfy-🏷️" />
+          </div>
+          <div class="setting-help">
+            Default: <code>wfy-🏷️</code>. Comma-separated list of temporary
+            “marker” tags. The toggle hotkey (default <strong>Ctrl+F10</strong>) adds or
+            removes a marker tag on whatever node the cursor is over — a fast way
+            to mark a few subtree roots, then click that tag in Workflowy to
+            isolate them and press F8 to expand only those. The default marker
+            carries the <code>wfy-</code> expand prefix, so a marked node is also
+            F8-expandable. If you configure more than one marker tag, the hotkey shows a
+            small numbered picker. Same input rules as expand prefixes: leading
+            <code>#</code> optional, surrounding spaces ignored, emojis allowed,
+            empty / internal-space entries dropped.
+          </div>
+          <div class="setting-row">
+            <label for="default-markdown-folder">Default folder for new Markdown files (F12+4)</label>
+            <input id="default-markdown-folder" type="text" spellcheck="false"
+                   placeholder="e.g. C:\Users\you\Documents\captures" />
+          </div>
+          <div class="setting-help">
+            Absolute directory where <strong>F12+4</strong> ("materialize note as a
+            Markdown file") writes a new <code>.md</code> when the node has no
+            Cartographer <code>Root:</code>/folder ancestor to anchor to. When such
+            an ancestor <em>does</em> exist, F12+4 writes the file next to it and
+            ignores this setting. Leave blank to require an ancestor folder; with no
+            ancestor and no default set, F12+4 reports an actionable error instead of
+            guessing. The folder must already exist on disk (the server verifies this
+            before writing).
+          </div>
+          <div class="setting-row">
+            <label for="archive-folder">Archive folder</label>
+            <input id="archive-folder" type="text" spellcheck="false"
+                   placeholder="e.g. C:\Users\you\Documents\workflowy-archives" />
+          </div>
+          <div class="setting-help">
+            Export archives the daemon reads when a handle is not in Workflowy
+            (<code>node.export</code> <code>output_file</code> writes them). One
+            absolute folder; leave empty to turn archive reads off.
+          </div>
+        </section>
+
+        <section class="settings-card" id="f8-postfixes">
+          <h2>F8 slice postfixes</h2>
+          <div class="setting-help lead">
+            A slice tag can carry a hyphen-<strong>postfix</strong> that changes
+            what <strong>F8</strong> does with that node, WITHOUT removing it from
+            the slice. For a base slice tag <code>tag--a</code>, the postfixed
+            variant is <code>tag--a--&lt;word&gt;</code> (it still matches a
+            <code>#tag--a</code> click by prefix, so it stays in the slice). These
+            words are read by the server, which compiles the search string and the
+            F8 expand/collapse plan — one place owns the meaning.
+          </div>
+          <div class="setting-row">
+            <label for="f8-postfix-auto-expand">Auto-expand postfix</label>
+            <input id="f8-postfix-auto-expand" type="text" spellcheck="false" placeholder="expand" />
+          </div>
+          <div class="setting-help">
+            Default: <code>expand</code>. A node tagged
+            <code>tag--a--expand</code> is the one F8 actually EXPANDS (a bare
+            <code>tag--a</code> is membership/marker only). One word; leading
+            <code>#</code> optional; empty falls back to the default.
+          </div>
+          <div class="setting-row">
+            <label for="f8-postfix-suppress">Suppress postfix</label>
+            <input id="f8-postfix-suppress" type="text" spellcheck="false" placeholder="suppress" />
+          </div>
+          <div class="setting-help">
+            Default: <code>suppress</code>. A node tagged
+            <code>tag--a--suppress</code> is COLLAPSED by F8 (its subtree is hidden
+            for this slice). Suppressing an ancestor that sits ABOVE the slice
+            group's root is inert — zoom inside it and it's no longer suppressed.
+          </div>
+          <div class="setting-row">
+            <label for="f8-postfix-deprecated">Deprecated postfix</label>
+            <input id="f8-postfix-deprecated" type="text" spellcheck="false" placeholder="deprecated" />
+          </div>
+          <div class="setting-help">
+            Default: <code>deprecated</code>. A node tagged
+            <code>tag--a--deprecated</code> STAYS in the slice (still matches a
+            <code>#tag--a</code> click) but is dropped from the default membership
+            view via the compiled search's negation
+            (<code>#tag--a -#tag--a--deprecated</code>) and is collapsed by F8
+            (unless collapsing it would hide a live, non-deprecated descendant).
+            Per-prefix: deprecating one tag does NOT evict a node still live via
+            another of the group's tags.
+          </div>
+          <div class="setting-row">
+            <label for="f8-global-never-expand-tags">Global never-expand tags</label>
+            <input id="f8-global-never-expand-tags" type="text" spellcheck="false" placeholder="e.g. archive--bridge-crossed" />
+          </div>
+          <div class="setting-help">
+            A blanket suppressor list, INDEPENDENT of any slice. F8 never
+            auto-expands a subtree rooted at a node carrying any of these tags, for
+            ANY active slice group. Comma-separated; leading <code>#</code>
+            optional; emojis allowed; may be left empty (no global suppressors).
+          </div>
+        </section>
+
+        <section class="settings-card" id="note-sessions">
+          <h2>Note sessions and Anchor Docks</h2>
+          <div class="setting-help lead">
+            A <strong>note session</strong> is a durable, discoverable topic
+            container (one Workflowy node plus its subtree). It is marked ONLY by
+            carrying a note-session tag in its name's trailing tag region — the
+            words “note session” never appear in the node name; the tag alone
+            defines it, and the node name is the topic. Storage is chronology;
+            meaning is tags. Anchor Docks are the same vocabulary: the deck's Anchors
+            drawer lists them.
+          </div>
+          <div class="setting-row">
+            <label for="note-session-tags">Note-session tag(s)</label>
+            <input id="note-session-tags" type="text" spellcheck="false" placeholder="wfy-ns" />
+          </div>
+          <div class="setting-help">
+            Default: <code>wfy-ns</code>. Comma-separated list. A node is treated as
+            a note session when its trailing tag region contains <em>any</em> of
+            these tags. The <strong>first</strong> tag is the default applied when
+            creating a new session. Same input rules as the other tag fields:
+            leading <code>#</code> optional, surrounding spaces ignored, emojis
+            allowed, empty / internal-space entries dropped.
+          </div>
+          <div class="setting-row">
+            <label for="note-session-local-postfixes">Local anchor postfix(es)</label>
+            <input id="note-session-local-postfixes" type="text" spellcheck="false" placeholder="local" />
+          </div>
+          <div class="setting-help">
+            Default: <code>local</code>. Comma-separated list of postfix
+            <em>words</em> (bare words &mdash; no <code>#</code>, no <code>--</code>).
+            A postfix appended to an anchor tag as
+            <code>&lt;anchor-tag&gt;--&lt;word&gt;</code> (e.g.
+            <code>wfy-ns--local</code>) marks a <strong>local anchor</strong>: it is
+            still a real anchor (it nests, and still stops a <code>descendants</code>
+            GLIMPSE at its boundary) but is <strong>hidden</strong> from the
+            top-level anchor list. Use it for sub-anchors that only matter inside
+            their parent. The <strong>first</strong> word is applied by
+            <code>create_anchor(local=true)</code>; <em>all</em> words are recognized
+            when reading. Same input rules as the postfix fields (leading
+            <code>#</code> optional, spaces ignored, empty / internal-space entries
+            dropped).
+          </div>
+          <div class="setting-row">
+            <label for="note-session-favorite-postfixes">Favorite anchor postfix(es)</label>
+            <input id="note-session-favorite-postfixes" type="text" spellcheck="false" placeholder="fav" />
+          </div>
+          <div class="setting-help">
+            Default: <code>fav</code>. Comma-separated list of postfix
+            <em>words</em> (bare words &mdash; no <code>#</code>, no <code>--</code>).
+            A postfix appended to an anchor tag as
+            <code>&lt;anchor-tag&gt;--&lt;word&gt;</code> (e.g.
+            <code>wfy-ns--fav</code>) marks a <strong>favorite anchor</strong>
+            (starred, ⭐): it stays in every listing and anchors the favorites
+            shortlist that <code>dock.list</code> and the deck's Anchors drawer
+            show by default (falling back to the full inventory, with a notice
+            naming the tag to use, when nothing is starred). The
+            <strong>first</strong> word is applied by
+            <code>dock.create</code>/<code>dock.promote</code>
+            <code>favorite=true</code>; <em>all</em> words are recognized when
+            reading. A favorite anchor that is also local carries both postfix
+            tags (one per attribute). Same input rules as the postfix fields
+            (leading <code>#</code> optional, spaces ignored, empty /
+            internal-space entries dropped).
+          </div>
+          <div class="setting-row">
+            <label for="global-tags">Global tags in use</label>
+            <input id="global-tags" type="text" spellcheck="false" placeholder="e.g. idea, todo, question" />
+          </div>
+          <div class="setting-help">
+            The tags the note-session system knows about. When capturing into a
+            session, the agent chooses from these (merged with any tags already
+            present in that session). Tags scattered elsewhere in Workflowy that are
+            not listed here are invisible to this system. Comma-separated; may be
+            left empty. The deck's Settings drawer shows this list read-only.
+          </div>
+          <div class="setting-row">
+            <label for="default-note-sessions-parent">Default Note Sessions parent (UUID)</label>
+            <input id="default-note-sessions-parent" type="text" spellcheck="false"
+                   placeholder="paste a Workflowy node UUID" />
+            <button type="button" class="small-toggle" id="default-note-sessions-parent-activate">Activate</button>
+          </div>
+          <div class="setting-help">
+            New note sessions are created under this node when no explicit parent is
+            given. Paste a UUID and click <strong>Activate</strong> to confirm and save
+            it. Leave blank to require an explicit parent at creation time — with
+            no default and no explicit parent, session creation reports an actionable
+            error rather than guessing a location.
+          </div>
+          <div class="setting-help path" id="default-note-sessions-parent-path"></div>
+          <div class="setting-row">
+            <label for="project-maps-location">Project Maps location</label>
+            <input id="project-maps-location" type="text" spellcheck="false"
+                   placeholder="a Workflowy node: UUID, 8-hex or [ap:…]" />
+          </div>
+          <div class="setting-help">
+            Where you keep your Project Maps: a Workflowy node (its UUID, the
+            8-hex start of it, or an <code>[ap:…]</code> AP-ID). It is a pointer
+            and nothing more. Agents read it through
+            <code>system.config.get</code> (<code>project_maps_location</code>),
+            and you can tell an agent to look there; scripts may use it to find
+            a project's map. What goes into a Project Map, and how many you keep
+            there, is entirely up to you: NEXUS never interprets, validates or
+            requires anything inside it. Leave blank for none.
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="hotkeys-shared.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

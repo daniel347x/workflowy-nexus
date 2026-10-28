@@ -1,0 +1,292 @@
+"""S04 Remediation Chain 1 (work-order item 1) — detached-worker
+execution-side barrier recheck.
+
+A governed worker launched and adopted while the barrier is CLEAN must
+still refuse at the execution-side recheck when ANOTHER PROCESS raises the
+hard barrier during bootstrap: zero mutation dispatch, a typed
+``coherence_barrier_active`` job failure persisted through the normal job
+merge-write, and exact-token finalization of the adopted claim.
+
+The worker bootstrap seams (claim adoption, heartbeat, client construction,
+config load, snapshot validation, the worker pin) are stubbed; the recheck
+itself is the REAL shared admission authority against a REAL coherence
+root, and the barrier is raised by a REAL subprocess (second process).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from coherence_harness import NOW, run_subprocess
+
+REPO = Path(__file__).resolve().parents[1]
+
+_RAISE_BARRIER_DRIVER = r"""
+import sys
+sys.path.insert(0, sys.argv[3] + "/tests")
+from pathlib import Path
+from coherence_harness import NOW
+from workflowy_mcp.coherence import (
+    coherence_paths,
+    initialize_manifest_if_absent,
+    new_bootstrap_manifest,
+    raise_global_dirty_barrier,
+)
+
+paths = coherence_paths(sys.argv[2], jobs_root=Path(sys.argv[1]))
+initialize_manifest_if_absent(paths, new_bootstrap_manifest(sys.argv[2], now=NOW))
+raise_global_dirty_barrier(
+    paths,
+    reason_code="ambiguous_commit_outcome",
+    transaction_id="tx-worker-recheck",
+    detail="raised by a second process during worker bootstrap",
+)
+print("barrier raised")
+"""
+
+
+def _make_worker_client(tmp_path: Path, monkeypatch):
+    from pydantic import SecretStr
+
+    from workflowy_mcp.client.api_client_core import WorkFlowyClientCore
+    from workflowy_mcp.models import APIConfiguration
+
+    jobs_root = tmp_path / "cartographer_jobs"
+    jobs_root.mkdir(parents=True, exist_ok=True)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.get_cartographer_jobs_dir",
+        lambda: jobs_root,
+    )
+
+    def _runtime_subdir(*parts):
+        if parts == ("nodes_export_cache",):
+            return snapshot_dir
+        return tmp_path.joinpath(*parts)
+
+    monkeypatch.setattr(
+        "workflowy_mcp.client.api_client_core.get_runtime_subdir", _runtime_subdir
+    )
+    config = APIConfiguration(
+        api_key=SecretStr("test-key-1234"), base_url="https://workflowy.com/api/v1"
+    )
+    return WorkFlowyClientCore(config), jobs_root, config
+
+
+def _install_worker_stubs(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    mode: str,
+    raise_barrier: bool,
+):
+    """Install every worker-bootstrap stub; return the observation dict.
+
+    The barrier recheck under test is NOT stubbed — it runs against the real
+    coherence root of the fixture client.
+    """
+    from workflowy_mcp import weave_worker
+    from workflowy_mcp.coherence import (
+        initialize_manifest_if_absent,
+        new_bootstrap_manifest,
+    )
+
+    client, jobs_root, api_config = _make_worker_client(tmp_path, monkeypatch)
+    paths = client._coherence_paths()
+    account = paths.account_root.name
+    initialize_manifest_if_absent(paths, new_bootstrap_manifest(account, now=NOW))
+
+    async def _close():
+        return None
+
+    client.close = _close
+
+    claim_id = "claim-test-1"
+    job_id = "job-test-1"
+    job = {
+        "id": job_id,
+        "claim_id": claim_id,
+        "account_scope_id": account,
+        "snapshot_path": str(tmp_path / "snapshot.json"),
+        "snapshot_lineage": {
+            "account_scope_id": account,
+            "epoch_number": 0,
+            "epoch_id": "e" * 32,
+            "incorporated_through_seq": 0,
+            "publication_kind": "full_refresh",
+        },
+        "root_uuid": "ROOT",
+        "mode": "file",
+        "status": "running",
+    }
+    job_file = jobs_root / f"{job_id}.json"
+    job_file.write_text(json.dumps(job), encoding="utf-8")
+
+    adoption = {
+        "claim": {
+            "claim_id": claim_id,
+            "job_id": job_id,
+            "account_scope_id": account,
+            "pid": os.getpid(),
+        },
+        "job": dict(job),
+    }
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.adopt_carto_worker_claim",
+        lambda _jf: adoption,
+    )
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.carto_cancel_requested", lambda _jf: False
+    )
+    monkeypatch.setattr(
+        weave_worker, "_start_carto_heartbeat_after_adoption", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "workflowy_mcp.client.api_client.WorkFlowyClient", lambda *a, **k: client
+    )
+    monkeypatch.setattr(
+        "workflowy_mcp.config.get_server_config",
+        lambda reload=False: SimpleNamespace(
+            get_api_config=lambda: api_config,
+            write_governor=None,
+            governance=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "workflowy_mcp.config.get_server_config_meta",
+        lambda: {"source": "test", "config_path": "test-config"},
+    )
+
+    merge_writes: list[dict] = []
+
+    def _merge_spy(_job_file, payload):
+        merge_writes.append(dict(payload))
+        return True
+
+    monkeypatch.setattr(
+        "workflowy_mcp.config.merge_write_carto_job_status", _merge_spy
+    )
+
+    finalize_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.finalize_claim",
+        lambda claim, root: finalize_calls.append((claim, str(root))),
+    )
+    monkeypatch.setattr(
+        "workflowy_mcp.carto_job_governance.load_usable_nodes_export_snapshot",
+        lambda *a, **k: None,
+    )
+
+    async def _fake_pin(_client, _label):
+        if raise_barrier:
+            # The "pause": the worker is mid-bootstrap while a SECOND
+            # PROCESS raises the hard barrier against the shared root.
+            proc = run_subprocess(
+                _RAISE_BARRIER_DRIVER,
+                str(jobs_root),
+                account,
+                str(REPO),
+                timeout=30,
+            )
+            assert proc.returncode == 0, proc.stderr
+
+    monkeypatch.setattr(
+        "workflowy_mcp.coherence.operation_cache.pin_worker_operation_cache",
+        _fake_pin,
+    )
+
+    dispatch_calls: list[tuple[str, dict]] = []
+
+    async def _file_spy(**kwargs):
+        dispatch_calls.append(("file", kwargs))
+        return {"success": True, "refreshed_file_nodes": 1}
+
+    async def _folder_spy(**kwargs):
+        dispatch_calls.append(("folder", kwargs))
+        return {"refreshed_file_nodes": 1}
+
+    async def _pipeline_spy(**kwargs):
+        dispatch_calls.append(("pipeline", kwargs))
+        return {"success": True, "cancelled": False, "continuation_live": False}
+
+    client.refresh_file_node_beacons = _file_spy
+    client.refresh_folder_cartographer_sync = _folder_spy
+    monkeypatch.setattr(
+        "workflowy_mcp.markdown_generate_pipeline.run_markdown_generate_pipeline",
+        _pipeline_spy,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["weave_worker.py", "--mode", mode, "--carto-job-file", str(job_file)],
+    )
+    return {
+        "client": client,
+        "paths": paths,
+        "jobs_root": jobs_root,
+        "claim_id": claim_id,
+        "merge_writes": merge_writes,
+        "finalize_calls": finalize_calls,
+        "dispatch_calls": dispatch_calls,
+    }
+
+
+@pytest.mark.parametrize("mode", ["carto_refresh", "markdown_generate"])
+def test_worker_recheck_refuses_after_second_process_raises_barrier(
+    tmp_path: Path, monkeypatch, mode: str
+):
+    """Launch/adopt clean, pause after launch, a second process raises the
+    barrier, release: the execution-side recheck refuses BEFORE mutation
+    dispatch with a typed failure and exact-token claim finalization."""
+    from workflowy_mcp import weave_worker
+    from workflowy_mcp.coherence import read_manifest
+
+    fx = _install_worker_stubs(tmp_path, monkeypatch, mode=mode, raise_barrier=True)
+
+    with pytest.raises(SystemExit) as excinfo:
+        asyncio.run(weave_worker.main())
+    assert excinfo.value.code == 1
+
+    # Zero mutation dispatch (neither reconcile path nor the md pipeline).
+    assert fx["dispatch_calls"] == []
+    # The adopted claim was finalized through the existing exact-token path.
+    assert fx["finalize_calls"] == [(fx["claim_id"], str(fx["jobs_root"]))]
+    # Exactly one persisted job write: the typed coherence_barrier_active failure.
+    assert len(fx["merge_writes"]) == 1
+    failed = fx["merge_writes"][0]
+    assert failed["status"] == "failed"
+    assert failed["error_kind"] == "coherence_barrier_active"
+    assert "coherence_barrier_active" in failed["error"]
+    # The barrier is genuinely active (raised by the subprocess).
+    manifest = read_manifest(fx["paths"], required=True)
+    assert manifest.dirty_status.active is True
+    assert manifest.dirty_status.transaction_id == "tx-worker-recheck"
+
+
+def test_worker_recheck_clean_path_dispatches_normally(tmp_path: Path, monkeypatch):
+    """Control: with NO barrier the worker passes the recheck and dispatches
+    (proves the dispatch spy placement and the clean fast path)."""
+    from workflowy_mcp import weave_worker
+
+    fx = _install_worker_stubs(
+        tmp_path, monkeypatch, mode="carto_refresh", raise_barrier=False
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        asyncio.run(weave_worker.main())
+    assert excinfo.value.code == 0
+
+    assert [call[0] for call in fx["dispatch_calls"]] == ["file"]
+    statuses = [write.get("status") for write in fx["merge_writes"]]
+    assert "running" in statuses
+    assert "completed" in statuses
+    assert fx["finalize_calls"] == [(fx["claim_id"], str(fx["jobs_root"]))]

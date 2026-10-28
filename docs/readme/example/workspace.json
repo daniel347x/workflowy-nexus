@@ -1,0 +1,329 @@
+{
+  "root": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+  "nodes": [
+    {
+      "id": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+      "name": "🌱 Pantry · example workspace",
+      "note": "A made-up team building **Pantry**, a shared grocery-list app. Example data for the NEXUS README: three Anchor Docks in three branches, and slice groups that cut across them.",
+      "parent_id": "b49affa1-3930-95e3-b2fe-ad9b881285e2",
+      "priority": 1500,
+      "created": 1793135136,
+      "modified": 1793135136
+    },
+    {
+      "id": "51a4b5ad-42d0-4768-8e4e-261971b17c98",
+      "name": "📱 Product",
+      "note": null,
+      "parent_id": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+      "priority": 100,
+      "created": 1793135137,
+      "modified": 1793135137
+    },
+    {
+      "id": "09eba3dd-afdc-4568-ad67-fcc7156808a9",
+      "name": "🗺️ Roadmap",
+      "note": null,
+      "parent_id": "51a4b5ad-42d0-4768-8e4e-261971b17c98",
+      "priority": 100,
+      "created": 1793135138,
+      "modified": 1793135138
+    },
+    {
+      "id": "33a0bac4-28f7-4290-ac37-0faeef64b8dd",
+      "name": "2.0 · Offline lists",
+      "note": null,
+      "parent_id": "09eba3dd-afdc-4568-ad67-fcc7156808a9",
+      "priority": 100,
+      "created": 1793135139,
+      "modified": 1793135139
+    },
+    {
+      "id": "846e35aa-a3f2-45df-8e49-548f43733ed6",
+      "name": "2.1 · Shared lists",
+      "note": null,
+      "parent_id": "09eba3dd-afdc-4568-ad67-fcc7156808a9",
+      "priority": 200,
+      "created": 1793135140,
+      "modified": 1793135140
+    },
+    {
+      "id": "9b70fd4a-0eb1-4930-9bad-f2bdae474315",
+      "name": "2.2 · Meal plans",
+      "note": null,
+      "parent_id": "09eba3dd-afdc-4568-ad67-fcc7156808a9",
+      "priority": 300,
+      "created": 1793135141,
+      "modified": 1793135141
+    },
+    {
+      "id": "484faa8a-3a7f-4969-acd8-961fa198c256",
+      "name": "🚀 Pantry 2.0 release #wfy-ns",
+      "note": "The 2.0 release: what's in it and the checklist to ship. One node per feature; design notes go in the note.",
+      "parent_id": "51a4b5ad-42d0-4768-8e4e-261971b17c98",
+      "priority": 200,
+      "created": 1793135143,
+      "modified": 1793135222
+    },
+    {
+      "id": "983b7baa-223b-40f1-8110-1bd3d1ce1f17",
+      "name": "[ap:Q9Z518] Offline lists: sync design #offline",
+      "note": "**Goal:** a list keeps working with no signal, and nothing typed in the aisle is lost.\n\n- Every edit is saved on the phone first, then queued.\n- The queue syncs the moment the phone is back online.\n- Two people changed the same item? The last edit wins; a delete wins over an edit.\n\n| Case | Result |\n|---|---|\n| Edited offline, then synced | Applied in order |\n| Same item edited on two phones | Last edit wins |\n| Deleted on one phone, edited on the other | Deleted |\n\nAgreed in the design review [ap:LP6AKR].",
+      "parent_id": "484faa8a-3a7f-4969-acd8-961fa198c256",
+      "priority": 100,
+      "created": 1793135144,
+      "modified": 1793135264
+    },
+    {
+      "id": "5a889809-ff5b-4053-a172-7cf99efceb83",
+      "name": "Shared lists: invite by link #sharing",
+      "note": "Send a link; whoever opens it can edit the list. Owners can switch a member to view-only.",
+      "parent_id": "484faa8a-3a7f-4969-acd8-961fa198c256",
+      "priority": 200,
+      "created": 1793135146,
+      "modified": 1793135239
+    },
+    {
+      "id": "98873ca8-f70c-425e-b296-f5279d6e16a7",
+      "name": "Barcode scanner: on-device model",
+      "note": "Scanning works with no network. Model under 5 MB; falls back to typing.",
+      "parent_id": "484faa8a-3a7f-4969-acd8-961fa198c256",
+      "priority": 300,
+      "created": 1793135147,
+      "modified": 1793135147
+    },
+    {
+      "id": "bbca1282-83ed-44b6-b973-e9c620696e9f",
+      "name": "Bug: duplicate items after recipe import",
+      "note": "Importing the same recipe twice adds every ingredient twice. Fix: merge lines with the same name and unit.",
+      "parent_id": "484faa8a-3a7f-4969-acd8-961fa198c256",
+      "priority": 400,
+      "created": 1793135150,
+      "modified": 1793135150
+    },
+    {
+      "id": "501d06a3-f67f-4d2a-8806-890e754139be",
+      "name": "✅ Release checklist",
+      "note": null,
+      "parent_id": "484faa8a-3a7f-4969-acd8-961fa198c256",
+      "priority": 500,
+      "created": 1793135151,
+      "modified": 1793135151
+    },
+    {
+      "id": "79ee1469-9aa2-46f6-a676-96f6acfb34db",
+      "name": "Beta build to 200 testers",
+      "note": null,
+      "parent_id": "501d06a3-f67f-4d2a-8806-890e754139be",
+      "priority": 100,
+      "created": 1793135152,
+      "modified": 1793135152
+    },
+    {
+      "id": "53f88a6d-8cb3-4af2-8234-d13d6d30d064",
+      "name": "Offline QA in a basement supermarket #offline",
+      "note": "Airplane mode is not enough: test where the signal really drops.",
+      "parent_id": "501d06a3-f67f-4d2a-8806-890e754139be",
+      "priority": 200,
+      "created": 1793135153,
+      "modified": 1793135241
+    },
+    {
+      "id": "4a05ba30-6679-4868-b958-bcb741733e21",
+      "name": "App Store screenshots and release notes",
+      "note": null,
+      "parent_id": "501d06a3-f67f-4d2a-8806-890e754139be",
+      "priority": 300,
+      "created": 1793135154,
+      "modified": 1793135154
+    },
+    {
+      "id": "7e923c1c-a01e-4938-ae2a-bd2faa2fe50e",
+      "name": "Turn on sharing for 10% of users #sharing",
+      "note": "",
+      "parent_id": "501d06a3-f67f-4d2a-8806-890e754139be",
+      "priority": 400,
+      "created": 1793135155,
+      "modified": 1793135243
+    },
+    {
+      "id": "0b68f3a8-cbf5-4218-891c-0ec02a7400c2",
+      "name": "🤝 Customers",
+      "note": null,
+      "parent_id": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+      "priority": 200,
+      "created": 1793135157,
+      "modified": 1793135157
+    },
+    {
+      "id": "be7447e1-2440-4bbd-97ce-201a5ccadc0e",
+      "name": "📅 Interview schedule",
+      "note": null,
+      "parent_id": "0b68f3a8-cbf5-4218-891c-0ec02a7400c2",
+      "priority": 100,
+      "created": 1793135158,
+      "modified": 1793135158
+    },
+    {
+      "id": "76ba814f-4e95-484f-a6b7-cebbdca73943",
+      "name": "Tue · two parents who shop weekly",
+      "note": null,
+      "parent_id": "be7447e1-2440-4bbd-97ce-201a5ccadc0e",
+      "priority": 100,
+      "created": 1793135159,
+      "modified": 1793135159
+    },
+    {
+      "id": "b1ff0d86-2a6a-4182-9a17-a128ed6b23af",
+      "name": "Thu · a student house of four",
+      "note": null,
+      "parent_id": "be7447e1-2440-4bbd-97ce-201a5ccadc0e",
+      "priority": 200,
+      "created": 1793135161,
+      "modified": 1793135161
+    },
+    {
+      "id": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "name": "💬 Customer feedback #wfy-ns",
+      "note": "What customers tell us: support tickets, store reviews and interviews, one node per theme. Agents summarize new tickets here.",
+      "parent_id": "0b68f3a8-cbf5-4218-891c-0ec02a7400c2",
+      "priority": 200,
+      "created": 1793135162,
+      "modified": 1793135223
+    },
+    {
+      "id": "240683c8-3cc3-4444-8c88-3f068d886734",
+      "name": "\"My list disappears in the store\": 14 tickets this month #offline",
+      "note": "> \"No signal in the basement aisle, and my list was blank.\"\n> \"Lost three items I added in the parking garage.\"\n\nPattern: underground stores, rural shops, parking garages. All on version 1.9.",
+      "parent_id": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "priority": 100,
+      "created": 1793135163,
+      "modified": 1793135245
+    },
+    {
+      "id": "7f8b756b-fb25-49a5-8080-8807bcca501f",
+      "name": "Request: share one list with my partner #sharing",
+      "note": "31 requests since August. Most want both phones to edit the same list, live.",
+      "parent_id": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "priority": 200,
+      "created": 1793135164,
+      "modified": 1793135246
+    },
+    {
+      "id": "d727d5dd-0f0a-4d04-b35c-b3ac5df1ee2a",
+      "name": "Praise: recipe import",
+      "note": "> \"Saves me twenty minutes every Sunday.\"",
+      "parent_id": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "priority": 300,
+      "created": 1793135165,
+      "modified": 1793135165
+    },
+    {
+      "id": "03eac702-6f89-46ea-84ef-d9954b63b053",
+      "name": "Review digest · Oct 12–18",
+      "note": "★ 4.6 from 212 reviews. Top themes: offline (18), sharing (11), scanner speed (6).",
+      "parent_id": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "priority": 400,
+      "created": 1793135166,
+      "modified": 1793135166
+    },
+    {
+      "id": "5a7d09f5-368c-4127-bb70-5a6a1cadf840",
+      "name": "Old idea: download the whole product catalog #offline--deprecated",
+      "note": "Superseded by the sync design: too big for older phones.",
+      "parent_id": "786aeb66-594c-4551-abe5-2f9056db7f8c",
+      "priority": 500,
+      "created": 1793135168,
+      "modified": 1793135248
+    },
+    {
+      "id": "ba9210cc-3543-4845-ad64-975e545ca8cb",
+      "name": "👥 Team",
+      "note": null,
+      "parent_id": "63a894eb-bae1-4a0e-b8ef-6480cd8e0bc8",
+      "priority": 300,
+      "created": 1793135169,
+      "modified": 1793135169
+    },
+    {
+      "id": "a1fcb003-c012-45d8-b63b-cb43ab0c7c90",
+      "name": "🧭 Onboarding checklist",
+      "note": null,
+      "parent_id": "ba9210cc-3543-4845-ad64-975e545ca8cb",
+      "priority": 100,
+      "created": 1793135171,
+      "modified": 1793135171
+    },
+    {
+      "id": "fd146557-94b1-4431-893d-a94bb4008dba",
+      "name": "📝 Meeting notes #wfy-ns",
+      "note": "One node per meeting: date, topic, decisions. Recaps are written right after the call.",
+      "parent_id": "ba9210cc-3543-4845-ad64-975e545ca8cb",
+      "priority": 200,
+      "created": 1793135172,
+      "modified": 1793135225
+    },
+    {
+      "id": "f447d8b8-bf34-4c82-949a-e51150ddff70",
+      "name": "[ap:0QN6MB] Mon Oct 19 · Planning: offline is the 2.0 headline #offline",
+      "note": "**Decision:** offline lists are the 2.0 headline; sharing moves to 2.1 if offline slips. Owners: Priya (sync), Sam (QA).",
+      "parent_id": "fd146557-94b1-4431-893d-a94bb4008dba",
+      "priority": 100,
+      "created": 1793135174,
+      "modified": 1793135249
+    },
+    {
+      "id": "0e137545-2a53-4de0-9fb9-600d0d07f176",
+      "name": "[ap:LP6AKR] Wed Oct 21 · Design review: how offline edits merge #offline--expand",
+      "note": "Priya walked through the queue-and-merge design ([ap:Q9Z518]). Two rules agreed, one question open.",
+      "parent_id": "fd146557-94b1-4431-893d-a94bb4008dba",
+      "priority": 200,
+      "created": 1793135175,
+      "modified": 1793135263
+    },
+    {
+      "id": "59425486-aaaa-4017-ade7-4e123cbfd5d5",
+      "name": "Decision: the last edit wins, per item",
+      "note": null,
+      "parent_id": "0e137545-2a53-4de0-9fb9-600d0d07f176",
+      "priority": 100,
+      "created": 1793135176,
+      "modified": 1793135176
+    },
+    {
+      "id": "4366d1e8-c246-4c3e-a7db-a02166ed0ab7",
+      "name": "Decision: a delete wins over an edit",
+      "note": null,
+      "parent_id": "0e137545-2a53-4de0-9fb9-600d0d07f176",
+      "priority": 200,
+      "created": 1793135177,
+      "modified": 1793135177
+    },
+    {
+      "id": "dfe102a0-07a0-445d-be74-3ff86cbc992b",
+      "name": "Open question: how to show a conflict on a shared list #sharing",
+      "note": "",
+      "parent_id": "0e137545-2a53-4de0-9fb9-600d0d07f176",
+      "priority": 300,
+      "created": 1793135178,
+      "modified": 1793135252
+    },
+    {
+      "id": "371eefc0-2564-4853-bc11-c2407f6007b9",
+      "name": "Thu Oct 22 · Sharing kickoff #sharing",
+      "note": "Invite links, edit versus view, and what a new member sees first. Owner: Noor.",
+      "parent_id": "fd146557-94b1-4431-893d-a94bb4008dba",
+      "priority": 300,
+      "created": 1793135179,
+      "modified": 1793135254
+    },
+    {
+      "id": "17cce28d-7f6b-4b52-baed-d9593aa697c0",
+      "name": "Fri Oct 23 · Beta retro",
+      "note": "Crash-free sessions 99.2%. Testers love the scanner; two asked for dark mode.",
+      "parent_id": "fd146557-94b1-4431-893d-a94bb4008dba",
+      "priority": 400,
+      "created": 1793135180,
+      "modified": 1793135180
+    }
+  ]
+}

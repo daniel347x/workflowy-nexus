@@ -1,0 +1,124 @@
+{
+ "claim_attributed_to_recon": "1,607 blocks in 450 beacon-language files (1277 python + 330 js_ts) at a345dc7",
+ "meaning_of_1607": "block diagnostic records (python 1274 kept + 3 skipped_unknown_kind; js_ts 330 kept) -- the recon's 'blocks' counter matches the measured block-record totals exactly; 'kept' alone is 1604.",
+ "recon_source": "/mnt/c/tmp/beacon_robustness/area-1/out/nexus_tree.json",
+ "recon_parser_root": "/mnt/c/tmp/beacon_robustness/probes/snapshot (area-1's a1lib import root)",
+ "this_freeze_parser_root": "/mnt/c/tmp/beacon_robustness/area-1/tree (verified byte-exact vs git a345dc7)",
+ "fields": [
+  {
+   "field": "files.total",
+   "recon": 450,
+   "measured": 450,
+   "match": true
+  },
+  {
+   "field": "files.python",
+   "recon": 408,
+   "measured": 408,
+   "match": true
+  },
+  {
+   "field": "files.js_ts",
+   "recon": 22,
+   "measured": 22,
+   "match": true
+  },
+  {
+   "field": "files.markdown",
+   "recon": 20,
+   "measured": 20,
+   "match": true
+  },
+  {
+   "field": "files_with_blocks.python",
+   "recon": 94,
+   "measured": 94,
+   "match": true
+  },
+  {
+   "field": "files_with_blocks.js_ts",
+   "recon": 5,
+   "measured": 5,
+   "match": true
+  },
+  {
+   "field": "files_without_blocks.markdown",
+   "recon": 20,
+   "measured": 20,
+   "match": true
+  },
+  {
+   "field": "block_records.total",
+   "recon": 1607,
+   "measured": 1607,
+   "match": true
+  },
+  {
+   "field": "block_records.python",
+   "recon": 1277,
+   "measured": 1277,
+   "match": true
+  },
+  {
+   "field": "block_records.js_ts",
+   "recon": 330,
+   "measured": 330,
+   "match": true
+  },
+  {
+   "field": "kept.python",
+   "recon": 1274,
+   "measured": 1274,
+   "match": true
+  },
+  {
+   "field": "kept.js_ts",
+   "recon": 330,
+   "measured": 330,
+   "match": true
+  },
+  {
+   "field": "skipped_unknown_kind.python",
+   "recon": 3,
+   "measured": 3,
+   "match": true
+  },
+  {
+   "field": "unterminated.js_ts",
+   "recon": 1,
+   "measured": 1,
+   "match": true
+  },
+  {
+   "field": "opener_in_string_or_code.python",
+   "recon": 22,
+   "measured": 22,
+   "match": true
+  },
+  {
+   "field": "opener_in_string_or_code.js_ts",
+   "recon": 1,
+   "measured": 1,
+   "match": true
+  },
+  {
+   "field": "has_continuation.python (terminated blocks)",
+   "recon": 6,
+   "measured": 6,
+   "match": true
+  },
+  {
+   "field": "continuation_lines[comment].python",
+   "recon": 51,
+   "measured": 51,
+   "match": true
+  }
+ ],
+ "all_match": true,
+ "notes": [
+  "All 20 markdown files show raw_lines != disk_parse lines: _markdown_source_lines splits on '\\n' after CRLF normalization, so a trailing newline yields one extra trailing empty element; the frozen disk_parse input_sha256 pins the exact sanitized+split text.",
+  "The recon's js_ts continuation_lines[None]=14 counts the unterminated block at tests/js/test_saved_tabs_drive_ui.js:1548 through EOF; the continuation scan in named_examples covers terminated blocks only (python: 6 blocks / 51 lines).",
+  "Neither side recomputes hidden_openers here; the recon reported 0 for both languages.",
+  "NEXUS contains no .vue/.sql/.sh/.yaml file at base (0 files of each), so the vue branch of _parse_disk_beacons_for_language has no real-data records in this freeze."
+ ]
+}

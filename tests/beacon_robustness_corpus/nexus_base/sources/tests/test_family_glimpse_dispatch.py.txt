@@ -1,0 +1,196 @@
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from workflowy_mcp import server
+from workflowy_mcp.mcp_api_registry import dispatch_operation, validate_params
+
+
+@pytest.fixture(autouse=True)
+def _boundary_client(monkeypatch):
+    """S03-B: glimpse.run is cache_backed, so the family front wraps dispatch in
+    a cache_operation_boundary; install a boundary-capable client double."""
+    from types import SimpleNamespace
+
+    from coherence_harness import make_boundary_capable
+
+    monkeypatch.setattr(
+        server,
+        "get_client",
+        lambda: make_boundary_capable(SimpleNamespace(), nodes=[]),
+    )
+
+
+def test_glimpse_registry_inventory_describe_and_schema_examples():
+    registry = server.GLIMPSE_REGISTRY
+    assert [spec.verb for spec in registry.operations()] == ["run", "estate"]
+    spec = registry.resolve("run")
+    assert spec is not None
+    assert spec.side_effects == ("render", "modal_push", "artifact_write")
+    assert spec.async_mode == "never"
+    assert spec.param_aliases == {
+        "root_uuid": "root_handle",
+        "slice_group": "group_handle",
+        "since": "recent",
+        "tail": "recent",
+    }
+    # [ap:TVIIBN] 4d(a): the family declares the loud sort_direction rule.
+    assert spec.domain_error_codes == (
+        "glimpse_request_failed",
+        server._SORT_DIRECTION_WITHOUT_SORT_BY_ERROR,
+        *server.SIMPLE_FORM_ERROR_CODES,
+    )
+
+    index = registry.describe_index()
+    assert [row["verb"] for row in index["operations"]] == ["run", "estate", "describe"]
+    full = registry.describe_full("run")
+    assert not set(spec.param_aliases).intersection(
+        full["params_schema"]["properties"]
+    )
+    assert "stop at child Anchor Docks" in full["returns"]["description"]
+    assert "Scope truth table" in full["returns"]["description"]
+    assert "render_spec='modal'" in full["returns"]["description"]
+    assert "'curated'" in full["returns"]["description"]
+    # U6 (ap:E03BN3): the run schema exposes the ancestor_notes TEACHING flag
+    # (boolean; the handler defaults it False so the chronological rule ships),
+    # and the describe text teaches the rule + the opt-out.
+    _props = full["params_schema"]["properties"]
+    assert "ancestor_notes" in _props
+    assert _props["ancestor_notes"]["type"] == "boolean"
+    assert (
+        "Ancestor notes are suppressed on chronological renders"
+        in _props["ancestor_notes"]["description"]
+    )
+    assert "ancestor_notes" in full["returns"]["description"]
+    validate_params(spec, {"root_handle": "R", "ancestor_notes": True})
+    for example in full["examples"]:
+        call = example["call"]
+        validate_params(spec, call.get("params") or {})
+
+
+def test_glimpse_wrapper_zero_arg_and_translation_contract(monkeypatch):
+    calls: list[dict] = []
+
+    async def impl(**kwargs):
+        calls.append(kwargs)
+        return "RAW MARKDOWN"
+
+    monkeypatch.setattr(server, "_glimpse_run_impl", impl)
+
+    assert asyncio.run(server.glimpse_family_tool()) == "RAW MARKDOWN"
+    assert calls[-1]["as_markdown"] is None
+    assert calls[-1]["headings_only"] is None
+    assert calls[-1]["sort_direction"] == "asc"
+
+    assert (
+        asyncio.run(
+            server.glimpse_family_tool(
+                params={
+                    "root_handle": "R",
+                    "group_handle": "G",
+                    "recent": "last 3",
+                    "render_spec": "modal",
+                    "as_markdown": False,
+                    "headings_only": True,
+                    "sort_by": "modified",
+                    "sort_direction": "desc",
+                    "match_scope": "name",
+                    "descend_policy": "stop_at_child_anchors",
+                    "output_file": "out.md",
+                    "push_to_modal": True,
+                    "target_tab": "spine",
+                    "allow_anchor_dock": True,
+                }
+            )
+        )
+        == "RAW MARKDOWN"
+    )
+    assert calls[-1] == {
+        "output_file": "out.md",
+        "as_markdown": False,
+        "target_tab": "spine",
+        "sort_by": "modified",
+        "sort_direction": "desc",
+        "slice_group": "G",
+        "root_uuid": "R",
+        "headings_only": True,
+        "since": "last 3",
+        # [ap:TVIIBN] 4d(a): the recency basis rides the impl kwargs
+        # (default None = resolve at apply: the sort axis, else modified).
+        "recent_by": None,
+        "push_to_modal": True,
+        "match_scope": "name",
+        "descend_policy": "stop_at_child_anchors",
+        # [ap:EPR86W] part a: the depth leg defaults True at the handler (the
+        # unbounded historical walk; a raw-root-only knob).
+        "recursive": True,
+        "render_spec": "modal",
+        "allow_anchor_dock": True,
+        # U6 (ap:E03BN3): the teaching flag defaults False at the registry
+        # handler — the rule ships unless the caller opts out.
+        "ancestor_notes": False,
+        # [ap:0M6VP8]: the heading-id form defaults False at the handler too.
+        "full_uuids": False,
+    }
+
+    # U6: an explicit ancestor_notes=true rides through to the impl (the
+    # sole opt-out of the chronological ancestor-note suppression).
+    assert asyncio.run(
+        server.glimpse_family_tool(
+            "run", {"root_handle": "R3", "ancestor_notes": True}
+        )
+    ) == "RAW MARKDOWN"
+    assert calls[-1]["ancestor_notes"] is True
+
+    assert asyncio.run(
+        server.glimpse_family_tool(
+            "   ", {"root_uuid": "R2", "slice_group": "G2", "since": "1w"}
+        )
+    ) == "RAW MARKDOWN"
+    assert calls[-1]["root_uuid"] == "R2"
+    assert calls[-1]["slice_group"] == "G2"
+    assert calls[-1]["since"] == "1w"
+
+    conflict = asyncio.run(
+        server.glimpse_family_tool(
+            "run", {"root_handle": "R", "root_uuid": "legacy"}
+        )
+    )
+    assert conflict["error"]["code"] == "forbidden_parameter"
+
+    non_string = asyncio.run(server.glimpse_family_tool(7, {}))
+    assert non_string["error"]["code"] == "missing_verb"
+
+
+def test_glimpse_expected_failure_is_losslessly_standardized(monkeypatch):
+    legacy = {"success": False, "error": "scope failed", "detail": {"x": 1}}
+
+    async def impl(**_kwargs):
+        return legacy
+
+    monkeypatch.setattr(server, "_glimpse_run_impl", impl)
+    result = asyncio.run(server.glimpse_family_tool("run", {}))
+    assert result["operation"] == "glimpse.run"
+    assert result["error"]["code"] == "glimpse_request_failed"
+    assert result["error"]["message"] == "scope failed"
+    assert result["error"]["extra"]["legacy_result"] == legacy
+
+
+def test_legacy_glimpse_delegates_to_hoisted_authority(monkeypatch):
+    async def impl(**kwargs):
+        return kwargs
+
+    monkeypatch.setattr(server, "_glimpse_run_impl", impl)
+    result = asyncio.run(server.glimpse(root_uuid="R", since="last 2"))
+    assert result["root_uuid"] == "R"
+    assert result["since"] == "last 2"
+
+
+def test_consolidated_default_registers_glimpse_family_name():
+    tools = asyncio.run(server.mcp.list_tools())
+    names = {tool.name for tool in tools}
+    assert "glimpse" in names
+    assert "workflowy_glimpse" not in names
+    assert "lightning_rod" in names

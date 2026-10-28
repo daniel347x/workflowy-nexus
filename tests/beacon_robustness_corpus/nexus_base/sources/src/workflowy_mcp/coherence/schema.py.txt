@@ -1,0 +1,1794 @@
+"""Versioned durable coherence schemas (S01 §6).
+
+Every durable object carries integer ``schema_version: 1``, an exact account
+scope, strict required fields, JSON-safe values, and deterministic
+``to_dict`` / ``from_dict`` behavior.
+
+Fail-closed doctrine:
+
+- a missing or non-integer version is malformed (``CoherenceSchemaError``);
+- any version other than 1 raises ``UnsupportedCoherenceSchemaError``;
+- booleans never satisfy integer fields;
+- timestamps are timezone-aware UTC ISO-8601 strings;
+- unknown keys on CONTROL artifacts (manifest, journal transaction
+  envelopes, effect envelopes, dirty-barrier state, external-dirt state)
+  fail closed.  Canonical NODE payloads embedded inside effects are the
+  documented extensibility surface: unknown node/cache-metadata keys there
+  are preserved by the §7 codec, never rejected (audit amendment F4).
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import secrets
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+from .. import carto_job_governance as gov
+from .errors import (
+    CoherenceAccountMismatchError,
+    CoherenceError,
+    CoherenceSchemaError,
+    CoherenceStateMissingError,
+    ManifestConflictError,
+    UnsupportedCoherenceSchemaError,
+)
+from .paths import CoherencePaths, coherence_lock, validate_account_scope_id
+
+SCHEMA_VERSION = 1
+
+_COHERENCE_MODES = frozenset({"bootstrap", "transition", "enforced"})
+_OWNER_KINDS = frozenset({"process", "detached_worker", "system"})
+_OWNERSHIP_KINDS = frozenset({"none", "lease", "claim"})
+_DIRT_MUTATION_KINDS = frozenset({"input", "structural", "reconnect", "synthetic"})
+_DETAIL_LIMIT = 500
+
+
+# ---------------------------------------------------------------------------
+# Shared strict-field helpers
+# ---------------------------------------------------------------------------
+
+
+def _artifact_version(payload: Mapping[str, Any], artifact: str, *, path: Any = None) -> int:
+    version = payload.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise CoherenceSchemaError(
+            f"{artifact}: schema_version missing or not an integer", path=path
+        )
+    if version != SCHEMA_VERSION:
+        raise UnsupportedCoherenceSchemaError(
+            f"{artifact}: unsupported schema_version {version}", path=path
+        )
+    return version
+
+
+def _reject_unknown_keys(
+    payload: Mapping[str, Any], allowed: Iterable[str], artifact: str, *, path: Any = None
+) -> None:
+    extra = sorted(set(payload) - set(allowed))
+    if extra:
+        raise CoherenceSchemaError(
+            f"{artifact}: unknown keys fail closed: {extra}", path=path
+        )
+
+
+def _require_int(
+    payload: Mapping[str, Any],
+    key: str,
+    artifact: str,
+    *,
+    minimum: int | None = None,
+    path: Any = None,
+) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise CoherenceSchemaError(f"{artifact}: {key} must be an integer", path=path)
+    if minimum is not None and value < minimum:
+        raise CoherenceSchemaError(
+            f"{artifact}: {key} must be >= {minimum}", path=path
+        )
+    return value
+
+
+def _require_bool(payload: Mapping[str, Any], key: str, artifact: str, *, path: Any = None) -> bool:
+    value = payload.get(key)
+    if not isinstance(value, bool):
+        raise CoherenceSchemaError(f"{artifact}: {key} must be a boolean", path=path)
+    return value
+
+
+def _require_str(payload: Mapping[str, Any], key: str, artifact: str, *, path: Any = None) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise CoherenceSchemaError(f"{artifact}: {key} must be a nonempty string", path=path)
+    return value
+
+
+def _optional_str(payload: Mapping[str, Any], key: str, artifact: str, *, path: Any = None) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise CoherenceSchemaError(f"{artifact}: {key} must be a string or null", path=path)
+    return value
+
+
+def _require_timestamp(value: Any, key: str, artifact: str, *, path: Any = None) -> str:
+    """Validate a timezone-aware UTC ISO-8601 timestamp string."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise CoherenceSchemaError(f"{artifact}: {key} must be a timestamp string", path=path)
+    raw = value.strip()
+    candidate = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise CoherenceSchemaError(
+            f"{artifact}: {key} is not ISO-8601: {raw!r}", path=path
+        ) from exc
+    if parsed.tzinfo is None:
+        raise CoherenceSchemaError(
+            f"{artifact}: {key} must be timezone-aware UTC", path=path
+        )
+    if parsed.utcoffset() != timezone.utc.utcoffset(None):
+        raise CoherenceSchemaError(
+            f"{artifact}: {key} must be UTC", path=path
+        )
+    return raw
+
+
+def _optional_timestamp(value: Any, key: str, artifact: str, *, path: Any = None) -> str | None:
+    if value is None:
+        return None
+    return _require_timestamp(value, key, artifact, path=path)
+
+
+def _require_json_safe(value: Any, key: str, artifact: str, *, path: Any = None) -> Any:
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError) as exc:
+        raise CoherenceSchemaError(
+            f"{artifact}: {key} must be JSON-safe", path=path
+        ) from exc
+    return value
+
+
+def _bound_detail(value: str | None) -> str | None:
+    if value is not None and len(value) > _DETAIL_LIMIT:
+        return value[:_DETAIL_LIMIT]
+    return value
+
+
+def _optional_str_field(value: Any, key: str, artifact: str) -> str | None:
+    """Constructor-side strict optional-string validation (A9)."""
+
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise CoherenceSchemaError(f"{artifact}: {key} must be a string or null")
+    return value
+
+
+def _attach_context(
+    exc: BaseException, *, path: Any = None, account: str | None = None
+) -> BaseException:
+    """Re-attach known artifact context to constructor-raised errors (so a
+    malformed on-disk artifact never reports path=None)."""
+
+    if isinstance(exc, CoherenceError):
+        additions: list[str] = []
+        if exc.path is None and path is not None:
+            exc.path = str(path)
+            additions.append(f"path={exc.path}")
+        if exc.account_scope_id is None and account is not None:
+            exc.account_scope_id = account
+            additions.append(f"account={account}")
+        if additions and exc.args:
+            exc.args = (f"{exc.args[0]} (+{', '.join(additions)})",)
+    return exc
+
+
+def _new_epoch_id() -> str:
+    return secrets.token_hex(16)
+
+
+def utc_now() -> str:
+    return gov.utc_now_iso()
+
+
+# ---------------------------------------------------------------------------
+# Hard dirty barrier v1 (nested in the manifest) — §6.2
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, init=False)
+class DirtyBarrierState:
+    """Durable hard coherence failure state.  S01 validates/constructs only;
+    S04 owns production writes/enforcement.
+
+    The public constructor surface is the SPECIFIED ``affected_region=``
+    keyword; the value is stored deep-owned in a private field and escapes
+    only as a deep copy through the ``affected_region`` property.
+    """
+
+    schema_version: int
+    account_scope_id: str
+    active: bool
+    generation: int
+    reason_code: str | None
+    detail: str | None
+    transaction_id: str | None
+    # Deeply immutable by ownership (S1): the region never escapes except as
+    # a deep copy through the ``affected_region`` property below.
+    _affected_region: dict | None
+    raised_at: str | None
+
+    _KEYS = (
+        "schema_version",
+        "account_scope_id",
+        "active",
+        "generation",
+        "reason_code",
+        "detail",
+        "transaction_id",
+        "affected_region",
+        "raised_at",
+    )
+
+    def __init__(
+        self,
+        *,
+        schema_version: int,
+        account_scope_id: str,
+        active: bool,
+        generation: int,
+        reason_code: str | None,
+        detail: str | None,
+        transaction_id: str | None,
+        affected_region: dict | None,
+        raised_at: str | None,
+    ) -> None:
+        import copy as _copy
+
+        object.__setattr__(self, "schema_version", schema_version)
+        object.__setattr__(self, "account_scope_id", account_scope_id)
+        object.__setattr__(self, "active", active)
+        object.__setattr__(self, "generation", generation)
+        object.__setattr__(self, "reason_code", reason_code)
+        object.__setattr__(self, "detail", detail)
+        object.__setattr__(self, "transaction_id", transaction_id)
+        object.__setattr__(
+            self,
+            "_affected_region",
+            None if affected_region is None else _copy.deepcopy(affected_region),
+        )
+        object.__setattr__(self, "raised_at", raised_at)
+        self._validate()
+
+    @property
+    def affected_region(self) -> dict | None:
+        """Deeply immutable by ownership: every read returns a deep copy."""
+
+        import copy as _copy
+
+        return _copy.deepcopy(self._affected_region)
+
+    def _validate(self) -> None:
+        if isinstance(self.schema_version, bool) or self.schema_version != SCHEMA_VERSION:
+            raise CoherenceSchemaError("dirty barrier: schema_version must be 1")
+        validate_account_scope_id(self.account_scope_id)
+        if not isinstance(self.active, bool):
+            raise CoherenceSchemaError("dirty barrier: active must be a boolean")
+        if isinstance(self.generation, bool) or not isinstance(self.generation, int) or self.generation < 0:
+            raise CoherenceSchemaError("dirty barrier: generation must be a non-negative integer")
+        _optional_str_field(self.reason_code, "reason_code", "dirty barrier")
+        _optional_str_field(self.detail, "detail", "dirty barrier")
+        _optional_str_field(self.transaction_id, "transaction_id", "dirty barrier")
+        if self.active:
+            if not self.reason_code:
+                raise CoherenceSchemaError("dirty barrier: active state requires reason_code")
+            if not self.raised_at:
+                raise CoherenceSchemaError("dirty barrier: active state requires raised_at")
+        if self._affected_region is not None:
+            if not isinstance(self._affected_region, dict):
+                raise CoherenceSchemaError("dirty barrier: affected_region must be an object or null")
+            _require_json_safe(self._affected_region, "affected_region", "dirty barrier")
+        if self.raised_at is not None:
+            _require_timestamp(self.raised_at, "raised_at", "dirty barrier")
+
+    @classmethod
+    def clean(cls, account_scope_id: str) -> DirtyBarrierState:
+        """The clean initial state: generation 0, all diagnostic fields null."""
+
+        return cls(
+            schema_version=SCHEMA_VERSION,
+            account_scope_id=validate_account_scope_id(account_scope_id),
+            active=False,
+            generation=0,
+            reason_code=None,
+            detail=None,
+            transaction_id=None,
+            affected_region=None,
+            raised_at=None,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "account_scope_id": self.account_scope_id,
+            "active": self.active,
+            "generation": self.generation,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "transaction_id": self.transaction_id,
+            "affected_region": self.affected_region,
+            "raised_at": self.raised_at,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *, path: Any = None) -> DirtyBarrierState:
+        _artifact_version(payload, "dirty barrier", path=path)
+        _reject_unknown_keys(payload, cls._KEYS, "dirty barrier", path=path)
+        account = payload.get("account_scope_id")
+        if not isinstance(account, str):
+            raise CoherenceSchemaError("dirty barrier: account_scope_id required", path=path)
+        try:
+            return cls(
+                schema_version=SCHEMA_VERSION,
+                account_scope_id=validate_account_scope_id(account),
+                active=_require_bool(payload, "active", "dirty barrier", path=path),
+                generation=_require_int(payload, "generation", "dirty barrier", minimum=0, path=path),
+                reason_code=_optional_str(payload, "reason_code", "dirty barrier", path=path),
+                detail=_optional_str(payload, "detail", "dirty barrier", path=path),
+                transaction_id=_optional_str(payload, "transaction_id", "dirty barrier", path=path),
+                affected_region=payload.get("affected_region"),
+                raised_at=_optional_timestamp(
+                    payload.get("raised_at"), "raised_at", "dirty barrier", path=path
+                ),
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path, account=account) from exc
+
+
+# ---------------------------------------------------------------------------
+# External dirt v1 — physically and semantically separate — §6.3
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@ExternalDirtState-3j99,
+#   role=ExternalDirtState,
+#   slice_labels=mci-barrier-dirt,
+#   kind=ast,
+# ]
+class ExternalDirtState:
+    """Shared GUI/external-edit dirt: stale-but-uncorrupted (refresh
+    recommended).  NEVER conflated with the hard dirty barrier."""
+
+    schema_version: int
+    account_scope_id: str
+    active: bool
+    generation: int
+    observed_at: str | None
+    mutation_kind: Literal["input", "structural", "reconnect", "synthetic"] | None
+    node_uuid: str | None
+    parent_uuid: str | None
+    detail: str | None
+
+    _KEYS = (
+        "schema_version",
+        "account_scope_id",
+        "active",
+        "generation",
+        "observed_at",
+        "mutation_kind",
+        "node_uuid",
+        "parent_uuid",
+        "detail",
+    )
+
+    def __post_init__(self) -> None:
+        if isinstance(self.schema_version, bool) or self.schema_version != SCHEMA_VERSION:
+            raise CoherenceSchemaError("external dirt: schema_version must be 1")
+        validate_account_scope_id(self.account_scope_id)
+        if not isinstance(self.active, bool):
+            raise CoherenceSchemaError("external dirt: active must be a boolean")
+        if isinstance(self.generation, bool) or not isinstance(self.generation, int) or self.generation < 0:
+            raise CoherenceSchemaError("external dirt: generation must be a non-negative integer")
+        if self.mutation_kind is not None and self.mutation_kind not in _DIRT_MUTATION_KINDS:
+            raise CoherenceSchemaError(
+                f"external dirt: mutation_kind must be one of {sorted(_DIRT_MUTATION_KINDS)} or null"
+            )
+        _optional_str_field(self.node_uuid, "node_uuid", "external dirt")
+        _optional_str_field(self.parent_uuid, "parent_uuid", "external dirt")
+        _optional_str_field(self.detail, "detail", "external dirt")
+        if self.active and not self.observed_at:
+            raise CoherenceSchemaError("external dirt: active state requires observed_at")
+        if self.observed_at is not None:
+            _require_timestamp(self.observed_at, "observed_at", "external dirt")
+
+    @classmethod
+    def clean(cls, account_scope_id: str) -> ExternalDirtState:
+        return cls(
+            schema_version=SCHEMA_VERSION,
+            account_scope_id=validate_account_scope_id(account_scope_id),
+            active=False,
+            generation=0,
+            observed_at=None,
+            mutation_kind=None,
+            node_uuid=None,
+            parent_uuid=None,
+            detail=None,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "account_scope_id": self.account_scope_id,
+            "active": self.active,
+            "generation": self.generation,
+            "observed_at": self.observed_at,
+            "mutation_kind": self.mutation_kind,
+            "node_uuid": self.node_uuid,
+            "parent_uuid": self.parent_uuid,
+            "detail": self.detail,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *, path: Any = None) -> ExternalDirtState:
+        _artifact_version(payload, "external dirt", path=path)
+        _reject_unknown_keys(payload, cls._KEYS, "external dirt", path=path)
+        account = payload.get("account_scope_id")
+        if not isinstance(account, str):
+            raise CoherenceSchemaError("external dirt: account_scope_id required", path=path)
+        try:
+            return cls(
+                schema_version=SCHEMA_VERSION,
+                account_scope_id=validate_account_scope_id(account),
+                active=_require_bool(payload, "active", "external dirt", path=path),
+                generation=_require_int(payload, "generation", "external dirt", minimum=0, path=path),
+                observed_at=_optional_timestamp(
+                    payload.get("observed_at"), "observed_at", "external dirt", path=path
+                ),
+                mutation_kind=payload.get("mutation_kind"),
+                node_uuid=_optional_str(payload, "node_uuid", "external dirt", path=path),
+                parent_uuid=_optional_str(payload, "parent_uuid", "external dirt", path=path),
+                detail=_optional_str(payload, "detail", "external dirt", path=path),
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path, account=account) from exc
+
+
+# ---------------------------------------------------------------------------
+# Coherence Manifest v1 — §6.1
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=coherence@schema-models,
+#   slice_labels=carto-governance,mci-epoch-schema,
+#   kind=ast,
+#   comment=S01 durable manifest authority model: account/epoch identity (with durable previous_epoch_id for post-cut lineage), base incorporation watermark, journal floor/head, coherence mode, nested hard dirty barrier; strict v1 validation with every lineage invariant fail-closed. Since CUT-1 covered_barrier_required_lease_ids is inert parsed residue, carried unchanged by every publisher; CUT-2A owns its removal.,
+# ]
+@dataclass(frozen=True)
+class CoherenceManifest:
+    """The Coherence Manifest: account/epoch identity, base snapshot lineage,
+    journal watermarks, coherence mode, the nested hard dirty barrier, and
+    the inert parsed ``covered_barrier_required_lease_ids`` residue.
+    Since CUT-1 every publisher carries it unchanged; CUT-2A removes it."""
+
+    schema_version: int
+    account_scope_id: str
+    epoch_number: int
+    epoch_id: str
+    base_snapshot_path: str | None
+    base_incorporated_through_seq: int
+    journal_floor_seq: int
+    journal_head_seq: int
+    coherence_mode: Literal["bootstrap", "transition", "enforced"]
+    dirty_status: DirtyBarrierState
+    created_at: str
+    updated_at: str
+    # Durable immediate-predecessor epoch identity (S02 forward-blocking
+    # lineage fix): set by the epoch publisher at a cut; None in bootstrap.
+    previous_epoch_id: str | None = None
+    # Inert parsed residue since CUT-1: empty in bootstrap and carried
+    # unchanged by every publisher, including full refresh. Keep the shape,
+    # validation and serialization until CUT-2A removes the field.
+    covered_barrier_required_lease_ids: tuple[str, ...] = ()
+
+    _KEYS = (
+        "schema_version",
+        "account_scope_id",
+        "epoch_number",
+        "epoch_id",
+        "base_snapshot_path",
+        "base_incorporated_through_seq",
+        "journal_floor_seq",
+        "journal_head_seq",
+        "coherence_mode",
+        "dirty_status",
+        "created_at",
+        "updated_at",
+        "previous_epoch_id",
+        "covered_barrier_required_lease_ids",
+    )
+
+    def __post_init__(self) -> None:
+        if isinstance(self.schema_version, bool) or self.schema_version != SCHEMA_VERSION:
+            raise CoherenceSchemaError("manifest: schema_version must be 1")
+        validate_account_scope_id(self.account_scope_id)
+        for key in (
+            "epoch_number",
+            "base_incorporated_through_seq",
+            "journal_floor_seq",
+            "journal_head_seq",
+        ):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise CoherenceSchemaError(f"manifest: {key} must be a non-negative integer")
+        if not isinstance(self.epoch_id, str) or not self.epoch_id:
+            raise CoherenceSchemaError("manifest: epoch_id must be a nonempty string")
+        # Lineage invariants for the durable predecessor (R2/S2): epoch 0
+        # (bootstrap) NEVER has a predecessor; every post-cut epoch (>= 1)
+        # MUST carry a nonempty predecessor distinct from the current epoch.
+        if self.epoch_number == 0:
+            if self.previous_epoch_id is not None:
+                raise CoherenceSchemaError(
+                    "manifest: epoch 0 cannot carry a previous_epoch_id"
+                )
+        else:
+            if not isinstance(self.previous_epoch_id, str) or not self.previous_epoch_id:
+                raise CoherenceSchemaError(
+                    "manifest: post-cut epochs require a nonempty previous_epoch_id"
+                )
+            if self.previous_epoch_id == self.epoch_id:
+                raise CoherenceSchemaError(
+                    "manifest: previous_epoch_id must differ from epoch_id"
+                )
+        if self.coherence_mode not in _COHERENCE_MODES:
+            raise CoherenceSchemaError(
+                f"manifest: coherence_mode must be one of {sorted(_COHERENCE_MODES)}"
+            )
+        # Lineage invariants (S01 §6.1).
+        if self.base_incorporated_through_seq > self.journal_head_seq:
+            raise CoherenceSchemaError(
+                "manifest: base_incorporated_through_seq must be <= journal_head_seq"
+            )
+        if self.journal_floor_seq != self.base_incorporated_through_seq + 1:
+            raise CoherenceSchemaError(
+                "manifest: journal_floor_seq must equal base_incorporated_through_seq + 1"
+            )
+        # An empty active journal is floor == head + 1 (i.e. incorporated == head).
+        if self.base_snapshot_path is None:
+            if self.coherence_mode != "bootstrap":
+                raise CoherenceSchemaError(
+                    "manifest: base_snapshot_path is null only in bootstrap mode"
+                )
+        else:
+            import os as _os
+
+            if not isinstance(self.base_snapshot_path, str) or not _os.path.isabs(
+                self.base_snapshot_path
+            ):
+                raise CoherenceSchemaError(
+                    "manifest: base_snapshot_path must be an absolute normalized path"
+                )
+            normalized = _os.path.normpath(self.base_snapshot_path)
+            if normalized != self.base_snapshot_path:
+                raise CoherenceSchemaError(
+                    "manifest: base_snapshot_path must be normalized"
+                )
+        if self.dirty_status.account_scope_id != self.account_scope_id:
+            raise CoherenceAccountMismatchError(
+                "manifest: dirty_status account does not match manifest account",
+                account_scope_id=self.account_scope_id,
+                epoch_id=self.epoch_id,
+            )
+        # The coverage receipt tolerates a serialized list (to_dict /
+        # manifest_with_updates round-trip) and normalizes to the canonical
+        # sorted, duplicate-free, 32-hex tuple.
+        if isinstance(self.covered_barrier_required_lease_ids, list):
+            object.__setattr__(
+                self,
+                "covered_barrier_required_lease_ids",
+                tuple(self.covered_barrier_required_lease_ids),
+            )
+        _validate_lease_id_tuple(
+            self.covered_barrier_required_lease_ids, label="manifest"
+        )
+        _require_timestamp(self.created_at, "created_at", "manifest")
+        _require_timestamp(self.updated_at, "updated_at", "manifest")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "account_scope_id": self.account_scope_id,
+            "epoch_number": self.epoch_number,
+            "epoch_id": self.epoch_id,
+            "base_snapshot_path": self.base_snapshot_path,
+            "base_incorporated_through_seq": self.base_incorporated_through_seq,
+            "journal_floor_seq": self.journal_floor_seq,
+            "journal_head_seq": self.journal_head_seq,
+            "coherence_mode": self.coherence_mode,
+            "dirty_status": self.dirty_status.to_dict(),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "previous_epoch_id": self.previous_epoch_id,
+            "covered_barrier_required_lease_ids": list(
+                self.covered_barrier_required_lease_ids
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *, path: Any = None) -> CoherenceManifest:
+        _artifact_version(payload, "manifest", path=path)
+        _reject_unknown_keys(payload, cls._KEYS, "manifest", path=path)
+        account = payload.get("account_scope_id")
+        if not isinstance(account, str):
+            raise CoherenceSchemaError("manifest: account_scope_id required", path=path)
+        dirty = payload.get("dirty_status")
+        if not isinstance(dirty, Mapping):
+            raise CoherenceSchemaError("manifest: dirty_status must be an object", path=path)
+        base_path = payload.get("base_snapshot_path")
+        if base_path is not None and not isinstance(base_path, str):
+            raise CoherenceSchemaError(
+                "manifest: base_snapshot_path must be a string or null", path=path
+            )
+        raw_covered_ids = payload.get("covered_barrier_required_lease_ids")
+        if raw_covered_ids is None:
+            covered_ids: tuple[str, ...] = ()  # pre-Chain-4 artifact reads uncovered
+        elif not isinstance(raw_covered_ids, list):
+            raise CoherenceSchemaError(
+                "manifest: covered_barrier_required_lease_ids must be an array",
+                path=path,
+            )
+        else:
+            covered_ids = _validate_lease_id_tuple(
+                tuple(raw_covered_ids), path=path, label="manifest"
+            )
+        try:
+            return cls(
+                schema_version=SCHEMA_VERSION,
+                account_scope_id=validate_account_scope_id(account),
+                epoch_number=_require_int(payload, "epoch_number", "manifest", minimum=0, path=path),
+                epoch_id=_require_str(payload, "epoch_id", "manifest", path=path),
+                base_snapshot_path=base_path,
+                base_incorporated_through_seq=_require_int(
+                    payload, "base_incorporated_through_seq", "manifest", minimum=0, path=path
+                ),
+                journal_floor_seq=_require_int(
+                    payload, "journal_floor_seq", "manifest", minimum=0, path=path
+                ),
+                journal_head_seq=_require_int(
+                    payload, "journal_head_seq", "manifest", minimum=0, path=path
+                ),
+                coherence_mode=payload.get("coherence_mode"),
+                dirty_status=DirtyBarrierState.from_dict(dirty, path=path),
+                created_at=_require_timestamp(
+                    payload.get("created_at"), "created_at", "manifest", path=path
+                ),
+                updated_at=_require_timestamp(
+                    payload.get("updated_at"), "updated_at", "manifest", path=path
+                ),
+                previous_epoch_id=_optional_str(
+                    payload, "previous_epoch_id", "manifest", path=path
+                ),
+                covered_barrier_required_lease_ids=covered_ids,
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path, account=account) from exc
+
+
+# @beacon[
+#   id=coherence@manifest-constructors,
+#   slice_labels=carto-governance,mci-epoch-schema,
+#   kind=ast,
+#   comment=S01 manifest constructors and CAS-guarded IO: bootstrap factory, validated pure updater, strict read, compare-and-swap write, O_EXCL first-writer initialization.,
+# ]
+def new_bootstrap_manifest(account_scope_id: str, now: str | None = None) -> CoherenceManifest:
+    """Create the bootstrap manifest for one account scope.
+
+    Bootstrap has no base snapshot (``base_snapshot_path=None``), epoch
+    number 0, and an empty journal (floor 1, head 0, incorporated 0).
+    """
+
+    scope = validate_account_scope_id(account_scope_id)
+    stamp = now or utc_now()
+    return CoherenceManifest(
+        schema_version=SCHEMA_VERSION,
+        account_scope_id=scope,
+        epoch_number=0,
+        epoch_id=_new_epoch_id(),
+        base_snapshot_path=None,
+        base_incorporated_through_seq=0,
+        journal_floor_seq=1,
+        journal_head_seq=0,
+        coherence_mode="bootstrap",
+        dirty_status=DirtyBarrierState.clean(scope),
+        created_at=stamp,
+        updated_at=stamp,
+    )
+
+
+def manifest_with_updates(
+    manifest: CoherenceManifest, now: str | None = None, **changes: Any
+) -> CoherenceManifest:
+    """Return a NEW validated manifest with the supplied field changes.
+
+    ``updated_at`` refreshes automatically unless explicitly supplied.
+    """
+
+    unknown = sorted(set(changes) - set(CoherenceManifest._KEYS) - {"updated_at"})
+    if unknown:
+        raise CoherenceSchemaError(f"manifest: cannot update unknown fields {unknown}")
+    if "schema_version" in changes:
+        raise CoherenceSchemaError("manifest: schema_version cannot change")
+    payload = manifest.to_dict()
+    dirty_payload = payload.pop("dirty_status")
+    payload.update(changes)
+    if "updated_at" not in changes:
+        payload["updated_at"] = now or utc_now()
+    dirty = changes.get("dirty_status")
+    if isinstance(dirty, DirtyBarrierState):
+        payload["dirty_status"] = dirty
+    elif isinstance(dirty, Mapping):
+        payload["dirty_status"] = DirtyBarrierState.from_dict(dirty)
+    else:
+        payload["dirty_status"] = DirtyBarrierState.from_dict(dirty_payload)
+    return CoherenceManifest(**payload)
+
+
+def read_manifest(paths: CoherencePaths, *, required: bool = True) -> CoherenceManifest | None:
+    """Read and strictly validate the manifest.  Missing state is a bootstrap
+    concern (``CoherenceStateMissingError``) unless ``required=False``."""
+
+    if not paths.manifest_path.exists():
+        if required:
+            raise CoherenceStateMissingError(
+                "coherence manifest is not initialized",
+                path=paths.manifest_path,
+            )
+        return None
+    try:
+        with paths.manifest_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise CoherenceSchemaError(
+            f"manifest: malformed JSON: {exc}", path=paths.manifest_path
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise CoherenceSchemaError(
+            "manifest: top-level JSON must be an object", path=paths.manifest_path
+        )
+    manifest = CoherenceManifest.from_dict(payload, path=paths.manifest_path)
+    if manifest.account_scope_id != _account_from_paths(paths):
+        raise CoherenceAccountMismatchError(
+            "manifest account does not match the coherence paths account root",
+            path=paths.manifest_path,
+            account_scope_id=manifest.account_scope_id,
+        )
+    return manifest
+
+
+def write_manifest(
+    paths: CoherencePaths,
+    manifest: CoherenceManifest,
+    *,
+    expected_epoch_id: str | None = None,
+    expected_head_seq: int | None = None,
+    fs_ops: Any = None,
+) -> CoherenceManifest:
+    """Atomically replace the manifest with compare-and-swap guards.
+
+    When expected values are supplied the on-disk manifest must match them;
+    stale writers receive ``ManifestConflictError`` and never overwrite.
+    Callers hold the coherence mutex around read-check-write sequences.
+    """
+
+    from .durable_io import atomic_write_json_durable
+
+    if manifest.account_scope_id != _account_from_paths(paths):
+        raise CoherenceAccountMismatchError(
+            "manifest account does not match the coherence paths account root",
+            path=paths.manifest_path,
+            account_scope_id=manifest.account_scope_id,
+        )
+    if expected_epoch_id is not None or expected_head_seq is not None:
+        current = read_manifest(paths, required=True)
+        assert current is not None
+        if expected_epoch_id is not None and current.epoch_id != expected_epoch_id:
+            raise ManifestConflictError(
+                "manifest epoch changed underneath writer",
+                path=paths.manifest_path,
+                account_scope_id=manifest.account_scope_id,
+                epoch_id=manifest.epoch_id,
+            )
+        if expected_head_seq is not None and current.journal_head_seq != expected_head_seq:
+            raise ManifestConflictError(
+                "manifest journal head changed underneath writer",
+                path=paths.manifest_path,
+                account_scope_id=manifest.account_scope_id,
+                epoch_id=manifest.epoch_id,
+                sequence=current.journal_head_seq,
+            )
+    atomic_write_json_durable(paths.manifest_path, manifest.to_dict(), fs_ops=fs_ops)
+    return manifest
+
+
+def initialize_manifest_if_absent(
+    paths: CoherencePaths, manifest: CoherenceManifest
+) -> CoherenceManifest:
+    """Lock-protected first-writer initialization.
+
+    Creates the coherence directory skeleton, seeds the mutex, then — under
+    the held coherence mutex — writes the manifest ONLY when absent.  Every
+    concurrent initializer returns the ONE persisted first manifest (never
+    its own discarded candidate), so bootstrap lineage is deterministic
+    across processes (audit amendment A1).
+    """
+
+    from .paths import ensure_coherence_directories
+
+    ensure_coherence_directories(paths)
+    _ensure_mutex_seed(paths)
+    if manifest.account_scope_id != _account_from_paths(paths):
+        raise CoherenceAccountMismatchError(
+            "manifest account does not match the coherence paths account root",
+            path=paths.manifest_path,
+            account_scope_id=manifest.account_scope_id,
+        )
+    with coherence_lock(paths):
+        existing = read_manifest(paths, required=False)
+        if existing is not None:
+            if existing.account_scope_id != manifest.account_scope_id:
+                raise CoherenceAccountMismatchError(
+                    "existing manifest belongs to another account scope",
+                    path=paths.manifest_path,
+                    account_scope_id=manifest.account_scope_id,
+                )
+            return existing
+        from .durable_io import atomic_write_json_durable
+
+        atomic_write_json_durable(paths.manifest_path, manifest.to_dict())
+        return manifest
+
+
+# ---------------------------------------------------------------------------
+# External dirt IO — §6.3 (primitives only; no callers wired yet)
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=auto-beacon@read_external_dirt-zm20,
+#   role=read_external_dirt,
+#   slice_labels=mci-barrier-dirt,
+#   kind=ast,
+# ]
+def read_external_dirt(
+    paths: CoherencePaths, *, required: bool = False
+) -> ExternalDirtState | None:
+    """Read external dirt state.  Missing state yields the clean generation-0
+    state unless ``required=True``."""
+
+    if not paths.external_dirt_path.exists():
+        if required:
+            raise CoherenceStateMissingError(
+                "external dirt state is not initialized",
+                path=paths.external_dirt_path,
+            )
+        return ExternalDirtState.clean(_account_from_paths(paths))
+    try:
+        with paths.external_dirt_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise CoherenceSchemaError(
+            f"external dirt: malformed JSON: {exc}", path=paths.external_dirt_path
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise CoherenceSchemaError(
+            "external dirt: top-level JSON must be an object", path=paths.external_dirt_path
+        )
+    state = ExternalDirtState.from_dict(payload, path=paths.external_dirt_path)
+    if state.account_scope_id != _account_from_paths(paths):
+        raise CoherenceAccountMismatchError(
+            "external dirt account does not match the coherence paths account root",
+            path=paths.external_dirt_path,
+            account_scope_id=state.account_scope_id,
+        )
+    return state
+
+
+# @beacon[
+#   id=auto-beacon@write_external_dirt-qxzi,
+#   role=write_external_dirt,
+#   slice_labels=mci-barrier-dirt,
+#   kind=ast,
+# ]
+def write_external_dirt(
+    paths: CoherencePaths, state: ExternalDirtState, *, fs_ops: Any = None
+) -> ExternalDirtState:
+    from .durable_io import atomic_write_json_durable
+
+    if state.account_scope_id != _account_from_paths(paths):
+        raise CoherenceAccountMismatchError(
+            "external dirt account does not match the coherence paths account root",
+            path=paths.external_dirt_path,
+            account_scope_id=state.account_scope_id,
+        )
+    atomic_write_json_durable(paths.external_dirt_path, state.to_dict(), fs_ops=fs_ops)
+    return state
+
+
+def _ensure_mutex_seed(paths: CoherencePaths) -> None:
+    """Seed the coherence mutex file with its lock byte at initialization.
+
+    msvcrt byte-range locking cannot lock an empty file, and the audited
+    ``_open_lock_handle`` writes the seed byte when the file is empty — so
+    seeding at initialization keeps first-use contention from racing the
+    seed write itself.  Race-safe by construction: append-mode open never
+    truncates, a concurrent seeder writes the same single byte, and any
+    OS-level contention (e.g. another process already holding the lock) is
+    advisory-swallowed — the audited opener also seeds on open when empty.
+    """
+
+    import os as _os
+
+    try:
+        with paths.coherence_mutex.open("ab") as handle:
+            handle.seek(0, _os.SEEK_END)
+            if handle.tell() < 1:
+                handle.write(b"\0")
+    except OSError:
+        pass
+
+
+def _account_from_paths(paths: CoherencePaths) -> str:
+    return validate_account_scope_id(paths.account_root.name)
+
+
+# ---------------------------------------------------------------------------
+# Journal transaction envelope v1 — §6.4
+# ---------------------------------------------------------------------------
+
+
+# @beacon[
+#   id=coherence@journal-models,
+#   slice_labels=carto-governance,mci-journal-effects,
+#   kind=ast,
+#   comment=S01 journal envelope models: JournalProducer (secret-free ownership/governance provenance), bounded VerificationEvidence (diagnostic, never reducer authority), immutable JournalTransaction with construction-time JSON-safety.,
+# ]
+@dataclass(frozen=True)
+class JournalProducer:
+    """Who produced a record.  Carries no secret; supports later
+    transaction-bound governance without schema replacement."""
+
+    pid: int
+    pid_create_time: float
+    owner_kind: Literal["process", "detached_worker", "system"]
+    ownership_kind: Literal["none", "lease", "claim"]
+    ownership_token: str | None = None
+    job_id: str | None = None
+
+    _KEYS = (
+        "pid",
+        "pid_create_time",
+        "owner_kind",
+        "ownership_kind",
+        "ownership_token",
+        "job_id",
+    )
+
+    def __post_init__(self) -> None:
+        if isinstance(self.pid, bool) or not isinstance(self.pid, int) or self.pid <= 0:
+            raise CoherenceSchemaError("producer: pid must be a positive integer")
+        if (
+            isinstance(self.pid_create_time, bool)
+            or not isinstance(self.pid_create_time, (int, float))
+            or not math.isfinite(float(self.pid_create_time))
+        ):
+            raise CoherenceSchemaError("producer: pid_create_time must be finite")
+        if self.owner_kind not in _OWNER_KINDS:
+            raise CoherenceSchemaError(
+                f"producer: owner_kind must be one of {sorted(_OWNER_KINDS)}"
+            )
+        if self.ownership_kind not in _OWNERSHIP_KINDS:
+            raise CoherenceSchemaError(
+                f"producer: ownership_kind must be one of {sorted(_OWNERSHIP_KINDS)}"
+            )
+        _optional_str_field(self.ownership_token, "ownership_token", "producer")
+        _optional_str_field(self.job_id, "job_id", "producer")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pid": self.pid,
+            "pid_create_time": float(self.pid_create_time),
+            "owner_kind": self.owner_kind,
+            "ownership_kind": self.ownership_kind,
+            "ownership_token": self.ownership_token,
+            "job_id": self.job_id,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *, path: Any = None) -> JournalProducer:
+        _reject_unknown_keys(payload, cls._KEYS, "journal producer", path=path)
+        pid = payload.get("pid")
+        pid_create_time = payload.get("pid_create_time")
+        try:
+            return cls(
+                pid=pid if isinstance(pid, int) else -1,
+                pid_create_time=pid_create_time if isinstance(pid_create_time, (int, float)) else float("nan"),
+                owner_kind=payload.get("owner_kind"),
+                ownership_kind=payload.get("ownership_kind"),
+                ownership_token=_optional_str(payload, "ownership_token", "journal producer", path=path),
+                job_id=_optional_str(payload, "job_id", "journal producer", path=path),
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path) from exc
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@VerificationEvidence-xdr6,
+#   role=VerificationEvidence,
+#   slice_labels=mci-journal-effects,
+#   kind=ast,
+# ]
+class VerificationEvidence:
+    """Diagnostic, bounded, JSON-safe metadata.  NEVER the reducer authority;
+    effects are."""
+
+    kind: str
+    outcome: str
+    node_uuid: str | None = None
+    parent_uuid: str | None = None
+    detail: str | None = None
+
+    _KEYS = ("kind", "outcome", "node_uuid", "parent_uuid", "detail")
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, str) or not self.kind:
+            raise CoherenceSchemaError("verification: kind must be a nonempty string")
+        if not isinstance(self.outcome, str) or not self.outcome:
+            raise CoherenceSchemaError("verification: outcome must be a nonempty string")
+        _optional_str_field(self.node_uuid, "node_uuid", "verification")
+        _optional_str_field(self.parent_uuid, "parent_uuid", "verification")
+        _optional_str_field(self.detail, "detail", "verification")
+        object.__setattr__(self, "detail", _bound_detail(self.detail))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "outcome": self.outcome,
+            "node_uuid": self.node_uuid,
+            "parent_uuid": self.parent_uuid,
+            "detail": self.detail,
+        }
+
+    @classmethod
+    def from_dict(
+        cls, payload: Mapping[str, Any], *, path: Any = None
+    ) -> VerificationEvidence:
+        _reject_unknown_keys(payload, cls._KEYS, "verification evidence", path=path)
+        try:
+            return cls(
+                kind=payload.get("kind"),
+                outcome=payload.get("outcome"),
+                node_uuid=_optional_str(payload, "node_uuid", "verification evidence", path=path),
+                parent_uuid=_optional_str(payload, "parent_uuid", "verification evidence", path=path),
+                detail=_optional_str(payload, "detail", "verification evidence", path=path),
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path) from exc
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@JournalTransaction-advq,
+#   role=JournalTransaction,
+#   slice_labels=mci-journal-effects,
+#   kind=ast,
+# ]
+class JournalTransaction:
+    """One committed journal record: verified canonical after-state effects,
+    never HTTP intents.  Immutable once fsynced."""
+
+    schema_version: int
+    account_scope_id: str
+    sequence: int
+    previous_sequence: int
+    transaction_id: str
+    published_epoch_id: str
+    operation_kind: str
+    committed_at: str
+    producer: JournalProducer
+    verification: tuple[VerificationEvidence, ...]
+    effects: tuple[Any, ...]  # tuple[SemanticEffect, ...] — typed loosely to avoid import cycle
+
+    _KEYS = (
+        "schema_version",
+        "account_scope_id",
+        "sequence",
+        "previous_sequence",
+        "transaction_id",
+        "published_epoch_id",
+        "operation_kind",
+        "committed_at",
+        "producer",
+        "verification",
+        "effects",
+    )
+
+    def __post_init__(self) -> None:
+        if isinstance(self.schema_version, bool) or self.schema_version != SCHEMA_VERSION:
+            raise CoherenceSchemaError("journal transaction: schema_version must be 1")
+        validate_account_scope_id(self.account_scope_id)
+        if isinstance(self.sequence, bool) or not isinstance(self.sequence, int) or self.sequence < 1:
+            raise CoherenceSchemaError("journal transaction: sequence must be >= 1")
+        if (
+            isinstance(self.previous_sequence, bool)
+            or not isinstance(self.previous_sequence, int)
+            or self.previous_sequence != self.sequence - 1
+        ):
+            raise CoherenceSchemaError(
+                "journal transaction: previous_sequence must equal sequence - 1"
+            )
+        if not isinstance(self.transaction_id, str) or not self.transaction_id:
+            raise CoherenceSchemaError(
+                "journal transaction: transaction_id must be collision-resistant opaque text"
+            )
+        if not isinstance(self.published_epoch_id, str) or not self.published_epoch_id:
+            raise CoherenceSchemaError(
+                "journal transaction: published_epoch_id must be nonempty"
+            )
+        if not isinstance(self.operation_kind, str) or not self.operation_kind:
+            raise CoherenceSchemaError(
+                "journal transaction: operation_kind must be a nonempty string"
+            )
+        _require_timestamp(self.committed_at, "committed_at", "journal transaction")
+        if not isinstance(self.producer, JournalProducer):
+            raise CoherenceSchemaError("journal transaction: producer invalid")
+        for entry in self.verification:
+            if not isinstance(entry, VerificationEvidence):
+                raise CoherenceSchemaError(
+                    "journal transaction: verification entries must be VerificationEvidence"
+                )
+        if not self.effects:
+            raise CoherenceSchemaError("journal transaction: effects must be nonempty")
+        for effect in self.effects:
+            if not (hasattr(effect, "effect_type") and hasattr(effect, "to_dict")):
+                raise CoherenceSchemaError(
+                    "journal transaction: effects entries must be SemanticEffect objects"
+                )
+        # The whole envelope must be JSON-safe at CONSTRUCTION (A9): caller
+        # schema bugs surface as typed schema errors here, never as physical
+        # JournalPublicationError during the durable write.
+        try:
+            json.dumps(self.to_dict())
+        except (TypeError, ValueError) as exc:
+            raise CoherenceSchemaError(
+                f"journal transaction: envelope is not JSON-safe: {exc}"
+            ) from exc
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "account_scope_id": self.account_scope_id,
+            "sequence": self.sequence,
+            "previous_sequence": self.previous_sequence,
+            "transaction_id": self.transaction_id,
+            "published_epoch_id": self.published_epoch_id,
+            "operation_kind": self.operation_kind,
+            "committed_at": self.committed_at,
+            "producer": self.producer.to_dict(),
+            "verification": [item.to_dict() for item in self.verification],
+            "effects": [effect.to_dict() for effect in self.effects],
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        effect_decoder: Callable[[Mapping[str, Any]], Any],
+        path: Any = None,
+    ) -> JournalTransaction:
+        _artifact_version(payload, "journal transaction", path=path)
+        _reject_unknown_keys(payload, cls._KEYS, "journal transaction", path=path)
+        account = payload.get("account_scope_id")
+        if not isinstance(account, str):
+            raise CoherenceSchemaError(
+                "journal transaction: account_scope_id required", path=path
+            )
+        producer = payload.get("producer")
+        if not isinstance(producer, Mapping):
+            raise CoherenceSchemaError(
+                "journal transaction: producer must be an object", path=path
+            )
+        verification = payload.get("verification")
+        if not isinstance(verification, list):
+            raise CoherenceSchemaError(
+                "journal transaction: verification must be an array", path=path
+            )
+        for entry in verification:
+            if not isinstance(entry, Mapping):
+                raise CoherenceSchemaError(
+                    "journal transaction: verification entries must be objects", path=path
+                )
+        effects = payload.get("effects")
+        if not isinstance(effects, list):
+            raise CoherenceSchemaError(
+                "journal transaction: effects must be an array", path=path
+            )
+        for entry in effects:
+            if not isinstance(entry, Mapping):
+                raise CoherenceSchemaError(
+                    "journal transaction: effects entries must be objects", path=path
+                )
+        try:
+            return cls(
+                schema_version=SCHEMA_VERSION,
+                account_scope_id=validate_account_scope_id(account),
+                sequence=payload.get("sequence"),
+                previous_sequence=payload.get("previous_sequence"),
+                transaction_id=payload.get("transaction_id"),
+                published_epoch_id=payload.get("published_epoch_id"),
+                operation_kind=payload.get("operation_kind"),
+                committed_at=payload.get("committed_at"),
+                producer=JournalProducer.from_dict(producer, path=path),
+                verification=tuple(
+                    VerificationEvidence.from_dict(item, path=path) for item in verification
+                ),
+                effects=tuple(effect_decoder(item) for item in effects),
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path, account=account) from exc
+
+
+def new_transaction_id() -> str:
+    """Collision-resistant opaque transaction identity."""
+
+    return secrets.token_hex(16)
+
+
+def new_epoch_id() -> str:
+    """Collision-resistant opaque epoch identity (32 lowercase hex)."""
+
+    return _new_epoch_id()
+
+
+# ---------------------------------------------------------------------------
+# Refresh cut token & publication claim v1 (S02 §5.2/§5.3)
+# ---------------------------------------------------------------------------
+
+# S02 refresh kinds, widened by S04 with ``checkpoint`` (the checkpoint
+# rotation publisher reuses the ONE publication-claim lifecycle, H2).
+REFRESH_KINDS = frozenset(
+    {
+        "manual",
+        "widget",
+        "system",
+        "bootstrap",
+        "recovery",
+        "confidence",
+        "carto_preflight",
+        "compat_patch",
+        "checkpoint",
+    }
+)
+FULL_REFRESH_KINDS = frozenset(
+    {
+        "manual",
+        "widget",
+        "system",
+        "bootstrap",
+        "recovery",
+        "confidence",
+        "carto_preflight",
+    }
+)
+COMPAT_PATCH_KIND = "compat_patch"
+
+REFRESH_CLAIM_ACTIVE_STATUSES = frozenset(
+    {"claimed", "settling", "downloading", "materializing", "publishing"}
+)
+REFRESH_CLAIM_TERMINAL_STATUSES = frozenset({"completed", "failed"})
+REFRESH_CLAIM_STATUSES = REFRESH_CLAIM_ACTIVE_STATUSES | REFRESH_CLAIM_TERMINAL_STATUSES
+
+
+# S05 §10.1 (H2a): the cut schema evolves IN PLACE to v2 — one type,
+# version-widened; no sidecar token artifact, no second cut file.  The
+# writer emits v2; the reader accepts v1 as an empty token tuple and fails
+# closed on any unknown future version.
+REFRESH_CUT_SCHEMA_VERSION = 2
+_REFRESH_CUT_V1_KEYS = (
+    "schema_version",
+    "account_scope_id",
+    "epoch_number",
+    "epoch_id",
+    "journal_head_seq",
+    "hard_barrier_generation",
+    "external_dirt_generation",
+    "captured_at",
+)
+
+
+def _validate_lease_id_tuple(
+    value: Any, *, path: Any = None, label: str = "refresh cut"
+) -> tuple[str, ...]:
+    if not isinstance(value, tuple) or any(
+        not isinstance(item, str)
+        or len(item) != 32
+        or any(ch not in "0123456789abcdef" for ch in item)
+        for item in value
+    ):
+        raise CoherenceSchemaError(
+            f"{label}: barrier_required_lease_ids entries must be 32 lowercase hex",
+            path=path,
+        )
+    if list(value) != sorted(value) or len(set(value)) != len(value):
+        raise CoherenceSchemaError(
+            f"{label}: barrier_required_lease_ids must be sorted and duplicate-free",
+            path=path,
+        )
+    return value
+
+
+@dataclass(frozen=True)
+# @beacon[
+#   id=auto-beacon@RefreshCutToken-sxy0,
+#   role=RefreshCutToken,
+#   slice_labels=mci-epoch-schema,
+#   kind=ast,
+# ]
+class RefreshCutToken:
+    """The refresh cut (S02 §5.2, S05 §10.1 v2): the shared-state generations
+    captured atomically at refresh INITIATION, before the settle delay and
+    before the export request is issued.
+
+    Publication clears ONLY hard-barrier/external-dirt generations at or
+    before this cut; a later signal survives. Since CUT-1 the v2
+    ``barrier_required_lease_ids`` field is inert parsed residue and new
+    cuts default to empty. The sorted, duplicate-free, 32-hex validation
+    and v1 empty-tuple compatibility stay until CUT-2A removes the field.
+    """
+
+    schema_version: int
+    account_scope_id: str
+    epoch_number: int
+    epoch_id: str
+    journal_head_seq: int
+    hard_barrier_generation: int
+    external_dirt_generation: int
+    captured_at: str
+    barrier_required_lease_ids: tuple[str, ...] = ()
+
+    _KEYS = _REFRESH_CUT_V1_KEYS + ("barrier_required_lease_ids",)
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.schema_version, bool)
+            or self.schema_version != REFRESH_CUT_SCHEMA_VERSION
+        ):
+            raise CoherenceSchemaError(
+                f"refresh cut: schema_version must be {REFRESH_CUT_SCHEMA_VERSION}"
+            )
+        validate_account_scope_id(self.account_scope_id)
+        for key in (
+            "epoch_number",
+            "journal_head_seq",
+            "hard_barrier_generation",
+            "external_dirt_generation",
+        ):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise CoherenceSchemaError(
+                    f"refresh cut: {key} must be a non-negative integer"
+                )
+        if not isinstance(self.epoch_id, str) or not self.epoch_id:
+            raise CoherenceSchemaError("refresh cut: epoch_id must be a nonempty string")
+        _require_timestamp(self.captured_at, "captured_at", "refresh cut")
+        _validate_lease_id_tuple(self.barrier_required_lease_ids)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "account_scope_id": self.account_scope_id,
+            "epoch_number": self.epoch_number,
+            "epoch_id": self.epoch_id,
+            "journal_head_seq": self.journal_head_seq,
+            "hard_barrier_generation": self.hard_barrier_generation,
+            "external_dirt_generation": self.external_dirt_generation,
+            "captured_at": self.captured_at,
+            "barrier_required_lease_ids": list(self.barrier_required_lease_ids),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *, path: Any = None) -> RefreshCutToken:
+        version = payload.get("schema_version")
+        if isinstance(version, bool) or not isinstance(version, int):
+            raise CoherenceSchemaError(
+                "refresh cut: schema_version missing or not an integer", path=path
+            )
+        token_ids: tuple[str, ...] = ()
+        if version == 1:
+            # v1 reads as the empty token tuple (S05 §10.1 compatibility).
+            _reject_unknown_keys(payload, _REFRESH_CUT_V1_KEYS, "refresh cut", path=path)
+        elif version == REFRESH_CUT_SCHEMA_VERSION:
+            _reject_unknown_keys(payload, cls._KEYS, "refresh cut", path=path)
+            raw_ids = payload.get("barrier_required_lease_ids")
+            if not isinstance(raw_ids, list):
+                raise CoherenceSchemaError(
+                    "refresh cut: barrier_required_lease_ids must be an array", path=path
+                )
+            token_ids = _validate_lease_id_tuple(tuple(raw_ids), path=path)
+        else:
+            raise UnsupportedCoherenceSchemaError(
+                f"refresh cut: unsupported schema_version {version}", path=path
+            )
+        account = payload.get("account_scope_id")
+        if not isinstance(account, str):
+            raise CoherenceSchemaError("refresh cut: account_scope_id required", path=path)
+        try:
+            return cls(
+                schema_version=REFRESH_CUT_SCHEMA_VERSION,
+                account_scope_id=validate_account_scope_id(account),
+                epoch_number=_require_int(payload, "epoch_number", "refresh cut", minimum=0, path=path),
+                epoch_id=_require_str(payload, "epoch_id", "refresh cut", path=path),
+                journal_head_seq=_require_int(
+                    payload, "journal_head_seq", "refresh cut", minimum=0, path=path
+                ),
+                hard_barrier_generation=_require_int(
+                    payload, "hard_barrier_generation", "refresh cut", minimum=0, path=path
+                ),
+                external_dirt_generation=_require_int(
+                    payload, "external_dirt_generation", "refresh cut", minimum=0, path=path
+                ),
+                captured_at=_require_timestamp(
+                    payload.get("captured_at"), "captured_at", "refresh cut", path=path
+                ),
+                barrier_required_lease_ids=token_ids,
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path, account=account) from exc
+
+
+# @beacon[
+#   id=coherence@refresh-claim-models,
+#   slice_labels=carto-governance,ra-workflowy-cache,mci-epoch-schema,
+#   kind=ast,
+#   comment=S02 refresh cut token + refresh-publication claim models: exact-token ownership, clock-independent owner-incarnation identity (start ticks + boot id, U01) as lifecycle authority, no cooldown, dead-owner recoverable via target-epoch identity; compat_patch never dedupes with a full refresh.,
+# ]
+@dataclass(frozen=True)
+class RefreshPublicationClaim:
+    """The account-scoped refresh-publication ownership artifact (S02 §5.3).
+
+    Exactly one epoch publication may be active per account.
+    Clock-independent owner-incarnation identity (start ticks + boot id,
+    U01) is lifecycle authority; the legacy ``owner_pid_create_time`` epoch
+    float is write-only provenance, never consulted.  Unknown liveness is
+    treated as alive.  There is no cooldown and no dedupe by request
+    reason: all full-refresh intents are equivalent when the active cut
+    covers the requester's required generations.  Every phase/result write
+    requires exact token ownership.
+    """
+
+    schema_version: int
+    account_scope_id: str
+    claim_id: str
+    owner_pid: int
+    owner_pid_create_time: float
+    refresh_kind: str
+    status: str
+    cut_token: RefreshCutToken | None
+    requested_hard_generation: int
+    requested_external_generation: int
+    target_epoch_number: int | None
+    target_epoch_id: str | None
+    started_at: str
+    updated_at: str
+    result: dict | None
+    # Additive S02 field: while active, names the in-flight candidate
+    # snapshot so manifest-aware GC can protect it (§11.2).
+    candidate_snapshot_path: str | None = None
+    # Additive S04 field: for a ``checkpoint`` claim, the journal head
+    # captured at acquisition (a LOWER bound of the head the checkpoint
+    # will incorporate) — the checkpoint↔checkpoint dedupe-coverage input
+    # (§10.1).  CROSS-FIELD LEGALITY (Waypoint A Stage2-17, CF-S04-H4):
+    # REQUIRED for ``checkpoint`` claims and FORBIDDEN for every other
+    # claim kind — enforced in ``__post_init__``, so construction AND
+    # deserialization fail closed on the illegal combination.
+    basis_head_seq: int | None = None
+    # U01: ADDITIVE-OPTIONAL clock-independent owner identity (both None on
+    # pre-upgrade artifacts — LEGACY artifacts fail closed at classification:
+    # never reaped while their pid exists; the epoch field is never consulted).
+    owner_start_ticks: int | None = None
+    owner_boot_id: str | None = None
+
+    _KEYS = (
+        "schema_version",
+        "account_scope_id",
+        "claim_id",
+        "owner_pid",
+        "owner_pid_create_time",
+        "refresh_kind",
+        "status",
+        "cut_token",
+        "requested_hard_generation",
+        "requested_external_generation",
+        "target_epoch_number",
+        "target_epoch_id",
+        "started_at",
+        "updated_at",
+        "result",
+        "candidate_snapshot_path",
+        "basis_head_seq",
+        "owner_start_ticks",
+        "owner_boot_id",
+    )
+
+    def __post_init__(self) -> None:
+        if isinstance(self.schema_version, bool) or self.schema_version != SCHEMA_VERSION:
+            raise CoherenceSchemaError("refresh claim: schema_version must be 1")
+        validate_account_scope_id(self.account_scope_id)
+        if not isinstance(self.claim_id, str) or not self.claim_id:
+            raise CoherenceSchemaError("refresh claim: claim_id must be a nonempty string")
+        if isinstance(self.owner_pid, bool) or not isinstance(self.owner_pid, int) or self.owner_pid <= 0:
+            raise CoherenceSchemaError("refresh claim: owner_pid must be a positive integer")
+        if (
+            isinstance(self.owner_pid_create_time, bool)
+            or not isinstance(self.owner_pid_create_time, (int, float))
+            or not math.isfinite(float(self.owner_pid_create_time))
+        ):
+            raise CoherenceSchemaError("refresh claim: owner_pid_create_time must be finite")
+        if self.refresh_kind not in REFRESH_KINDS:
+            raise CoherenceSchemaError(
+                f"refresh claim: refresh_kind must be one of {sorted(REFRESH_KINDS)}"
+            )
+        if self.status not in REFRESH_CLAIM_STATUSES:
+            raise CoherenceSchemaError(
+                f"refresh claim: status must be one of {sorted(REFRESH_CLAIM_STATUSES)}"
+            )
+        if self.cut_token is not None and not isinstance(self.cut_token, RefreshCutToken):
+            raise CoherenceSchemaError("refresh claim: cut_token must be a RefreshCutToken or null")
+        if self.cut_token is not None and self.cut_token.account_scope_id != self.account_scope_id:
+            raise CoherenceAccountMismatchError(
+                "refresh claim: cut_token account does not match claim account",
+                account_scope_id=self.account_scope_id,
+            )
+        for key in ("requested_hard_generation", "requested_external_generation"):
+            value = getattr(self, key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise CoherenceSchemaError(
+                    f"refresh claim: {key} must be a non-negative integer"
+                )
+        if self.target_epoch_number is not None and (
+            isinstance(self.target_epoch_number, bool)
+            or not isinstance(self.target_epoch_number, int)
+            or self.target_epoch_number < 0
+        ):
+            raise CoherenceSchemaError(
+                "refresh claim: target_epoch_number must be a non-negative integer or null"
+            )
+        if self.target_epoch_id is not None and (
+            not isinstance(self.target_epoch_id, str) or not self.target_epoch_id
+        ):
+            raise CoherenceSchemaError(
+                "refresh claim: target_epoch_id must be a nonempty string or null"
+            )
+        _require_timestamp(self.started_at, "started_at", "refresh claim")
+        _require_timestamp(self.updated_at, "updated_at", "refresh claim")
+        if self.result is not None:
+            if not isinstance(self.result, dict):
+                raise CoherenceSchemaError("refresh claim: result must be an object or null")
+            _require_json_safe(self.result, "result", "refresh claim")
+        if self.candidate_snapshot_path is not None and not isinstance(
+            self.candidate_snapshot_path, str
+        ):
+            raise CoherenceSchemaError(
+                "refresh claim: candidate_snapshot_path must be a string or null"
+            )
+        if self.basis_head_seq is not None and (
+            isinstance(self.basis_head_seq, bool)
+            or not isinstance(self.basis_head_seq, int)
+            or self.basis_head_seq < 0
+        ):
+            raise CoherenceSchemaError(
+                "refresh claim: basis_head_seq must be a non-negative integer or null"
+            )
+        # Cross-field legality (Waypoint A Stage2-17, CF-S04-H4): the shipped
+        # lifecycle contract is that a checkpoint claim ALWAYS captures its
+        # due head at acquisition (checkpoint↔checkpoint dedupe coverage),
+        # and no other claim kind ever carries the field.  Enforced here so
+        # both construction and from_dict deserialization fail closed.
+        if self.refresh_kind == "checkpoint" and self.basis_head_seq is None:
+            raise CoherenceSchemaError(
+                "refresh claim: a checkpoint claim must carry basis_head_seq "
+                "(the journal head captured at acquisition)"
+            )
+        if self.refresh_kind != "checkpoint" and self.basis_head_seq is not None:
+            raise CoherenceSchemaError(
+                f"refresh claim: basis_head_seq is forbidden on a "
+                f"{self.refresh_kind!r} claim (checkpoint-only field)"
+            )
+        # U01: additive-optional stable identity — int >= 0 or None; non-empty
+        # str or None.
+        if self.owner_start_ticks is not None and (
+            isinstance(self.owner_start_ticks, bool)
+            or not isinstance(self.owner_start_ticks, int)
+            or self.owner_start_ticks < 0
+        ):
+            raise CoherenceSchemaError(
+                "refresh claim: owner_start_ticks must be a non-negative integer or null"
+            )
+        if self.owner_boot_id is not None and (
+            not isinstance(self.owner_boot_id, str) or not self.owner_boot_id
+        ):
+            raise CoherenceSchemaError(
+                "refresh claim: owner_boot_id must be a nonempty string or null"
+            )
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in REFRESH_CLAIM_TERMINAL_STATUSES
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "account_scope_id": self.account_scope_id,
+            "claim_id": self.claim_id,
+            "owner_pid": self.owner_pid,
+            "owner_pid_create_time": float(self.owner_pid_create_time),
+            "refresh_kind": self.refresh_kind,
+            "status": self.status,
+            "cut_token": None if self.cut_token is None else self.cut_token.to_dict(),
+            "requested_hard_generation": self.requested_hard_generation,
+            "requested_external_generation": self.requested_external_generation,
+            "target_epoch_number": self.target_epoch_number,
+            "target_epoch_id": self.target_epoch_id,
+            "started_at": self.started_at,
+            "updated_at": self.updated_at,
+            "result": self.result,
+            "candidate_snapshot_path": self.candidate_snapshot_path,
+            "basis_head_seq": self.basis_head_seq,
+            "owner_start_ticks": self.owner_start_ticks,
+            "owner_boot_id": self.owner_boot_id,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *, path: Any = None) -> RefreshPublicationClaim:
+        _artifact_version(payload, "refresh claim", path=path)
+        _reject_unknown_keys(payload, cls._KEYS, "refresh claim", path=path)
+        account = payload.get("account_scope_id")
+        if not isinstance(account, str):
+            raise CoherenceSchemaError("refresh claim: account_scope_id required", path=path)
+        cut = payload.get("cut_token")
+        if cut is not None and not isinstance(cut, Mapping):
+            raise CoherenceSchemaError("refresh claim: cut_token must be an object or null", path=path)
+        result = payload.get("result")
+        if result is not None and not isinstance(result, dict):
+            raise CoherenceSchemaError("refresh claim: result must be an object or null", path=path)
+        try:
+            return cls(
+                schema_version=SCHEMA_VERSION,
+                account_scope_id=validate_account_scope_id(account),
+                claim_id=_require_str(payload, "claim_id", "refresh claim", path=path),
+                owner_pid=_require_int(payload, "owner_pid", "refresh claim", minimum=1, path=path),
+                owner_pid_create_time=payload.get("owner_pid_create_time"),
+                refresh_kind=payload.get("refresh_kind"),
+                status=payload.get("status"),
+                cut_token=None if cut is None else RefreshCutToken.from_dict(cut, path=path),
+                requested_hard_generation=_require_int(
+                    payload, "requested_hard_generation", "refresh claim", minimum=0, path=path
+                ),
+                requested_external_generation=_require_int(
+                    payload, "requested_external_generation", "refresh claim", minimum=0, path=path
+                ),
+                target_epoch_number=payload.get("target_epoch_number"),
+                target_epoch_id=_optional_str(payload, "target_epoch_id", "refresh claim", path=path),
+                started_at=_require_timestamp(
+                    payload.get("started_at"), "started_at", "refresh claim", path=path
+                ),
+                updated_at=_require_timestamp(
+                    payload.get("updated_at"), "updated_at", "refresh claim", path=path
+                ),
+                result=result,
+                candidate_snapshot_path=_optional_str(
+                    payload, "candidate_snapshot_path", "refresh claim", path=path
+                ),
+                basis_head_seq=payload.get("basis_head_seq"),
+                # U01: additive-optional — pre-upgrade artifacts read as legacy
+                # (None) and fail closed at classification.
+                owner_start_ticks=payload.get("owner_start_ticks"),
+                owner_boot_id=payload.get("owner_boot_id"),
+            )
+        except CoherenceError as exc:
+            raise _attach_context(exc, path=path, account=account) from exc
+
+
+def claim_with_updates(claim: RefreshPublicationClaim, now: str | None = None, **changes: Any) -> RefreshPublicationClaim:
+    """Return a NEW validated claim with the supplied field changes."""
+
+    unknown = sorted(set(changes) - set(RefreshPublicationClaim._KEYS) - {"updated_at"})
+    if unknown:
+        raise CoherenceSchemaError(f"refresh claim: cannot update unknown fields {unknown}")
+    if "schema_version" in changes:
+        raise CoherenceSchemaError("refresh claim: schema_version cannot change")
+    payload = claim.to_dict()
+    payload.update(changes)
+    if "updated_at" not in changes:
+        payload["updated_at"] = now or utc_now()
+    return RefreshPublicationClaim.from_dict(payload)
+
+
+def new_claim_id() -> str:
+    """Collision-resistant opaque refresh-claim identity."""
+
+    return secrets.token_hex(16)
+
+
+def read_refresh_claim(paths: CoherencePaths) -> RefreshPublicationClaim | None:
+    """Read the fixed-path refresh claim.  Absent yields None; malformed
+    state fails closed (never best-effort)."""
+
+    if not paths.refresh_publication_path.exists():
+        return None
+    try:
+        with paths.refresh_publication_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise CoherenceSchemaError(
+            f"refresh claim: malformed JSON: {exc}", path=paths.refresh_publication_path
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise CoherenceSchemaError(
+            "refresh claim: top-level JSON must be an object",
+            path=paths.refresh_publication_path,
+        )
+    claim = RefreshPublicationClaim.from_dict(payload, path=paths.refresh_publication_path)
+    if claim.account_scope_id != _account_from_paths(paths):
+        raise CoherenceAccountMismatchError(
+            "refresh claim account does not match the coherence paths account root",
+            path=paths.refresh_publication_path,
+            account_scope_id=claim.account_scope_id,
+        )
+    return claim
+
+
+def write_refresh_claim(
+    paths: CoherencePaths,
+    claim: RefreshPublicationClaim,
+    *,
+    expected_claim_id: str | None = None,
+    fs_ops: Any = None,
+) -> RefreshPublicationClaim:
+    """Durably replace the fixed-path refresh claim.
+
+    Exact-token guard: when ``expected_claim_id`` is supplied the on-disk
+    claim must be the same token (or absent/terminal replacement semantics
+    handled by the caller under the coherence mutex); a mismatch raises
+    ``ManifestConflictError`` and never overwrites.
+    """
+
+    from .durable_io import atomic_write_json_durable
+
+    if claim.account_scope_id != _account_from_paths(paths):
+        raise CoherenceAccountMismatchError(
+            "refresh claim account does not match the coherence paths account root",
+            path=paths.refresh_publication_path,
+            account_scope_id=claim.account_scope_id,
+        )
+    if expected_claim_id is not None:
+        current = read_refresh_claim(paths)
+        if current is None or current.claim_id != expected_claim_id:
+            raise ManifestConflictError(
+                "refresh claim token changed underneath writer",
+                path=paths.refresh_publication_path,
+                account_scope_id=claim.account_scope_id,
+            )
+    atomic_write_json_durable(paths.refresh_publication_path, claim.to_dict(), fs_ops=fs_ops)
+    return claim

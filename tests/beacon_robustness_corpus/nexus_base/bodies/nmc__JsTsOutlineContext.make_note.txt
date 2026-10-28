@@ -1,0 +1,38 @@
+    def make_note(
+        self,
+        ast_qual: str,
+        start_line_local: Optional[int] = None,
+        doc: Optional[str] = None,
+    ) -> str:
+        """Build the Workflowy note text for an emitted JS/TS AST node.
+
+        Always starts with ``AST_QUALNAME: {ast_qual}``. If ``doc`` is
+        provided, appends a ``---`` separator and the docstring. If
+        ``start_line_local`` is provided, slurps adjacent JS/TS comments
+        from the local source view (uses ``self.lines`` / ``self.n`` /
+        ``self.comment_mask`` / ``self.cleaned_comments``) and appends
+        them under a ``CONTEXT COMMENTS (JS/TS):`` block.
+
+        Note: ``start_line_local`` is intentionally the LOCAL line (used
+        to look up comments in the local source view, which for Vue is
+        the extracted script block). For node emission in the outline
+        tree, use ``self.abs_line(start_line_local)`` to compute
+        ``orig_lineno_start_unused``.
+        """
+        note_lines: List[str] = [f"AST_QUALNAME: {ast_qual}"]
+        if doc:
+            note_lines.append("---")
+            note_lines.append(doc)
+        if isinstance(start_line_local, int):
+            ctx_comments = _extract_js_ast_comment_context(
+                start_line_local,
+                self.lines,
+                self.n,
+                self.comment_mask,
+                self.cleaned_comments,
+            )
+            if ctx_comments:
+                note_lines.append("")
+                note_lines.append("CONTEXT COMMENTS (JS/TS):")
+                note_lines.extend(ctx_comments)
+        return "\n".join(note_lines)

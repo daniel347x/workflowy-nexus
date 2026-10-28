@@ -1,0 +1,157 @@
+"""Stage2-17 (Waypoint A locked work order) — claim-schema cross-field
+legality (CF-S04-H4) + PERMANENT_FENCE mutation sensitivity.
+
+Two halves:
+
+1. ``RefreshPublicationClaim.basis_head_seq`` cross-field legality, enforced
+   at schema construction AND deserialization (``__post_init__``): the
+   shipped lifecycle contract is that a ``checkpoint`` claim ALWAYS carries
+   the journal head captured at acquisition (the checkpoint↔checkpoint
+   dedupe-coverage input), and no other claim kind ever carries the field.
+
+2. Mutation sensitivity of the CUT-1 absolute zero-caller rebase fence,
+   including calls injected inside operation_cache itself. Definition-only
+   controls remain clean; no module has a caller exemption.
+   The single-epoch-writer fence already carries its own injection locks
+   (tests/test_coherence_s04_fences.py: rogue writer, field-role
+   violation, rogue construction, and the old-scan-misses proof) and is
+   cited, not duplicated here.
+"""
+
+from __future__ import annotations
+
+import pytest
+from coherence_harness import ACCOUNT_A, NOW
+from test_mutation_leases_s05_fences import _offenders_in
+
+from workflowy_mcp.coherence import (
+    COMPAT_PATCH_KIND,
+    RefreshPublicationClaim,
+    claim_with_updates,
+    new_claim_id,
+    new_epoch_id,
+)
+from workflowy_mcp.coherence.errors import CoherenceSchemaError
+
+# ---------------------------------------------------------------------------
+# Part 1 — basis_head_seq cross-field legality (CF-S04-H4)
+# ---------------------------------------------------------------------------
+
+
+def _claim_kwargs(refresh_kind: str, basis_head_seq: int | None) -> dict:
+    return {
+        "schema_version": 1,
+        "account_scope_id": ACCOUNT_A,
+        "claim_id": new_claim_id(),
+        "owner_pid": 4242,
+        "owner_pid_create_time": 1.5,
+        "refresh_kind": refresh_kind,
+        "status": "claimed",
+        "cut_token": None,
+        "requested_hard_generation": 0,
+        "requested_external_generation": 0,
+        "target_epoch_number": 2,
+        "target_epoch_id": new_epoch_id(),
+        "started_at": NOW,
+        "updated_at": NOW,
+        "result": None,
+        "basis_head_seq": basis_head_seq,
+    }
+
+
+def test_checkpoint_claim_requires_basis_head_seq_at_construction():
+    """CF-S04-H4: a checkpoint claim without the captured due head is
+    illegal — construction fails closed."""
+    with pytest.raises(CoherenceSchemaError, match="must carry basis_head_seq"):
+        RefreshPublicationClaim(**_claim_kwargs("checkpoint", None))
+
+
+def test_checkpoint_claim_requires_basis_head_seq_at_deserialization():
+    """The same legality holds through from_dict (durable read path): a
+    checkpoint payload missing the field fails closed."""
+    payload = _claim_kwargs("checkpoint", None)
+    with pytest.raises(CoherenceSchemaError, match="must carry basis_head_seq"):
+        RefreshPublicationClaim.from_dict(payload)
+    # Also when the key is entirely absent from the durable payload.
+    del payload["basis_head_seq"]
+    with pytest.raises(CoherenceSchemaError, match="must carry basis_head_seq"):
+        RefreshPublicationClaim.from_dict(payload)
+
+
+def test_full_refresh_claim_forbids_basis_head_seq():
+    """A full-refresh-kind claim carrying the checkpoint-only field is
+    illegal (construction AND deserialization)."""
+    with pytest.raises(CoherenceSchemaError, match="forbidden.*checkpoint-only"):
+        RefreshPublicationClaim(**_claim_kwargs("system", 7))
+    with pytest.raises(CoherenceSchemaError, match="forbidden.*checkpoint-only"):
+        RefreshPublicationClaim.from_dict(_claim_kwargs("manual", 7))
+
+
+def test_compat_patch_claim_forbids_basis_head_seq():
+    with pytest.raises(CoherenceSchemaError, match="forbidden.*checkpoint-only"):
+        RefreshPublicationClaim(**_claim_kwargs(COMPAT_PATCH_KIND, 7))
+
+
+def test_checkpoint_claim_with_basis_head_seq_roundtrips():
+    """The legal shape: a checkpoint claim carrying the captured due head
+    constructs, serializes, deserializes, and updates unchanged."""
+    claim = RefreshPublicationClaim(**_claim_kwargs("checkpoint", 11))
+    assert claim.basis_head_seq == 11
+    restored = RefreshPublicationClaim.from_dict(claim.to_dict())
+    assert restored == claim
+    updated = claim_with_updates(claim, status="materializing")
+    assert updated.basis_head_seq == 11
+    assert updated.status == "materializing"
+
+
+def test_non_checkpoint_claim_without_basis_head_seq_remains_valid():
+    """Regression control: ordinary full-refresh claims (no field) are
+    untouched by the new legality."""
+    claim = RefreshPublicationClaim(**_claim_kwargs("system", None))
+    assert claim.basis_head_seq is None
+    assert RefreshPublicationClaim.from_dict(claim.to_dict()) == claim
+
+
+# ---------------------------------------------------------------------------
+# Part 2 — fence mutation sensitivity (PERMANENT_FENCE discipline)
+# ---------------------------------------------------------------------------
+
+# The prohibited production shape the H5b rebase-confinement fence claims
+# to prevent: a mid-operation journal re-adoption outside the orchestrator.
+_PROHIBITED_REBASE_SHAPE = '''\
+"""A hypothetical production consumer (prohibited shape)."""
+
+from workflowy_mcp.coherence.operation_cache import (
+    establish_admission_snapshot,
+    rebase_during_admission,
+)
+
+
+async def mid_operation_readmit(client, snapshot):
+    await rebase_during_admission(client, snapshot)
+    return await establish_admission_snapshot(client, snapshot)
+'''
+
+# @beacon[
+#   id=auto-beacon@test_rebase_seam_fence_catches_injected_production_bypass-ua53,
+#   role=test_rebase_seam_fence_catches_injected_production_bypass,
+#   slice_labels=mci-harness-tests,
+#   kind=ast,
+# ]
+def test_rebase_seam_fence_catches_injected_production_bypass():
+    """Every call rejects, even inside operation_cache; definitions are clean."""
+    for rel in ("workflowy_mcp/server.py", "workflowy_mcp/new.py", "workflowy_mcp/coherence/operation_cache.py"):
+        offenders = _offenders_in([(rel, _PROHIBITED_REBASE_SHAPE)])
+        assert any("rebase_during_admission" in hit for hit in offenders)
+        assert any("establish_admission_snapshot" in hit for hit in offenders)
+    definitions = "async def rebase_during_admission(client): pass\nasync def establish_admission_snapshot(client): pass"
+    assert _offenders_in([("workflowy_mcp/coherence/operation_cache.py", definitions)]) == []
+
+
+def test_fences_hold_on_current_production_tree():
+    """The companion direction of the introduce-and-restore discipline:
+    with no prohibited shape present, the fence reports zero offenders on
+    the real production tree (re-verified here alongside the S05 fences)."""
+    from test_mutation_leases_s05_fences import _offenders_for
+
+    assert _offenders_for() == []

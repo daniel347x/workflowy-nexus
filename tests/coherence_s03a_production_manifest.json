@@ -1,0 +1,105 @@
+{
+  "manifest": "S03-A production-touch manifest (H6 gate 1)",
+  "baseline_commit": "306ecb0",
+  "frozen_from": "post-S02 tree at 306ecb0 (S02 sealed), before S03-A edits",
+  "scope_rule": "Entries marked for modification MUST show diffs in S03-A commits. Anything beyond this manifest + the S03 spec's prescribed seams requires STOP-and-approval.",
+  "entries": [
+    {
+      "file": "src/workflowy_mcp/client/api_client_core.py",
+      "symbols": [
+        "WorkFlowyClientCore.__init__ (CacheViewPublisher ownership; sentinel unpopulated view; _nodes_export_cache/_nodes_export_cache_timestamp attribute assignments REMOVED)",
+        "WorkFlowyClientCore._nodes_export_cache (property: READ-ONLY derivation of the publisher's current view, H3)",
+        "WorkFlowyClientCore._nodes_export_cache_timestamp (property: READ-ONLY derivation, H3)",
+        "WorkFlowyClientCore._safe_account_scope_id (new)",
+        "WorkFlowyClientCore._publish_lineage_view (new: the ONE real-adoption adapter, H2 classes c/e)",
+        "WorkFlowyClientCore.publish_local_cache_view (new: §6.2 transition COW bridge, H2 class d)",
+        "WorkFlowyClientCore._adopt_coherence_head (new: §7.1 operation-boundary adoption adapter)",
+        "WorkFlowyClientCore._load_nodes_export_cache_from_disk (warm start publishes through _publish_lineage_view)",
+        "WorkFlowyClientCore._mark_nodes_export_dirty (dirty-ID coupling serialized under publisher mutex, §6.2)",
+        "WorkFlowyClientCore._get_nodes_export_cache_nodes (§6.4 accessor over captured/current view; view= kwarg added)",
+        "WorkFlowyClientCore.update_cached_node_name (COW bridge)",
+        "WorkFlowyClientCore.update_cached_node_note (COW bridge)",
+        "WorkFlowyClientCore._apply_create_to_nodes_export_cache (COW bridge; gained parent_id kwarg absorbing create_node's inline wiring — H4 single transform body)",
+        "WorkFlowyClientCore._apply_update_to_nodes_export_cache (COW bridge)",
+        "WorkFlowyClientCore._apply_delete_to_nodes_export_cache (COW bridge; direct cache-dict assignment REMOVED)",
+        "WorkFlowyClientCore._apply_move_to_nodes_export_cache (COW bridge)",
+        "WorkFlowyClientCore.create_node (inline eager-insert block delegates to _apply_create_to_nodes_export_cache(parent_id=...); logging/dirty semantics preserved)",
+        "WorkFlowyClientCore.refresh_nodes_export_cache (S02 local adoption through _publish_lineage_view)",
+        "WorkFlowyClientCore.patch_nodes_export_snapshot_on_disk (S02 mini-epoch local adoption through _publish_lineage_view + discard_dirty commit)"
+      ],
+      "disposition": "modified",
+      "why": "H6 S03-A manifest: client publisher ownership, every surviving legacy eager patcher, dirty-ID coupling points, S02 refresh/mini-epoch local-adoption integration"
+    },
+    {
+      "file": "src/workflowy_mcp/coherence/adoption.py",
+      "symbols": [
+        "UNPOPULATED_EPOCH_ID", "unpopulated_cache_view", "is_unpopulated_view",
+        "CacheAdoptionResult", "adopt_manifest_head",
+        "(internal) _adopt_once, _is_current, _publish_tail_replay, _replay_tail_onto, _reload_from_manifest, _recover_from_base, _publish_epoch_view, _cas_publish, _markers, _result, _LocalEpochAdvanced"
+      ],
+      "disposition": "created",
+      "why": "S03 §4/§5 required source layout: the journal adoption engine"
+    },
+    {
+      "file": "src/workflowy_mcp/coherence/operation_cache.py",
+      "symbols": [
+        "OperationCacheSnapshot", "current_operation_cache", "capture_operation_cache",
+        "cache_operation_boundary", "create_isolated_context_task", "publish_local_cache_view",
+        "(internal) _snapshot_for_view, _advance_task_snapshot, _OPERATION_CACHE_SNAPSHOT"
+      ],
+      "disposition": "created",
+      "why": "S03 §4/§6/§7 required source layout: operation-boundary authority + transition COW bridge"
+    },
+    {
+      "file": "src/workflowy_mcp/coherence/errors.py",
+      "symbols": ["CacheAdoptionError (new typed adoption failure, recovery_class=refresh)"],
+      "disposition": "modified",
+      "why": "S03 §5.5 typed adoption failure required by the failure-recovery contract"
+    },
+    {
+      "file": "src/workflowy_mcp/coherence/cache_view.py",
+      "symbols": [
+        "CacheViewPublisher.publish_with_commit (atomic swap + dirty-bookkeeping commit under one mutex, §6.2)",
+        "CacheViewPublisher.synchronized (short process-local critical sections, §6.2)"
+      ],
+      "disposition": "modified",
+      "why": "S03 §6.2 dirty-ID coupling must be atomic with view publication"
+    },
+    {
+      "file": "src/workflowy_mcp/coherence/__init__.py",
+      "symbols": ["package exports for adoption/operation_cache/CacheAdoptionError"],
+      "disposition": "modified",
+      "why": "export the S03 primitives"
+    },
+    {
+      "file": "src/workflowy_mcp/client/api_client_etch.py",
+      "symbols": [
+        "export_nodes_impl (whole-vault cache-hit path: _total_fetched_from_api in-place patch REPLACED by a shallow wrapper — S02 Addendum-4 item 8; never mutates the published view)"
+      ],
+      "disposition": "modified",
+      "why": "S02 forward-ledger item 8: the in-place bookkeeping pattern must not carry into the CacheView world"
+    },
+    {
+      "file": "src/workflowy_mcp/server.py",
+      "symbols": [
+        "_select_manifest_linked_snapshot (launcher-side job-basis local adoption through client._publish_lineage_view; direct attribute assignments REMOVED)"
+      ],
+      "disposition": "modified",
+      "why": "H6 S03-A manifest: S02 refresh/mini-epoch local-adoption integration must route through the publisher (property conversion made the old assignments illegal)"
+    },
+    {
+      "file": "src/workflowy_mcp/weave_worker.py",
+      "symbols": [
+        "main (governed-worker snapshot bootstrap adopts through client._publish_lineage_view with job snapshot_lineage markers; direct attribute assignments REMOVED)"
+      ],
+      "disposition": "modified",
+      "why": "H2 class e narrow bootstrap/warm-start integration; full worker manifest-adoption ordering is S03-B Gate (c)"
+    }
+  ],
+  "notes": [
+    "No production CRUD/mutation semantics changed; patcher transforms are byte-equivalent H4 extractions (clone-before-mutate).",
+    "No public MCP parameter/schema changes.",
+    "coherence_mode remains 'transition'; no refresh elision claimed.",
+    "S03-B manifest (consumers, fronts, task-spawn sites, worker bootstrap) is regenerated from the post-S06 tree before S03-B edits."
+  ]
+}

@@ -1,0 +1,1194 @@
+{
+ "record_layout": "summary-head/1",
+ "id": "carto-markdown-generate-1fa52c8e",
+ "type": "CARTO_MARKDOWN_GENERATE",
+ "mode": "file",
+ "root_uuid": "454056dc-3d12-55ba-994a-60fff0ab11e9",
+ "status": "completed_with_warnings",
+ "error": null,
+ "created_at": "2026-10-27T14:11:31.841788",
+ "updated_at": "2026-10-27T14:11:31.868720",
+ "progress": {
+  "total_files": 1,
+  "completed_files": 0,
+  "current_file": null,
+  "current_phase": "done",
+  "nodes_created": 0,
+  "nodes_updated": 0,
+  "nodes_moved": 0,
+  "nodes_deleted": 0
+ },
+ "warning_count": 2,
+ "warnings": [
+  {
+   "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+   "note": "j4 local parser failure",
+   "section": false
+  },
+  {
+   "type": "phase8_refresh_failed",
+   "error": "Source outline unavailable; existing symbols retained",
+   "disk_committed": true
+  }
+ ],
+ "execution_model": "daemon_task",
+ "execution_owner": "launcher",
+ "detached": false,
+ "cache_refresh_required": true,
+ "freshness_disposition": "performed",
+ "snapshot_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/snapshots/20261027-101131-832109_pid2081463_nodes_export_snapshot.json",
+ "snapshot_lineage": {
+  "account_scope_id": "40976e08f3bf596e573c1a1994718f5f",
+  "epoch_number": 0,
+  "epoch_id": "7d0ecc95e781737122bba9ed7c2c6d61",
+  "incorporated_through_seq": 0
+ },
+ "live_basis_lineage": {
+  "account_scope_id": "40976e08f3bf596e573c1a1994718f5f",
+  "epoch_number": 0,
+  "epoch_id": "7d0ecc95e781737122bba9ed7c2c6d61",
+  "adopted_sequence": 0
+ },
+ "logs_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/jobs/20261027-141131_carto-markdown-generate-1fa52c8e.log",
+ "claim_id": "4f4427c9956145b4943717c871b19e9f",
+ "dedupe_key": "6a8407e4d217bbdf7e4c23704abfabcca932c6811c66f98d0962f4ecb09a695d",
+ "account_scope_id": "40976e08f3bf596e573c1a1994718f5f",
+ "footprint": {
+  "kind": "file",
+  "path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+  "root_uuid": "454056dc-3d12-55ba-994a-60fff0ab11e9",
+  "ancestor_chain": [
+   "454056dc-3d12-55ba-994a-60fff0ab11e9",
+   "3ed4cb0d-3b16-5f8a-8013-c6fb25a2343d",
+   "7c0e4983-ffb5-53cb-81b6-430b3af18049"
+  ]
+ },
+ "launcher": "gui",
+ "parent_job_id": null,
+ "handoff_state": "preparing",
+ "pid": 2081463,
+ "_job_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/jobs/20261027-141131_carto-markdown-generate-1fa52c8e.json",
+ "result_summary": {
+  "warnings_total": 2,
+  "warnings_by_type": {
+   "phase8_refresh_failed": 1,
+   "warning": 1
+  },
+  "warnings_truncated": 0,
+  "changed": true,
+  "findings_total": 1,
+  "findings_by_code": {
+   "mapper_parse_error": 1
+  },
+  "findings_truncated": 0,
+  "summary_line": "1 successful \u00b7 0 failed \u00b7 0 skipped \u00b7 1 findings \u00b7 0 events",
+  "status": "completed_with_warnings",
+  "successful": 1,
+  "failed": 0,
+  "skipped": 0,
+  "partial_success": true,
+  "success": true,
+  "cancelled": false,
+  "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+  "publication": {
+   "success": true,
+   "changed": true,
+   "before_sha256": "5c1c635232beab483ddc321566f6b1b0440eb7b254c95001de297ad3d2918873",
+   "candidate_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+   "edited_ranges": [
+    {
+     "start_byte": 3,
+     "end_byte": 28,
+     "replacement_bytes": 183,
+     "owner": "document"
+    }
+   ],
+   "structural_effects": [],
+   "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12"
+  },
+  "publication_policy": {
+   "expected_sha256": "5c1c635232beab483ddc321566f6b1b0440eb7b254c95001de297ad3d2918873",
+   "source_exists": true,
+   "bom": "retain_existing_or_generated",
+   "had_bom": true,
+   "newlines": "retain_generated_physical_endings_with_local_metadata_and_eof",
+   "line_endings": [
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n",
+    "\n"
+   ]
+  },
+  "ast_beacons_reapplied": 1,
+  "ast_beacons_skipped": 0,
+  "completed_with_warnings": true,
+  "message": "Generated Markdown at /tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md; publication and inline refresh are separate outcomes",
+  "errors": [],
+  "warnings": [
+   {
+    "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+    "note": "j4 local parser failure",
+    "section": false
+   },
+   {
+    "type": "phase8_refresh_failed",
+    "error": "Source outline unavailable; existing symbols retained",
+    "disk_committed": true
+   }
+  ],
+  "events": [],
+  "files_changed": [
+   "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md"
+  ],
+  "findings": [
+   {
+    "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+    "line": 0,
+    "code": "mapper_parse_error",
+    "severity": "error",
+    "view": "mapper",
+    "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+    "beacon_id": null,
+    "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+    "detail": {
+     "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+     "note": "j4 local parser failure",
+     "section": false
+    },
+    "kind": "mapper_parse_error",
+    "producer": "beacon.refresh",
+    "observed": {
+     "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+     "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+     "block_ranges": [],
+     "field_ranges": [],
+     "member_fingerprints": [],
+     "identity_ambiguous": false
+    },
+    "members": [],
+    "fix": {
+     "class": "manual",
+     "resolutions": [
+      {
+       "resolution": "retry",
+       "summary": "Recover the source/reader and re-list current findings.",
+       "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+       "params_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+       }
+      },
+      {
+       "resolution": "keep",
+       "summary": "Keep the observed state.",
+       "effect": "No write and no persistent waiver.",
+       "params_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+       }
+      }
+     ],
+     "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+    },
+    "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+   }
+  ],
+  "phase8": {
+   "execution": "inline",
+   "status": "failed",
+   "success": false,
+   "error": "Source outline unavailable; existing symbols retained",
+   "warnings": [],
+   "files": [
+    {
+     "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+     "status": "failed",
+     "changed": false,
+     "findings": [
+      {
+       "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "line": 0,
+       "code": "mapper_parse_error",
+       "severity": "error",
+       "view": "mapper",
+       "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+       "beacon_id": null,
+       "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+       "detail": {
+        "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+        "note": "j4 local parser failure",
+        "section": false
+       },
+       "kind": "mapper_parse_error",
+       "producer": "beacon.refresh",
+       "observed": {
+        "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+        "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+        "block_ranges": [],
+        "field_ranges": [],
+        "member_fingerprints": [],
+        "identity_ambiguous": false
+       },
+       "members": [],
+       "fix": {
+        "class": "manual",
+        "resolutions": [
+         {
+          "resolution": "retry",
+          "summary": "Recover the source/reader and re-list current findings.",
+          "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+          "params_schema": {
+           "type": "object",
+           "properties": {},
+           "required": [],
+           "additionalProperties": false
+          }
+         },
+         {
+          "resolution": "keep",
+          "summary": "Keep the observed state.",
+          "effect": "No write and no persistent waiver.",
+          "params_schema": {
+           "type": "object",
+           "properties": {},
+           "required": [],
+           "additionalProperties": false
+          }
+         }
+        ],
+        "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+       },
+       "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+      }
+     ],
+     "warnings": [
+      {
+       "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+       "note": "j4 local parser failure",
+       "section": false
+      }
+     ],
+     "events": [],
+     "repair_outcomes": [
+      {
+       "pass": "c0",
+       "success": true,
+       "changed": false,
+       "path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "counts": {},
+       "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "edited_ranges": [],
+       "events": [],
+       "skipped_repairs": [],
+       "findings": [],
+       "diagnostics": []
+      },
+      {
+       "pass": "aliases",
+       "success": true,
+       "changed": false,
+       "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "edited_ranges": [],
+       "events": [],
+       "skipped_aliases": [],
+       "findings": [],
+       "diagnostics": []
+      },
+      {
+       "pass": "groups",
+       "success": true,
+       "changed": false,
+       "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "kind": "markdown",
+       "merged_groups": 0,
+       "removed_blocks": 0,
+       "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "edited_ranges": [],
+       "applied_groups": [],
+       "skipped_groups": [],
+       "diagnostics": [],
+       "events": [],
+       "findings": []
+      }
+     ],
+     "diagnostics": [
+      {
+       "record": "source_error",
+       "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "language": "markdown",
+       "exception": "j4 local parser failure"
+      }
+     ],
+     "check_target": {
+      "verb": "check",
+      "params": {
+       "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "min_severity": "info"
+      }
+     },
+     "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+     "duplicate_source_beacon_ids": {},
+     "state": "parse_failed",
+     "preserve_existing": true,
+     "reconcile_children": null,
+     "create_allowed": false,
+     "delete_allowed": false,
+     "sections": [],
+     "retained_uuids": [
+      "d15c4760-d63e-5aeb-92ab-a830ee9bd054",
+      "be215ee5-5ff6-59a9-aa7e-7e3b845b79f3"
+     ],
+     "retained_sections": [],
+     "reconcile_report": {},
+     "ambiguities": [],
+     "ambiguous_count": 0,
+     "projection": {
+      "state": "parse_failed",
+      "preserve_existing": true,
+      "reconcile_children": null,
+      "create_allowed": false,
+      "delete_allowed": false,
+      "sections": [],
+      "retained_uuids": [
+       "d15c4760-d63e-5aeb-92ab-a830ee9bd054",
+       "be215ee5-5ff6-59a9-aa7e-7e3b845b79f3"
+      ],
+      "retained_sections": [],
+      "findings": [
+       {
+        "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+        "line": 0,
+        "code": "mapper_parse_error",
+        "severity": "error",
+        "view": "mapper",
+        "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+        "beacon_id": null,
+        "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+        "detail": {
+         "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+         "note": "j4 local parser failure",
+         "section": false
+        },
+        "kind": "mapper_parse_error",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+         "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+         "block_ranges": [],
+         "field_ranges": [],
+         "member_fingerprints": [],
+         "identity_ambiguous": false
+        },
+        "members": [],
+        "fix": {
+         "class": "manual",
+         "resolutions": [
+          {
+           "resolution": "retry",
+           "summary": "Recover the source/reader and re-list current findings.",
+           "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+           "params_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+           }
+          },
+          {
+           "resolution": "keep",
+           "summary": "Keep the observed state.",
+           "effect": "No write and no persistent waiver.",
+           "params_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+           }
+          }
+         ],
+         "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+        },
+        "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+       }
+      ],
+      "warnings": [
+       {
+        "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+        "note": "j4 local parser failure",
+        "section": false
+       }
+      ],
+      "reconcile_report": {},
+      "ambiguities": [],
+      "ambiguous_count": 0
+     },
+     "success": false,
+     "dry_run": false,
+     "file_node_id": "454056dc-3d12-55ba-994a-60fff0ab11e9",
+     "source_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+     "error": "Source outline unavailable; existing symbols retained",
+     "header_freshness": {
+      "available": false,
+      "reason": "source_outline_unavailable"
+     },
+     "nodes_created": 0,
+     "nodes_updated": 0,
+     "nodes_deleted": 0,
+     "nodes_moved": 0,
+     "api_calls": 0,
+     "warning_count": 1
+    }
+   ],
+   "result": {
+    "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+    "status": "failed",
+    "changed": false,
+    "findings": [
+     {
+      "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "line": 0,
+      "code": "mapper_parse_error",
+      "severity": "error",
+      "view": "mapper",
+      "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+      "beacon_id": null,
+      "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+      "detail": {
+       "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+       "note": "j4 local parser failure",
+       "section": false
+      },
+      "kind": "mapper_parse_error",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "block_ranges": [],
+       "field_ranges": [],
+       "member_fingerprints": [],
+       "identity_ambiguous": false
+      },
+      "members": [],
+      "fix": {
+       "class": "manual",
+       "resolutions": [
+        {
+         "resolution": "retry",
+         "summary": "Recover the source/reader and re-list current findings.",
+         "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+         "params_schema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+         }
+        },
+        {
+         "resolution": "keep",
+         "summary": "Keep the observed state.",
+         "effect": "No write and no persistent waiver.",
+         "params_schema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+         }
+        }
+       ],
+       "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+      },
+      "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+     }
+    ],
+    "warnings": [
+     {
+      "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+      "note": "j4 local parser failure",
+      "section": false
+     }
+    ],
+    "events": [],
+    "repair_outcomes": [
+     {
+      "pass": "c0",
+      "success": true,
+      "changed": false,
+      "path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "counts": {},
+      "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+      "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+      "edited_ranges": [],
+      "events": [],
+      "skipped_repairs": [],
+      "findings": [],
+      "diagnostics": []
+     },
+     {
+      "pass": "aliases",
+      "success": true,
+      "changed": false,
+      "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+      "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+      "edited_ranges": [],
+      "events": [],
+      "skipped_aliases": [],
+      "findings": [],
+      "diagnostics": []
+     },
+     {
+      "pass": "groups",
+      "success": true,
+      "changed": false,
+      "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "kind": "markdown",
+      "merged_groups": 0,
+      "removed_blocks": 0,
+      "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+      "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+      "edited_ranges": [],
+      "applied_groups": [],
+      "skipped_groups": [],
+      "diagnostics": [],
+      "events": [],
+      "findings": []
+     }
+    ],
+    "diagnostics": [
+     {
+      "record": "source_error",
+      "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "language": "markdown",
+      "exception": "j4 local parser failure"
+     }
+    ],
+    "check_target": {
+     "verb": "check",
+     "params": {
+      "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "min_severity": "info"
+     }
+    },
+    "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+    "duplicate_source_beacon_ids": {},
+    "state": "parse_failed",
+    "preserve_existing": true,
+    "reconcile_children": null,
+    "create_allowed": false,
+    "delete_allowed": false,
+    "sections": [],
+    "retained_uuids": [
+     "d15c4760-d63e-5aeb-92ab-a830ee9bd054",
+     "be215ee5-5ff6-59a9-aa7e-7e3b845b79f3"
+    ],
+    "retained_sections": [],
+    "reconcile_report": {},
+    "ambiguities": [],
+    "ambiguous_count": 0,
+    "projection": {
+     "state": "parse_failed",
+     "preserve_existing": true,
+     "reconcile_children": null,
+     "create_allowed": false,
+     "delete_allowed": false,
+     "sections": [],
+     "retained_uuids": [
+      "d15c4760-d63e-5aeb-92ab-a830ee9bd054",
+      "be215ee5-5ff6-59a9-aa7e-7e3b845b79f3"
+     ],
+     "retained_sections": [],
+     "findings": [
+      {
+       "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "line": 0,
+       "code": "mapper_parse_error",
+       "severity": "error",
+       "view": "mapper",
+       "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+       "beacon_id": null,
+       "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+       "detail": {
+        "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+        "note": "j4 local parser failure",
+        "section": false
+       },
+       "kind": "mapper_parse_error",
+       "producer": "beacon.refresh",
+       "observed": {
+        "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+        "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+        "block_ranges": [],
+        "field_ranges": [],
+        "member_fingerprints": [],
+        "identity_ambiguous": false
+       },
+       "members": [],
+       "fix": {
+        "class": "manual",
+        "resolutions": [
+         {
+          "resolution": "retry",
+          "summary": "Recover the source/reader and re-list current findings.",
+          "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+          "params_schema": {
+           "type": "object",
+           "properties": {},
+           "required": [],
+           "additionalProperties": false
+          }
+         },
+         {
+          "resolution": "keep",
+          "summary": "Keep the observed state.",
+          "effect": "No write and no persistent waiver.",
+          "params_schema": {
+           "type": "object",
+           "properties": {},
+           "required": [],
+           "additionalProperties": false
+          }
+         }
+        ],
+        "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+       },
+       "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+      }
+     ],
+     "warnings": [
+      {
+       "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+       "note": "j4 local parser failure",
+       "section": false
+      }
+     ],
+     "reconcile_report": {},
+     "ambiguities": [],
+     "ambiguous_count": 0
+    },
+    "success": false,
+    "dry_run": false,
+    "file_node_id": "454056dc-3d12-55ba-994a-60fff0ab11e9",
+    "source_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+    "error": "Source outline unavailable; existing symbols retained",
+    "header_freshness": {
+     "available": false,
+     "reason": "source_outline_unavailable"
+    },
+    "nodes_created": 0,
+    "nodes_updated": 0,
+    "nodes_deleted": 0,
+    "nodes_moved": 0,
+    "api_calls": 0,
+    "warning_count": 1
+   }
+  },
+  "files": [
+   {
+    "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+    "status": "committed",
+    "changed": true,
+    "outcomes": [
+     {
+      "node_id": "d15c4760-d63e-5aeb-92ab-a830ee9bd054",
+      "name": "Heading #j4",
+      "md_path": [
+       "# Heading"
+      ],
+      "occurrence": 1,
+      "source_records": [
+       {
+        "header": "BEACON (MD AST)",
+        "line": 4,
+        "occurrences": [
+         {
+          "key": "id",
+          "value": "j4-live",
+          "line": 5
+         },
+         {
+          "key": "kind",
+          "value": "ast",
+          "line": 6
+         },
+         {
+          "key": "comment",
+          "value": "live heading",
+          "line": 7
+         }
+        ],
+        "id": "j4-live",
+        "kind": "ast",
+        "comment": "live heading"
+       }
+      ],
+      "node_index": 0,
+      "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "language": "markdown",
+      "operation": "created_beacon",
+      "success": true,
+      "records": [
+       {
+        "record_index": 0,
+        "beacon_id": "j4-live",
+        "operation": "created_beacon",
+        "success": true,
+        "candidates": [],
+        "diagnostics": [],
+        "physical_witness": {
+         "section": {
+          "type": "markdown",
+          "start_line": 1,
+          "end_line": 12
+         },
+         "opener_start_byte": null,
+         "block_hash": null,
+         "anchor": {
+          "line": 1,
+          "outline_line": 1,
+          "ast_qualname": null,
+          "md_path": [
+           "# Heading"
+          ],
+          "header": "# Heading",
+          "decorator_ranges": []
+         }
+        },
+        "disk_comment": null,
+        "noop_reason": null,
+        "resemblance_evidence": [],
+        "comment_outcome": "preserve",
+        "comment_conflict": null,
+        "comment_warning": null,
+        "removed_labels": [],
+        "adoption_additive": false,
+        "field_errors": [],
+        "planned_operation": "create",
+        "intended_slice_labels": [
+         "j4"
+        ],
+        "resolved_comment": "live heading"
+       }
+      ],
+      "emitted_records": [
+       0
+      ],
+      "beacon_id": "j4-live",
+      "candidates": [],
+      "diagnostics": [],
+      "physical_witness": {
+       "section": {
+        "type": "markdown",
+        "start_line": 1,
+        "end_line": 12
+       },
+       "opener_start_byte": null,
+       "block_hash": null,
+       "anchor": {
+        "line": 1,
+        "outline_line": 1,
+        "ast_qualname": null,
+        "md_path": [
+         "# Heading"
+        ],
+        "header": "# Heading",
+        "decorator_ranges": []
+       }
+      },
+      "disk_comment": null,
+      "noop_reason": null,
+      "resemblance_evidence": [],
+      "comment_outcome": "preserve",
+      "comment_conflict": null,
+      "comment_warning": null,
+      "removed_labels": [],
+      "adoption_additive": false,
+      "field_errors": [],
+      "planned_operation": "create",
+      "intended_slice_labels": [
+       "j4"
+      ],
+      "resolved_comment": "live heading"
+     }
+    ],
+    "omissions": [],
+    "relocations": [],
+    "findings": [
+     {
+      "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "line": 0,
+      "code": "mapper_parse_error",
+      "severity": "error",
+      "view": "mapper",
+      "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+      "beacon_id": null,
+      "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+      "detail": {
+       "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+       "note": "j4 local parser failure",
+       "section": false
+      },
+      "kind": "mapper_parse_error",
+      "producer": "beacon.refresh",
+      "observed": {
+       "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "block_ranges": [],
+       "field_ranges": [],
+       "member_fingerprints": [],
+       "identity_ambiguous": false
+      },
+      "members": [],
+      "fix": {
+       "class": "manual",
+       "resolutions": [
+        {
+         "resolution": "retry",
+         "summary": "Recover the source/reader and re-list current findings.",
+         "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+         "params_schema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+         }
+        },
+        {
+         "resolution": "keep",
+         "summary": "Keep the observed state.",
+         "effect": "No write and no persistent waiver.",
+         "params_schema": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+         }
+        }
+       ],
+       "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+      },
+      "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+     }
+    ],
+    "analysis_error": null,
+    "publication_policy": {
+     "expected_sha256": "5c1c635232beab483ddc321566f6b1b0440eb7b254c95001de297ad3d2918873",
+     "source_exists": true,
+     "bom": "retain_existing_or_generated",
+     "had_bom": true,
+     "newlines": "retain_generated_physical_endings_with_local_metadata_and_eof",
+     "line_endings": [
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n"
+     ]
+    },
+    "publication": {
+     "success": true,
+     "changed": true,
+     "before_sha256": "5c1c635232beab483ddc321566f6b1b0440eb7b254c95001de297ad3d2918873",
+     "candidate_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+     "edited_ranges": [
+      {
+       "start_byte": 3,
+       "end_byte": 28,
+       "replacement_bytes": 183,
+       "owner": "document"
+      }
+     ],
+     "structural_effects": [],
+     "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12"
+    },
+    "check_target": {
+     "verb": "check",
+     "params": {
+      "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+      "min_severity": "info"
+     }
+    },
+    "refresh_outcome": {
+     "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+     "status": "failed",
+     "changed": false,
+     "findings": [
+      {
+       "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "line": 0,
+       "code": "mapper_parse_error",
+       "severity": "error",
+       "view": "mapper",
+       "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+       "beacon_id": null,
+       "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+       "detail": {
+        "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+        "note": "j4 local parser failure",
+        "section": false
+       },
+       "kind": "mapper_parse_error",
+       "producer": "beacon.refresh",
+       "observed": {
+        "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+        "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+        "block_ranges": [],
+        "field_ranges": [],
+        "member_fingerprints": [],
+        "identity_ambiguous": false
+       },
+       "members": [],
+       "fix": {
+        "class": "manual",
+        "resolutions": [
+         {
+          "resolution": "retry",
+          "summary": "Recover the source/reader and re-list current findings.",
+          "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+          "params_schema": {
+           "type": "object",
+           "properties": {},
+           "required": [],
+           "additionalProperties": false
+          }
+         },
+         {
+          "resolution": "keep",
+          "summary": "Keep the observed state.",
+          "effect": "No write and no persistent waiver.",
+          "params_schema": {
+           "type": "object",
+           "properties": {},
+           "required": [],
+           "additionalProperties": false
+          }
+         }
+        ],
+        "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+       },
+       "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+      }
+     ],
+     "warnings": [
+      {
+       "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+       "note": "j4 local parser failure",
+       "section": false
+      }
+     ],
+     "events": [],
+     "repair_outcomes": [
+      {
+       "pass": "c0",
+       "success": true,
+       "changed": false,
+       "path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "counts": {},
+       "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "edited_ranges": [],
+       "events": [],
+       "skipped_repairs": [],
+       "findings": [],
+       "diagnostics": []
+      },
+      {
+       "pass": "aliases",
+       "success": true,
+       "changed": false,
+       "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "edited_ranges": [],
+       "events": [],
+       "skipped_aliases": [],
+       "findings": [],
+       "diagnostics": []
+      },
+      {
+       "pass": "groups",
+       "success": true,
+       "changed": false,
+       "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "kind": "markdown",
+       "merged_groups": 0,
+       "removed_blocks": 0,
+       "before_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "after_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+       "edited_ranges": [],
+       "applied_groups": [],
+       "skipped_groups": [],
+       "diagnostics": [],
+       "events": [],
+       "findings": []
+      }
+     ],
+     "diagnostics": [
+      {
+       "record": "source_error",
+       "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "language": "markdown",
+       "exception": "j4 local parser failure"
+      }
+     ],
+     "check_target": {
+      "verb": "check",
+      "params": {
+       "file_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+       "min_severity": "info"
+      }
+     },
+     "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+     "duplicate_source_beacon_ids": {},
+     "state": "parse_failed",
+     "preserve_existing": true,
+     "reconcile_children": null,
+     "create_allowed": false,
+     "delete_allowed": false,
+     "sections": [],
+     "retained_uuids": [
+      "d15c4760-d63e-5aeb-92ab-a830ee9bd054",
+      "be215ee5-5ff6-59a9-aa7e-7e3b845b79f3"
+     ],
+     "retained_sections": [],
+     "reconcile_report": {},
+     "ambiguities": [],
+     "ambiguous_count": 0,
+     "projection": {
+      "state": "parse_failed",
+      "preserve_existing": true,
+      "reconcile_children": null,
+      "create_allowed": false,
+      "delete_allowed": false,
+      "sections": [],
+      "retained_uuids": [
+       "d15c4760-d63e-5aeb-92ab-a830ee9bd054",
+       "be215ee5-5ff6-59a9-aa7e-7e3b845b79f3"
+      ],
+      "retained_sections": [],
+      "findings": [
+       {
+        "file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+        "line": 0,
+        "code": "mapper_parse_error",
+        "severity": "error",
+        "view": "mapper",
+        "authority": "_is_cartographer_parse_error_sentinel over map_codebase",
+        "beacon_id": null,
+        "message": "The outline builder failed for this file; inspect the recorded exception and retry; independent files/sections remain checkable.",
+        "detail": {
+         "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+         "note": "j4 local parser failure",
+         "section": false
+        },
+        "kind": "mapper_parse_error",
+        "producer": "beacon.refresh",
+        "observed": {
+         "canonical_file": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+         "file_sha256": "d799db5f5c20135605d0bff8fc8e27f4bb9b2b5d7e45577ddb7bf9869922ef12",
+         "block_ranges": [],
+         "field_ranges": [],
+         "member_fingerprints": [],
+         "identity_ambiguous": false
+        },
+        "members": [],
+        "fix": {
+         "class": "manual",
+         "resolutions": [
+          {
+           "resolution": "retry",
+           "summary": "Recover the source/reader and re-list current findings.",
+           "effect": "Read-only retry; no structural edit is authorized without parseable evidence.",
+           "params_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+           }
+          },
+          {
+           "resolution": "keep",
+           "summary": "Keep the observed state.",
+           "effect": "No write and no persistent waiver.",
+           "params_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+           }
+          }
+         ],
+         "instructions": "Inspect the file and the reported exception; restore/read UTF-8 source and retry. No parseable metadata extent is available for structural repair."
+        },
+        "finding_id": "bf1:2ef58142e22013b82c63919719d5c8b1d0cd26f5d13db240be54db5353b6b7f7"
+       }
+      ],
+      "warnings": [
+       {
+        "name": "\u26a0\ufe0f Parse Error [2026-10-27 10:11:31]",
+        "note": "j4 local parser failure",
+        "section": false
+       }
+      ],
+      "reconcile_report": {},
+      "ambiguities": [],
+      "ambiguous_count": 0
+     },
+     "success": false,
+     "dry_run": false,
+     "file_node_id": "454056dc-3d12-55ba-994a-60fff0ab11e9",
+     "source_path": "/tmp/pytest-of-daniel347x/pytest-3266/popen-gw0/test_r5_r6_one_publication_and2/repo/doc.md",
+     "error": "Source outline unavailable; existing symbols retained",
+     "header_freshness": {
+      "available": false,
+      "reason": "source_outline_unavailable"
+     },
+     "nodes_created": 0,
+     "nodes_updated": 0,
+     "nodes_deleted": 0,
+     "nodes_moved": 0,
+     "api_calls": 0,
+     "warning_count": 1
+    }
+   }
+  ]
+ }
+}

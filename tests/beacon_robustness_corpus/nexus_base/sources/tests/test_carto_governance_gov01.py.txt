@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+import threading
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+
+import psutil
+import pytest
+
+from workflowy_mcp import carto_job_governance as gov
+
+ACCOUNT = "a" * 32
+
+
+def _cache() -> dict[str, dict]:
+    return {
+        "vault": {"id": "vault"},
+        "repo": {"id": "repo", "parent_id": "vault"},
+        "file": {"id": "file", "parent_id": "repo"},
+    }
+
+
+def _spawning_claim(tmp_path: Path, jobs: Path, *, job_id: str) -> tuple[dict, Path]:
+    process = psutil.Process(os.getpid())
+    claim = gov.build_claim(
+        job_id=job_id,
+        job_type="CARTO_REFRESH",
+        dedupe_key=hashlib.sha256(job_id.encode("utf-8")).hexdigest(),
+        account_scope_id=ACCOUNT,
+        footprint=gov.compute_footprint(
+            tmp_path / "repo" / f"{job_id}.py", "file", _cache(), kind="file"
+        ),
+        launcher="system",
+        parent_job_id=None,
+        launcher_pid=os.getpid(),
+        pid=os.getpid(),
+        pid_create_time=process.create_time(),
+        handoff_state="spawning",
+        spawn_started_at=gov.utc_now_iso(),
+        execution_owner="launcher",
+    )
+    gov.write_claim(claim, jobs)
+    job_file = jobs / f"{job_id}.json"
+    gov.atomic_write_json(
+        job_file,
+        {
+            "id": job_id,
+            "type": "CARTO_REFRESH",
+            "status": "spawning",
+            "claim_id": claim["claim_id"],
+            "pid": claim["pid"],
+            "pid_create_time": claim["pid_create_time"],
+            "execution_owner": "launcher",
+            "handoff_state": "spawning",
+        },
+    )
+    return claim, job_file
+
+
+def _current_claim(jobs: Path) -> dict:
+    paths = gov.governance_paths(jobs)
+    claim_path = next(paths.claims_dir.glob("*.lock.json"))
+    return gov.read_claim(claim_path)
+
+
+def _spawn(
+    *,
+    claim: dict,
+    job_file: Path,
+    jobs: Path,
+    popen_factory,
+) -> dict:
+    return asyncio.run(
+        gov._spawn_governed_worker(
+            claim=claim,
+            job_file=job_file,
+            log_file=jobs / f"{claim['job_id']}.log",
+            jobs_root=jobs,
+            worker_script=jobs / "worker.py",
+            worker_mode="carto_refresh",
+            env={},
+            popen_factory=popen_factory,
+        )
+    )
+
+
+def test_adoption_wins_before_create_time_failure_preserves_worker(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "worker.py").write_text("# isolated test worker", encoding="utf-8")
+    claim, job_file = _spawning_claim(tmp_path, jobs, job_id="adopt-create-time")
+
+    def popen_factory(*_args, **_kwargs):
+        gov.adopt_carto_worker_claim(job_file, pid=4242, pid_create_time=42.0)
+
+        class FailingProcessLookup:
+            def __init__(self, _pid):
+                raise OSError("create_time unavailable")
+
+        monkeypatch.setattr(gov.psutil, "Process", FailingProcessLookup)
+        return SimpleNamespace(pid=4242)
+
+    result = _spawn(
+        claim=claim,
+        job_file=job_file,
+        jobs=jobs,
+        popen_factory=popen_factory,
+    )
+
+    assert result == {"success": True, "pid": 4242}
+    current = _current_claim(jobs)
+    assert current["execution_owner"] == "detached_worker"
+    assert current["handoff_state"] == "running"
+    assert json.loads(job_file.read_text(encoding="utf-8"))["status"] == "running"
+    assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_adoption_wins_before_launcher_lock_failure_preserves_worker(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "worker.py").write_text("# isolated test worker", encoding="utf-8")
+    claim, job_file = _spawning_claim(tmp_path, jobs, job_id="adopt-lock-write")
+    real_async_os_lock = gov.async_os_lock
+    lock_calls = 0
+
+    @asynccontextmanager
+    async def fail_record_lock_once(path, *args, **kwargs):
+        nonlocal lock_calls
+        lock_calls += 1
+        if lock_calls == 2:
+            raise OSError("launcher bookkeeping lock failed")
+        async with real_async_os_lock(path, *args, **kwargs):
+            yield
+
+    monkeypatch.setattr(gov, "async_os_lock", fail_record_lock_once)
+
+    def popen_factory(*_args, **_kwargs):
+        gov.adopt_carto_worker_claim(job_file, pid=4343, pid_create_time=43.0)
+        return SimpleNamespace(pid=4343)
+
+    result = _spawn(
+        claim=claim,
+        job_file=job_file,
+        jobs=jobs,
+        popen_factory=popen_factory,
+    )
+
+    assert result["success"] is True
+    assert "launcher bookkeeping lock failed" in result["launcher_bookkeeping_warning"]
+    current = _current_claim(jobs)
+    assert current["execution_owner"] == "detached_worker"
+    assert current["handoff_state"] == "running"
+    assert json.loads(job_file.read_text(encoding="utf-8"))["status"] == "running"
+    assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+
+
+def test_launcher_rollback_wins_and_late_adopter_has_zero_mutation(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "worker.py").write_text("# isolated test worker", encoding="utf-8")
+    claim, job_file = _spawning_claim(tmp_path, jobs, job_id="launcher-rollback")
+
+    class FailingProcessLookup:
+        def __init__(self, _pid):
+            pass
+
+        def create_time(self):
+            raise OSError("create_time unavailable")
+
+    monkeypatch.setattr(gov.psutil, "Process", FailingProcessLookup)
+    result = _spawn(
+        claim=claim,
+        job_file=job_file,
+        jobs=jobs,
+        popen_factory=lambda *_args, **_kwargs: SimpleNamespace(pid=4444),
+    )
+
+    assert result["success"] is False
+    assert result["rollback_outcome"]["outcome"] == "finalized"
+    assert result["rollback_outcome"]["ownership"] == "launcher_owned"
+    assert result["rollback_outcome"]["cleanup"]["status"] == "released"
+    assert not list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+    assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+    with pytest.raises((gov.GovernanceConflictError, FileNotFoundError)):
+        gov.adopt_carto_worker_claim(job_file, pid=4444, pid_create_time=44.0)
+    assert json.loads(job_file.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_adoption_and_failure_finalization_contend_without_revocation(tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    claim, job_file = _spawning_claim(tmp_path, jobs, job_id="contended-handoff")
+    barrier = threading.Barrier(2)
+    outcomes: dict[str, object] = {}
+
+    def adopt():
+        barrier.wait()
+        try:
+            outcomes["adopt"] = gov.adopt_carto_worker_claim(
+                job_file, pid=4545, pid_create_time=45.0
+            )
+        except BaseException as exc:  # the losing side is expected to fail closed
+            outcomes["adopt_error"] = exc
+
+    def rollback():
+        barrier.wait()
+        outcomes["rollback"] = asyncio.run(
+            gov._rollback_spawn_failure_if_launcher_owned(
+                claim_id=claim["claim_id"],
+                job_file=job_file,
+                jobs_root=jobs,
+                error=OSError("post-Popen bookkeeping failed"),
+                cancelled=False,
+            )
+        )
+
+    threads = [threading.Thread(target=adopt), threading.Thread(target=rollback)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    adoption_won = "adopt" in outcomes
+    rollback_result = outcomes.get("rollback")
+    assert isinstance(rollback_result, gov.SpawnRollbackResult)
+    rollback_won = rollback_result.outcome == "finalized"
+    assert adoption_won is not rollback_won
+    if adoption_won:
+        assert rollback_result.ownership == "worker_owned"
+        current = _current_claim(jobs)
+        assert current["execution_owner"] == "detached_worker"
+        assert current["handoff_state"] == "running"
+        assert json.loads(job_file.read_text(encoding="utf-8"))["status"] == "running"
+        assert not list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+    else:
+        assert "adopt_error" in outcomes
+        assert not list(gov.governance_paths(jobs).claims_dir.glob("*.json"))
+        assert list(gov.governance_paths(jobs).tombstones_dir.glob("*.json"))
+        assert json.loads(job_file.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_record_spawned_worker_cannot_regress_adopted_status(monkeypatch, tmp_path):
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    claim, job_file = _spawning_claim(tmp_path, jobs, job_id="status-no-regress")
+    gov.adopt_carto_worker_claim(job_file, pid=4646, pid_create_time=46.0)
+
+    class ForbiddenProcessLookup:
+        def __init__(self, _pid):
+            raise AssertionError("adopted worker must bypass launcher metadata lookup")
+
+    monkeypatch.setattr(gov.psutil, "Process", ForbiddenProcessLookup)
+    asyncio.run(gov._record_spawned_worker(claim["claim_id"], job_file, jobs, 4646))
+
+    current = _current_claim(jobs)
+    job = json.loads(job_file.read_text(encoding="utf-8"))
+    assert current["handoff_state"] == "running"
+    assert current["execution_owner"] == "detached_worker"
+    assert job["status"] == "running"
+    assert job["execution_owner"] == "detached_worker"

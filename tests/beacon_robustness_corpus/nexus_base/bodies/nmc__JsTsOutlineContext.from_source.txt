@@ -1,0 +1,39 @@
+    def from_source(
+        cls,
+        *,
+        source_text: str,
+        file_path: str,
+        language_name: str,
+        line_offset0: int,
+        qual_prefix: str,
+    ) -> "JsTsOutlineContext":
+        """Build a context for parsing a JS/TS source string (Vue case).
+
+        ``source_text`` is the extracted ``<script>`` block content,
+        ``line_offset0`` is the 0-based file row where source_text line 1
+        lives, and ``qual_prefix`` is prepended to every AST_QUALNAME via
+        ``qualify(...)`` so script-block qualnames don't collide between
+        multiple ``<script>`` blocks in the same .vue file.
+        """
+        source_bytes = source_text.encode("utf-8")
+        parser = Parser()
+        language = get_language(language_name)  # type: ignore[operator]
+        parser.language = language
+        tree = parser.parse(source_bytes)
+        root = tree.root_node
+        lines = source_text.splitlines()
+        n = len(lines)
+        comment_mask, cleaned_comments = _build_js_comment_mask(lines)
+        return cls(
+            file_path=file_path,
+            source_text=source_text,
+            source_bytes=source_bytes,
+            language_name=language_name,
+            root=root,
+            lines=lines,
+            n=n,
+            comment_mask=comment_mask,
+            cleaned_comments=cleaned_comments,
+            line_offset0=line_offset0,
+            qual_prefix=qual_prefix,
+        )

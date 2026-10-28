@@ -1,0 +1,27 @@
+
+src/workflowy_mcp/__pycache__/
+
+src/workflowy_mcp/client/__pycache__/
+
+src/workflowy_mcp/models/__pycache__/
+
+__pycache__/
+
+.refactor_snapshots/
+
+# edit_file guardian artifacts (never commit these)
+*.stage2-backup-*
+*.stage2-corrupted-*
+
+uv.lock
+.venv/
+.venv-wsl/
+.pytest_cache
+.ruff_cache
+__pycache__
+
+# test-run receipt written by scripts/run_tests.py (never commit)
+tests/.last_run.json
+# rolling window of the newest runs, plus the newest full pytest log
+tests/.runs/
+tests/.last_run.log

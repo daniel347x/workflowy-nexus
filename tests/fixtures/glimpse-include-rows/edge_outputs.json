@@ -1,0 +1,36 @@
+{
+  "base_commit": "0c56c969dc9e58f6695f6d132780e6bc9fdee007",
+  "server_sha256": "a225702518284d179e886847ebd82129a8bffc4f7172ef455aae8fbb89c182c0",
+  "values": {
+    "empty_window": "> Curation selection ('curated'): everything newer than the most recently created already-tagged node (the curated cursor); sort_direction only orders (asc = oldest first); it never changes which items were chosen.\n(empty)",
+    "empty_lens": "(empty)",
+    "estate_node": "# 🏛️ ESTATE · (untitled) · handle {'node': '10000000-0000-4000-8000-000000000003'} · 1 entry · 1 rendered\n\n# 📄 [1] 10000000-0000-4000-8000-000000000003\n\n> render_scope: {\"content_format\":\"markdown\",\"descend_policy\":\"all\",\"focus\":null,\"group_id\":null,\"group_name\":null,\"headings_only\":false,\"kind\":\"lightning_rod\",\"live_gui_sync_skipped_reason\":\"lightning\",\"live_gui_sync_supported\":false,\"match_scope\":\"name_and_note\",\"recent_by\":null,\"recursive\":true,\"root_uuid\":\"10000000-0000-4000-8000-000000000003\",\"selection\":{\"favor\":\"uuid\",\"match_scope\":\"name_and_note\",\"mode\":\"render_symbols\",\"root_uuids\":[\"10000000-0000-4000-8000-000000000003\"],\"symbols\":[\"10000000-0000-4000-8000-000000000003\"]},\"selection_kind\":\"symbols\",\"since\":null,\"sort_by\":\"none\",\"sort_direction\":\"asc\",\"tree_mode\":\"render_tree\",\"workflowy_search_equivalent\":false}\n\n# Resolver\n\nResolver body\n",
+    "estate_empty_lens": "# 🏛️ ESTATE · (untitled) · handle {'lightning': {'mode': 'render_lens', 'lens': {'kind': 'merge', 'operation': 'difference', 'inputs': [{'kind': 'subtree', 'root_handle': '10000000-0000-4000-8000-000000000001'}, {'kind': 'subtree', 'root_handle': '10000000-0000-4000-8000-000000000001'}]}}} · 1 entry · 1 rendered\n\n# 📄 [1] entry 1\n\n> render_scope: {\"atom_summary\":{\"by_kind\":{\"subtree\":2},\"count\":2},\"content_format\":\"markdown\",\"descend_policy\":\"all\",\"empty_selection\":true,\"focus\":null,\"group_id\":null,\"group_name\":null,\"headings_only\":false,\"kind\":\"lightning_rod\",\"leaf_count\":0,\"live_gui_sync_skipped_reason\":\"lightning\",\"live_gui_sync_supported\":false,\"match_scope\":\"name\",\"recent_by\":null,\"recursive\":true,\"root_uuid\":null,\"selection\":{\"lens\":{\"inputs\":[{\"descend\":\"all\",\"kind\":\"subtree\",\"root_handle\":\"10000000-0000-4000-8000-000000000001\"},{\"descend\":\"all\",\"kind\":\"subtree\",\"root_handle\":\"10000000-0000-4000-8000-000000000001\"}],\"kind\":\"merge\",\"operation\":\"difference\"},\"match_scope\":\"name\",\"mode\":\"render_lens\",\"query\":null,\"query_mode\":\"smart\"},\"selection_kind\":\"lens\",\"since\":null,\"sort_by\":\"none\",\"sort_direction\":\"asc\",\"tree_mode\":\"render_tree\",\"workflowy_search_equivalent\":false}\n\n(empty)\n",
+    "forbidden_run": {
+      "success": false,
+      "operation": "glimpse.run",
+      "error": {
+        "code": "forbidden_parameter",
+        "message": "forbidden parameter 'include_rows'; allowed parameters: ['root_handle', 'group_handle', 'render_spec', 'allow_anchor_dock', 'as_markdown', 'headings_only', 'full_uuids', 'repository_view', 'sort_by', 'sort_direction', 'recent', 'recent_by', 'output_file', 'push_to_modal', 'target_tab', 'match_scope', 'descend_policy', 'recursive', 'include_archives', 'ancestor_notes']",
+        "describe_hint": {
+          "tool": "glimpse",
+          "verb": "describe",
+          "of": "run"
+        }
+      }
+    },
+    "forbidden_dock": {
+      "success": false,
+      "operation": "anchor.dock.render",
+      "error": {
+        "code": "forbidden_parameter",
+        "message": "forbidden parameter 'include_rows'; allowed parameters: ['dock_handle', 'sort_by', 'sort_direction', 'recent', 'recent_by', 'headings_only', 'full_uuids', 'as_markdown', 'output_file', 'push_to_modal', 'include_archives', 'recursive', 'descend_policy', 'target_tab', 'ancestor_notes']",
+        "describe_hint": {
+          "tool": "anchor",
+          "verb": "describe",
+          "of": "dock.render"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+ "base_commit": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+ "candidate_tree": "/mnt/c/tmp/beacon_robustness/area-1/tree",
+ "comparison_worktree": "/mnt/e/__daniel347x/__Dan_Root/__repos/workflowy-nexus-mcp-tools-wt-beacon-check",
+ "worktree_rev_parse_head": "a345dc780f0a6fed4b47a63b3fd13c914b15309f",
+ "worktree_status_porcelain": [],
+ "tracked_files": 536,
+ "verified_ok_blob_exact": 535,
+ "verified_ok_checkout_form": 1,
+ "checkout_form_notes": [
+  {
+   "path": "scripts/Clear-WorkflowyNexusCache.ps1",
+   "why": "git blob is line-ending-normalized; copy equals the a345dc7 worktree checkout form",
+   "git_oid": "7ee5fbcd488f482f7b9f993be509fb19e0f5b1fe",
+   "git_size": 14469,
+   "checkout_size": 14798
+  }
+ ],
+ "mismatches": [],
+ "non_blob_entries": [],
+ "extra_files_in_tree_not_tracked": [],
+ "verdict": "VERIFIED: area-1/tree is byte-identical to a345dc7 (git blobs, or the clean worktree checkout form where .gitattributes rewrites line endings) for every tracked file"
+}
